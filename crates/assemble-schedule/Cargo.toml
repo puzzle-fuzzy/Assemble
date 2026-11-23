@@ -4,10 +4,9 @@ version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true
-description = "日程出现规则的投影与通知去重账本：与云端同一套月重复推算"
+description = "日程出现规则的推算与通知去重账本：服务端与桌面端共用同一套月重复规则"
 
 [dependencies]
-assemble-protocol.workspace = true
 chrono.workspace = true
 serde.workspace = true
 thiserror.workspace = true

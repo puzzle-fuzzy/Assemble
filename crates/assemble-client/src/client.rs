@@ -1,59 +1,56 @@
-//! [`JarvisClient`]：资源、设备命令、文件与账户接口。
+//! [`Client`]：账户、设备、云盘与发送的接口。
 //!
 //! 所有方法都经过同一个发送管线，由它统一处理超时、取消、凭据头、
-//! 来源固定与错误归类。接口的路径、请求体与响应结构和 Electron 版的
-//! TypeScript 客户端一一对应。
+//! 来源固定与错误归类。接口的路径、请求体与响应结构都在 `assemble-protocol` 里。
+//!
+//! 上传与下载都是流式的：上传时文件只读一遍、边读边报进度；下载交出的是一个
+//! 读取器，由调用方交给 `assemble-transfer` 落盘。两边都盯着"卡住"——
+//! 超过一段时间没有任何字节流动，就按超时处理，而不是干等。
 
-use std::path::PathBuf;
+use std::io;
+use std::path::{Path, PathBuf};
 use std::pin::Pin;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
+use std::task::{Context, Poll};
 use std::time::Duration;
 
 use bytes::Bytes;
 use futures_core::Stream;
 use futures_util::TryStreamExt;
-use reqwest::cookie::{CookieStore, Jar};
-use reqwest::header::{ACCEPT, AUTHORIZATION, ORIGIN};
-use reqwest::multipart::{Form, Part};
-use reqwest::{Body, Client, Method, redirect};
+use reqwest::header::{ACCEPT, AUTHORIZATION, CONTENT_LENGTH, CONTENT_TYPE};
+use reqwest::{Body, Client as HttpClient, Method, RequestBuilder, redirect};
 use serde::{Serialize, de::DeserializeOwned};
-use serde_json::{Value, json};
+use serde_json::Value;
+use tokio::io::{AsyncRead, AsyncReadExt, ReadBuf};
 use tokio_util::io::StreamReader;
 use tokio_util::sync::CancellationToken;
 use zeroize::Zeroizing;
 
-use assemble_protocol::auth::{AuthResponse, MeResponse, SESSION_COOKIE, SuccessResponse};
-use assemble_protocol::catalog::{CapabilitiesResponse, JarvisCapability};
-use assemble_protocol::commands::{
-    CommandResponse, CommandsResponse, DeviceCommand, DeviceReport, DirectoryRequestInput,
-    HeartbeatInput, WaitSeconds,
-};
-use assemble_protocol::desktop_login::DesktopExchangeInput;
+use assemble_protocol::device::{Device, DeviceListing, RenameDeviceInput};
+use assemble_protocol::drive::{DriveFile, DriveListing, RenameInput};
 use assemble_protocol::error::ApiErrorBody;
-use assemble_protocol::files::{FileResolution, FileResolveInput, InventoryInput, UploadMetadata};
-use assemble_protocol::health::{HealthResponse, ReadinessResponse};
+use assemble_protocol::health::{HEALTH_PATH, HealthResponse};
+use assemble_protocol::login::{EXCHANGE_PATH, ExchangeInput, ExchangeResponse, MeResponse};
 use assemble_protocol::primitives::{MAX_FILE_SIZE, is_valid_id};
-use assemble_protocol::resources::OkResponse;
-use assemble_protocol::resources::{
-    JarvisItem, JarvisList, JarvisRecord, ListQuery, LogData, ResourceName, UpdateInput,
-    VersionInput,
-};
+// 协议里的"一次发送"叫 `Send`，与 `std::marker::Send` 重名；这里换个名字引进来。
+use assemble_protocol::sends::{FailInput, Send as SendRecord, SendListing, SendQuery};
 use assemble_store::secret::SecretString;
 
 use crate::error::ClientError;
-use crate::origin::Deployment;
+use assemble_protocol::origin::ServerOrigin;
 
 /// 普通请求的时限。
 pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(15);
 
-/// 命令长轮询的时限：服务端最多压住 25 秒，留出余量。
-pub const COMMAND_WAIT_TIMEOUT: Duration = Duration::from_secs(30);
+/// 传输时多久没有任何字节流动就按超时处理。
+pub const TRANSFER_STALL: Duration = Duration::from_secs(60);
 
-/// 列表接口一页的最大条数。
-pub const PAGE_SIZE: u32 = 100;
+/// 上传时每次读取的字节数。
+const UPLOAD_CHUNK_BYTES: usize = 64 * 1024;
 
-/// 设备日志一次最多上报的条数。
-pub const MAX_LOG_BATCH: usize = 100;
+/// 上传时汇报进度的间隔。
+const PROGRESS_INTERVAL: Duration = Duration::from_millis(150);
 
 /// 一次请求的退出条件。
 #[derive(Debug, Clone, Copy)]
@@ -71,37 +68,667 @@ impl<'a> RequestOptions<'a> {
         }
     }
 
-    /// 这一次请求实际使用的时限：显式指定 > 长轮询时限 > 默认时限。
-    fn budget(&self, long_poll: bool) -> Duration {
-        self.timeout.unwrap_or(if long_poll {
-            COMMAND_WAIT_TIMEOUT
+    fn budget(self) -> Duration {
+        self.timeout.unwrap_or(DEFAULT_TIMEOUT)
+    }
+}
+
+/// 一次传输（上传或下载）的退出条件。传输没有总时限：文件多大、网络多慢
+/// 都不该让它超时；只在卡住太久时放弃。
+#[derive(Debug, Clone, Copy)]
+pub struct TransferOptions<'a> {
+    pub cancel: &'a CancellationToken,
+    /// 多久没有任何字节流动就按超时处理。
+    pub stall: Duration,
+}
+
+impl<'a> TransferOptions<'a> {
+    pub fn new(cancel: &'a CancellationToken) -> Self {
+        Self {
+            cancel,
+            stall: TRANSFER_STALL,
+        }
+    }
+}
+
+/// 传输进度。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TransferProgress {
+    /// 已经传过去的字节数。
+    pub transferred: u64,
+    /// 总字节数。
+    pub total: u64,
+}
+
+impl TransferProgress {
+    /// 0 到 1 之间的完成比例；总量为零时为 1。
+    pub fn fraction(self) -> f64 {
+        if self.total == 0 {
+            1.0
         } else {
-            DEFAULT_TIMEOUT
+            // 文件不超过 100 MB，两个数都放得进 u32，再转 f64 不会丢精度。
+            let transferred = u32::try_from(self.transferred).unwrap_or(u32::MAX);
+            let total = u32::try_from(self.total).unwrap_or(u32::MAX);
+            (f64::from(transferred) / f64::from(total)).clamp(0.0, 1.0)
+        }
+    }
+}
+
+/// 进度回调。
+pub type ProgressCallback<'a> = &'a mut (dyn FnMut(TransferProgress) + Send);
+
+/// 一个准备发出去的本机文件：已经确认过大小与摘要。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OutgoingFile {
+    pub path: PathBuf,
+    pub size: u64,
+    pub sha256: String,
+}
+
+impl OutgoingFile {
+    /// 确认一个本机文件可以发出去：是普通文件、不超过单文件上限，并算出摘要。
+    ///
+    /// 摘要要放在请求里，所以必须先把整个文件读一遍；100 MB 以内的文件这一步很快。
+    pub async fn open(path: &Path, cancel: &CancellationToken) -> Result<Self, ClientError> {
+        let metadata = tokio::fs::metadata(path)
+            .await
+            .map_err(|_| ClientError::LocalSource)?;
+        if !metadata.is_file() {
+            return Err(ClientError::LocalSource);
+        }
+        // 先看大小再读内容：太大的文件不必白读一遍。
+        if metadata.len() > MAX_FILE_SIZE {
+            return Err(ClientError::TooLarge);
+        }
+        let file = assemble_transfer::source::inspect(path, cancel)
+            .await
+            .map_err(|error| local_failure(&error))?;
+        if file.size > MAX_FILE_SIZE {
+            return Err(ClientError::TooLarge);
+        }
+        Ok(Self {
+            path: file.path,
+            size: file.size,
+            sha256: file.sha256,
         })
+    }
+
+    /// 发出去时用的名字：本机文件名。
+    pub fn name(&self) -> String {
+        self.path
+            .file_name()
+            .map(|name| name.to_string_lossy().trim().to_owned())
+            .filter(|name| !name.is_empty())
+            .unwrap_or_else(|| "file".to_owned())
+    }
+
+    /// 按扩展名猜的媒体类型；猜不出就是二进制。
+    pub fn mime_type(&self) -> String {
+        mime_guess::from_path(&self.path)
+            .first()
+            .map_or("application/octet-stream".to_owned(), |guess| {
+                guess.essence_str().to_owned()
+            })
+    }
+}
+
+fn local_failure(error: &assemble_transfer::TransferError) -> ClientError {
+    match error {
+        assemble_transfer::TransferError::Cancelled => ClientError::Cancelled,
+        assemble_transfer::TransferError::TooLarge => ClientError::TooLarge,
+        _ => ClientError::LocalSource,
+    }
+}
+
+/// 一次下载的响应体：按到达的顺序流式读取，不把整个文件放进内存。
+pub struct Download<'a> {
+    /// 服务端声明的总长度；没有声明时为 `None`。
+    pub content_length: Option<u64>,
+    reader: MeteredReader<'a>,
+}
+
+impl<'a> Download<'a> {
+    /// 取出可读取的字节流。读取中断或卡住时得到一个 I/O 错误。
+    pub fn into_reader(self) -> MeteredReader<'a> {
+        self.reader
+    }
+}
+
+impl std::fmt::Debug for Download<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Download")
+            .field("content_length", &self.content_length)
+            .field("reader", &"byte stream")
+            .finish()
+    }
+}
+
+/// 下载的字节流：每读到一段就报进度；卡住太久时报超时错误。
+pub struct MeteredReader<'a> {
+    inner: StreamReader<Pin<Box<dyn Stream<Item = io::Result<Bytes>> + Send>>, Bytes>,
+    stall: Duration,
+    timer: Option<Pin<Box<tokio::time::Sleep>>>,
+    total: Option<u64>,
+    received: u64,
+    progress: Option<&'a mut (dyn FnMut(TransferProgress) + Send)>,
+}
+
+impl AsyncRead for MeteredReader<'_> {
+    fn poll_read(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &mut ReadBuf<'_>,
+    ) -> Poll<io::Result<()>> {
+        let this = &mut *self;
+        // 调用方可能带着已经装了一部分的缓冲区来，只算这一次新添的字节。
+        let before = buf.filled().len();
+        match Pin::new(&mut this.inner).poll_read(cx, buf) {
+            Poll::Ready(Ok(())) => {
+                let added = (buf.filled().len() - before) as u64;
+                if added > 0 {
+                    this.timer = None;
+                    this.received = this.received.saturating_add(added);
+                    if let Some(report) = this.progress.as_deref_mut() {
+                        report(TransferProgress {
+                            transferred: this.received,
+                            total: this.total.unwrap_or(this.received),
+                        });
+                    }
+                }
+                Poll::Ready(Ok(()))
+            }
+            Poll::Ready(Err(error)) => Poll::Ready(Err(error)),
+            Poll::Pending => {
+                if this.timer.is_none() {
+                    this.timer = Some(Box::pin(tokio::time::sleep(this.stall)));
+                }
+                match this.timer.as_mut().map(Pin::as_mut).unwrap().poll(cx) {
+                    Poll::Ready(()) => Poll::Ready(Err(io::Error::new(
+                        io::ErrorKind::TimedOut,
+                        "the download stopped yielding data",
+                    ))),
+                    Poll::Pending => Poll::Pending,
+                }
+            }
+        }
+    }
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum ClientBuildError {
+    #[error("the HTTP client could not be configured: {0}")]
+    Transport(#[from] reqwest::Error),
+}
+
+/// 访问服务端的一个客户端。克隆共享同一份令牌。
+#[derive(Clone)]
+pub struct Client {
+    origin: Arc<ServerOrigin>,
+    http: HttpClient,
+    bearer: Arc<Mutex<Option<SecretString>>>,
+}
+
+impl Client {
+    /// 为一个服务来源创建客户端。请求只发往这个来源，且永远不跟随重定向。
+    pub fn new(origin: ServerOrigin) -> Result<Self, ClientBuildError> {
+        // 不带 Cookie 罐：桌面端从不持有网页登录状态，登录只发生在系统浏览器里。
+        let http = HttpClient::builder()
+            .redirect(redirect::Policy::none())
+            .build()?;
+        Ok(Self {
+            origin: Arc::new(origin),
+            http,
+            bearer: Arc::new(Mutex::new(None)),
+        })
+    }
+
+    pub fn origin(&self) -> &ServerOrigin {
+        &self.origin
+    }
+
+    /// 换用新的设备令牌；传 `None` 表示已退出。
+    pub fn set_bearer(&self, token: Option<SecretString>) {
+        *self.bearer.lock().unwrap_or_else(PoisonError::into_inner) = token;
+    }
+
+    pub fn has_bearer(&self) -> bool {
+        self.bearer
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .is_some()
+    }
+
+    /// `Authorization` 请求头的值：`Bearer <令牌>`。没有令牌时为 `None`。
+    pub(crate) fn authorization(&self) -> Option<Zeroizing<String>> {
+        self.bearer
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .as_ref()
+            .map(|token| Zeroizing::new(format!("Bearer {}", token.expose())))
+    }
+
+    /// 只允许访问接口与两个公开的探活地址，且路径里不能有需要特殊处理的片段。
+    pub(crate) fn bare_request(
+        &self,
+        method: Method,
+        path: &str,
+    ) -> Result<RequestBuilder, ClientError> {
+        let allowed = path.starts_with("/v1/") || path == HEALTH_PATH || path == "/readyz";
+        let no_relative_segments = path
+            .split('/')
+            .all(|segment| !matches!(segment, "." | ".."));
+        if allowed && no_relative_segments && !path.contains(['%', '\\']) {
+            Ok(self.http.request(method, self.origin.join(path)))
+        } else {
+            Err(ClientError::InvalidRequest)
+        }
+    }
+
+    // ---- 公开接口 ----
+
+    /// `GET /healthz`：进程能应答。
+    pub async fn health(&self, options: &RequestOptions<'_>) -> Result<(), ClientError> {
+        let call = Call::get(HEALTH_PATH).anonymous();
+        let response: HealthResponse = self.call_json(call, options).await?;
+        if response.status == "ok" {
+            Ok(())
+        } else {
+            Err(ClientError::InvalidResponse)
+        }
+    }
+
+    /// 用授权码换取设备令牌。这个请求不带任何令牌。
+    pub async fn exchange(
+        &self,
+        input: &ExchangeInput,
+        options: &RequestOptions<'_>,
+    ) -> Result<(ExchangeResponse, SecretString), ClientError> {
+        if !input.is_valid() {
+            return Err(ClientError::InvalidRequest);
+        }
+        let call = Call::get(EXCHANGE_PATH)
+            .post(Payload::Json(json(input)?))
+            .anonymous();
+        let mut response: ExchangeResponse = self.call_json(call, options).await?;
+        // 令牌立刻离开普通字符串：之后只有零化后的那一份。
+        let token = SecretString::new(std::mem::take(&mut response.token));
+        Ok((response, token))
+    }
+
+    // ---- 账户 ----
+
+    /// `GET /v1/me`：当前令牌对应的账户与设备。
+    pub async fn me(&self, options: &RequestOptions<'_>) -> Result<MeResponse, ClientError> {
+        self.call_json(Call::get("/v1/me"), options).await
+    }
+
+    /// `POST /v1/auth/logout`：撤销这台设备的令牌并删除设备记录。
+    pub async fn logout(&self, options: &RequestOptions<'_>) -> Result<(), ClientError> {
+        self.call_empty(Call::get("/v1/auth/logout").post(Payload::None), options)
+            .await
+    }
+
+    // ---- 设备 ----
+
+    pub async fn devices(&self, options: &RequestOptions<'_>) -> Result<Vec<Device>, ClientError> {
+        let listing: DeviceListing = self.call_json(Call::get("/v1/devices"), options).await?;
+        Ok(listing.items)
+    }
+
+    pub async fn rename_device(
+        &self,
+        id: &str,
+        input: &RenameDeviceInput,
+        options: &RequestOptions<'_>,
+    ) -> Result<Device, ClientError> {
+        if !input.is_valid() {
+            return Err(ClientError::InvalidRequest);
+        }
+        let path = format!("/v1/devices/{}", id_segment(id)?);
+        let call = Call::get(&path).with_payload(Method::PATCH, Payload::Json(json(input)?));
+        self.call_json(call, options).await
+    }
+
+    /// 撤销另一台设备：它的令牌立刻失效，也不再出现在设备列表里。
+    pub async fn remove_device(
+        &self,
+        id: &str,
+        options: &RequestOptions<'_>,
+    ) -> Result<(), ClientError> {
+        let path = format!("/v1/devices/{}", id_segment(id)?);
+        self.call_empty(Call::get(&path).delete(), options).await
+    }
+
+    // ---- 云盘 ----
+
+    pub async fn drive(&self, options: &RequestOptions<'_>) -> Result<DriveListing, ClientError> {
+        self.call_json(Call::get("/v1/drive/files"), options).await
+    }
+
+    /// 把一个本机文件存进云盘。
+    pub async fn drive_upload(
+        &self,
+        name: &str,
+        file: &OutgoingFile,
+        options: TransferOptions<'_>,
+        progress: Option<ProgressCallback<'_>>,
+    ) -> Result<DriveFile, ClientError> {
+        let query = upload_query(name, file)?;
+        self.upload("/v1/drive/files", query, file, options, progress)
+            .await
+    }
+
+    /// 取出云盘里一个文件的内容。
+    pub async fn drive_content<'a>(
+        &self,
+        id: &str,
+        options: TransferOptions<'a>,
+        progress: Option<ProgressCallback<'a>>,
+    ) -> Result<Download<'a>, ClientError> {
+        let path = format!("/v1/drive/files/{}/content", id_segment(id)?);
+        self.download(&path, options, progress).await
+    }
+
+    pub async fn drive_rename(
+        &self,
+        id: &str,
+        input: &RenameInput,
+        options: &RequestOptions<'_>,
+    ) -> Result<DriveFile, ClientError> {
+        if input.clean_name().is_none() {
+            return Err(ClientError::InvalidRequest);
+        }
+        let path = format!("/v1/drive/files/{}", id_segment(id)?);
+        let call = Call::get(&path).with_payload(Method::PATCH, Payload::Json(json(input)?));
+        self.call_json(call, options).await
+    }
+
+    pub async fn drive_delete(
+        &self,
+        id: &str,
+        options: &RequestOptions<'_>,
+    ) -> Result<(), ClientError> {
+        let path = format!("/v1/drive/files/{}", id_segment(id)?);
+        self.call_empty(Call::get(&path).delete(), options).await
+    }
+
+    // ---- 发送到设备 ----
+
+    /// 把一个本机文件发给同一个账户的另一台在线设备。正文就是文件的字节。
+    pub async fn send_to_device(
+        &self,
+        to_device_id: &str,
+        file: &OutgoingFile,
+        options: TransferOptions<'_>,
+        progress: Option<ProgressCallback<'_>>,
+    ) -> Result<SendRecord, ClientError> {
+        let target = id_segment(to_device_id)?;
+        let mut query = upload_query(&file.name(), file)?;
+        query.insert(0, ("toDeviceId", target.to_owned()));
+        self.upload("/v1/sends", query, file, options, progress)
+            .await
+    }
+
+    pub async fn sends(
+        &self,
+        query: &SendQuery,
+        options: &RequestOptions<'_>,
+    ) -> Result<Vec<SendRecord>, ClientError> {
+        if !query.is_valid() {
+            return Err(ClientError::InvalidRequest);
+        }
+        let mut call = Call::get("/v1/sends")
+            .query("direction", enum_spelling(query.direction)?)
+            .query("limit", query.limit.to_string());
+        if let Some(state) = query.state {
+            call = call.query("state", enum_spelling(state)?);
+        }
+        let listing: SendListing = self.call_json(call, options).await?;
+        Ok(listing.items)
+    }
+
+    /// 取出一次待接收发送的内容。内容只有处于 `offered` 时才在服务端。
+    pub async fn send_content<'a>(
+        &self,
+        id: &str,
+        options: TransferOptions<'a>,
+        progress: Option<ProgressCallback<'a>>,
+    ) -> Result<Download<'a>, ClientError> {
+        let path = format!("/v1/sends/{}/content", id_segment(id)?);
+        self.download(&path, options, progress).await
+    }
+
+    pub async fn send_accept(
+        &self,
+        id: &str,
+        options: &RequestOptions<'_>,
+    ) -> Result<SendRecord, ClientError> {
+        self.send_action(id, "accept", options).await
+    }
+
+    pub async fn send_decline(
+        &self,
+        id: &str,
+        options: &RequestOptions<'_>,
+    ) -> Result<SendRecord, ClientError> {
+        self.send_action(id, "decline", options).await
+    }
+
+    /// 发送方撤回一次还在等待接收的发送。
+    pub async fn send_cancel(
+        &self,
+        id: &str,
+        options: &RequestOptions<'_>,
+    ) -> Result<SendRecord, ClientError> {
+        self.send_action(id, "cancel", options).await
+    }
+
+    /// 接收方告诉发送方：这个文件我收不下来。
+    pub async fn send_failed(
+        &self,
+        id: &str,
+        input: FailInput,
+        options: &RequestOptions<'_>,
+    ) -> Result<SendRecord, ClientError> {
+        let path = format!("/v1/sends/{}/failed", id_segment(id)?);
+        let call = Call::get(&path).post(Payload::Json(json(&input)?));
+        self.call_json(call, options).await
+    }
+
+    async fn send_action(
+        &self,
+        id: &str,
+        action: &'static str,
+        options: &RequestOptions<'_>,
+    ) -> Result<SendRecord, ClientError> {
+        let path = format!("/v1/sends/{id}/{action}", id = id_segment(id)?);
+        self.call_json(Call::get(&path).post(Payload::None), options)
+            .await
+    }
+
+    // ---- 发送管线 ----
+
+    /// 发出请求，校验状态，再按约定结构解析。
+    async fn call_json<T: DeserializeOwned>(
+        &self,
+        call: Call<'_>,
+        options: &RequestOptions<'_>,
+    ) -> Result<T, ClientError> {
+        let response = self.send(call, options.budget(), options.cancel).await?;
+        decode(checked(response).await?).await
+    }
+
+    /// 发出一个没有正文的写请求，只关心成没成功。
+    async fn call_empty(
+        &self,
+        call: Call<'_>,
+        options: &RequestOptions<'_>,
+    ) -> Result<(), ClientError> {
+        let response = self.send(call, options.budget(), options.cancel).await?;
+        checked(response).await?;
+        Ok(())
+    }
+
+    /// 流式上传：正文是文件的字节，边读边报进度。
+    async fn upload<T: DeserializeOwned>(
+        &self,
+        path: &'static str,
+        query: Vec<(&'static str, String)>,
+        file: &OutgoingFile,
+        options: TransferOptions<'_>,
+        mut progress: Option<ProgressCallback<'_>>,
+    ) -> Result<T, ClientError> {
+        if file.size > MAX_FILE_SIZE {
+            return Err(ClientError::TooLarge);
+        }
+        let source = tokio::fs::File::open(&file.path)
+            .await
+            .map_err(|_| ClientError::LocalSource)?;
+        let sent = Arc::new(AtomicU64::new(0));
+        let stalled = Arc::new(AtomicBool::new(false));
+        let body = Body::wrap_stream(metered(
+            source,
+            options.stall,
+            Arc::clone(&sent),
+            Arc::clone(&stalled),
+        ));
+        let mut request = self.bare_request(Method::POST, path)?.query(&query);
+        request = request
+            .header(CONTENT_TYPE, "application/octet-stream")
+            .header(CONTENT_LENGTH, file.size)
+            .header(ACCEPT, "application/json");
+        if let Some(authorization) = self.authorization() {
+            request = request.header(AUTHORIZATION, authorization.as_str());
+        }
+
+        // 一边发送，一边按固定间隔把已发送的字节数报给调用方。
+        let mut sending = Box::pin(request.body(body).send());
+        let mut ticker = tokio::time::interval(PROGRESS_INTERVAL);
+        let total = file.size;
+        let outcome = loop {
+            tokio::select! {
+                biased;
+                () = options.cancel.cancelled() => return Err(ClientError::Cancelled),
+                outcome = &mut sending => break outcome,
+                _ = ticker.tick() => {
+                    if let Some(report) = progress.as_deref_mut() {
+                        report(TransferProgress { transferred: sent.load(Ordering::Relaxed), total });
+                    }
+                }
+            }
+        };
+        let response = match outcome {
+            Ok(response) => response,
+            Err(error) => {
+                return Err(if stalled.load(Ordering::SeqCst) {
+                    ClientError::Timeout
+                } else {
+                    transport(&error)
+                });
+            }
+        };
+        let response = checked(response).await?;
+        if let Some(report) = progress {
+            report(TransferProgress {
+                transferred: total,
+                total,
+            });
+        }
+        decode(response).await
+    }
+
+    /// 一次下载：校验状态后把正文交成一个读取器。
+    async fn download<'a>(
+        &self,
+        path: &str,
+        options: TransferOptions<'a>,
+        progress: Option<ProgressCallback<'a>>,
+    ) -> Result<Download<'a>, ClientError> {
+        let mut request = self.bare_request(Method::GET, path)?;
+        request = request.header(ACCEPT, "application/octet-stream");
+        if let Some(authorization) = self.authorization() {
+            request = request.header(AUTHORIZATION, authorization.as_str());
+        }
+        let response = tokio::select! {
+            biased;
+            () = options.cancel.cancelled() => return Err(ClientError::Cancelled),
+            outcome = request.send() => match outcome {
+                Ok(response) => response,
+                Err(error) => return Err(transport(&error)),
+            },
+        };
+        let response = checked(response).await?;
+        let content_length = response.content_length();
+        // 传输错误在离开客户端时转成 I/O 错误：调用方只需要处理一种错误。
+        let stream: Pin<Box<dyn Stream<Item = io::Result<Bytes>> + Send>> =
+            Box::pin(response.bytes_stream().map_err(io::Error::other));
+        Ok(Download {
+            content_length,
+            reader: MeteredReader {
+                inner: StreamReader::new(stream),
+                stall: options.stall,
+                timer: None,
+                total: content_length,
+                received: 0,
+                progress,
+            },
+        })
+    }
+
+    /// 普通请求的必经之路：带凭据头、有时限、可取消。传输不走这里。
+    async fn send(
+        &self,
+        call: Call<'_>,
+        budget: Duration,
+        cancel: &CancellationToken,
+    ) -> Result<reqwest::Response, ClientError> {
+        if cancel.is_cancelled() {
+            return Err(ClientError::Cancelled);
+        }
+        let mut request = self
+            .bare_request(call.method, call.path)?
+            .query(&call.query)
+            .header(ACCEPT, "application/json");
+        if call.authenticated {
+            let Some(authorization) = self.authorization() else {
+                // 还没登录就发需要登录的请求：在本地拦下，不发给服务端。
+                return Err(ClientError::InvalidRequest);
+            };
+            request = request.header(AUTHORIZATION, authorization.as_str());
+        }
+        let sending = match call.payload {
+            Payload::None => request.send(),
+            Payload::Json(value) => request.json(&value).send(),
+        };
+        tokio::select! {
+            biased;
+            () = cancel.cancelled() => Err(ClientError::Cancelled),
+            outcome = tokio::time::timeout(budget, sending) => match outcome {
+                Ok(Ok(response)) => Ok(response),
+                Ok(Err(error)) => Err(transport(&error)),
+                Err(_) => Err(ClientError::Timeout),
+            },
+        }
     }
 }
 
 /// 一次调用的全部要素，交给发送管线之前先在这里组装好。
 struct Call<'a> {
-    channel: Channel,
     method: Method,
     path: &'a str,
     query: Vec<(&'static str, String)>,
     payload: Payload,
-    accept: Accept,
-    long_poll: bool,
+    authenticated: bool,
 }
 
 impl<'a> Call<'a> {
     fn get(path: &'a str) -> Self {
         Self {
-            channel: Channel::Authenticated,
             method: Method::GET,
             path,
             query: Vec::new(),
             payload: Payload::None,
-            accept: Accept::Json,
-            long_poll: false,
+            authenticated: true,
         }
     }
 
@@ -115,674 +742,81 @@ impl<'a> Call<'a> {
         self.with_payload(Method::POST, payload)
     }
 
+    fn delete(mut self) -> Self {
+        self.method = Method::DELETE;
+        self
+    }
+
     fn anonymous(mut self) -> Self {
-        self.channel = Channel::Anonymous;
+        self.authenticated = false;
         self
     }
 
-    fn query(mut self, key: &'static str, value: impl Into<String>) -> Self {
-        self.query.push((key, value.into()));
+    fn query(mut self, key: &'static str, value: String) -> Self {
+        self.query.push((key, value));
         self
     }
-
-    fn long_poll(mut self) -> Self {
-        self.long_poll = true;
-        self
-    }
-
-    fn binary(mut self) -> Self {
-        self.accept = Accept::OctetStream;
-        self
-    }
-}
-
-/// 用哪一路凭据发请求。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Channel {
-    /// 带上 Bearer 设备会话。
-    Authenticated,
-    /// 不带 Authorization。只有换取会话与公开接口需要它。
-    Anonymous,
 }
 
 enum Payload {
     None,
     Json(Value),
-    Multipart(Form),
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Accept {
-    Json,
-    OctetStream,
+/// 上传接口共用的查询参数：名字、大小、摘要、媒体类型。
+fn upload_query(
+    name: &str,
+    file: &OutgoingFile,
+) -> Result<Vec<(&'static str, String)>, ClientError> {
+    if assemble_protocol::drive::clean_file_name(name).is_none() {
+        return Err(ClientError::InvalidRequest);
+    }
+    Ok(vec![
+        ("name", name.trim().to_owned()),
+        ("size", file.size.to_string()),
+        ("sha256", file.sha256.clone()),
+        ("mimeType", file.mime_type()),
+    ])
 }
 
-impl Accept {
-    fn value(self) -> &'static str {
-        match self {
-            Self::Json => "application/json",
-            Self::OctetStream => "application/octet-stream",
-        }
-    }
-}
-
-/// 要上传的本机文件。
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct LocalSource {
-    pub path: PathBuf,
-    /// 已经确认过的大小，必须小于单文件上限。
-    pub size: u64,
-    pub mime_type: Option<String>,
-}
-
-/// 一次下载的响应体：按到达的顺序流式读取，不把整个文件放进内存。
-pub struct Download {
-    /// 服务端声明的总长度；没有声明时为 `None`。
-    pub content_length: Option<u64>,
-    reader: StreamReader<Pin<Box<dyn Stream<Item = std::io::Result<Bytes>> + Send>>, Bytes>,
-}
-
-impl Download {
-    /// 取出可读取的字节流。读取中断时得到一个 I/O 错误。
-    pub fn into_reader(self) -> impl tokio::io::AsyncRead + Unpin + Send + 'static {
-        self.reader
-    }
-}
-
-impl std::fmt::Debug for Download {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Download")
-            .field("content_length", &self.content_length)
-            .field("reader", &"byte stream")
-            .finish()
-    }
-}
-
-#[derive(Debug, thiserror::Error)]
-pub enum ClientBuildError {
-    #[error("the HTTP client could not be configured: {0}")]
-    Transport(#[from] reqwest::Error),
-}
-
-/// 访问云端的一个客户端。克隆共享同一份会话。
-#[derive(Clone)]
-pub struct JarvisClient {
-    deployment: Arc<Deployment>,
-    http: Client,
-    jar: Arc<Jar>,
-    bearer: Arc<Mutex<Option<SecretString>>>,
-}
-
-impl JarvisClient {
-    /// 为一个部署创建客户端。请求只发往这个部署，且永远不跟随重定向。
-    pub fn new(deployment: Deployment) -> Result<Self, ClientBuildError> {
-        let jar = Arc::new(Jar::default());
-        let http = Client::builder()
-            .cookie_provider(Arc::clone(&jar))
-            .redirect(redirect::Policy::none())
-            .build()?;
-        Ok(Self {
-            deployment: Arc::new(deployment),
-            http,
-            jar,
-            bearer: Arc::new(Mutex::new(None)),
-        })
-    }
-
-    pub fn deployment(&self) -> &Deployment {
-        &self.deployment
-    }
-
-    /// 换用新的 Bearer 设备会话；传 `None` 表示已退出。
-    pub fn set_bearer(&self, token: Option<SecretString>) {
-        *self.bearer.lock().unwrap_or_else(PoisonError::into_inner) = token;
-    }
-
-    pub fn has_bearer(&self) -> bool {
-        self.bearer
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .is_some()
-    }
-
-    fn bearer(&self) -> Option<Zeroizing<String>> {
-        self.bearer
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .as_ref()
-            .map(|token| Zeroizing::new(token.expose().to_owned()))
-    }
-
-    /// 当前存着的网页会话 Cookie。只用于核对与撤销，不写进任何日志或返回给界面。
-    pub fn session_cookie(&self) -> Option<SecretString> {
-        // Cookie 的路径限定在 `/api` 之下，所以要用一个 API 地址去取。
-        let probe = self.deployment.api.join("/api/auth/me");
-        let header = self.jar.cookies(&probe)?;
-        let text = header.to_str().ok()?;
-        text.split(';').find_map(|pair| {
-            let (name, value) = pair.trim().split_once('=')?;
-            (name == SESSION_COOKIE && !value.is_empty()).then(|| SecretString::new(value))
-        })
-    }
-
-    /// 清掉网页会话 Cookie。退出与重新登录之前都要做。
-    pub fn clear_session_cookie(&self) {
-        let target = self.deployment.api.join("/api/auth/me");
-        self.jar
-            .add_cookie_str(&format!("{SESSION_COOKIE}=; Path=/api; Max-Age=0"), &target);
-    }
-
-    // ---- 探活 ----
-
-    /// `GET /health`：进程能应答。公开接口。
-    pub async fn health(
-        &self,
-        options: &RequestOptions<'_>,
-    ) -> Result<HealthResponse, ClientError> {
-        self.call_json(Call::get("/health").anonymous(), options)
-            .await
-    }
-
-    /// `GET /ready`：依赖已就绪。不可用时服务端返回 503，这里如实给出"不可用"。
-    pub async fn ready(
-        &self,
-        options: &RequestOptions<'_>,
-    ) -> Result<ReadinessResponse, ClientError> {
-        let call = Call::get("/ready").anonymous();
-        let response = self.send(call, options).await?;
-        decode(response).await
-    }
-
-    // ---- 账户与会话 ----
-
-    /// 用授权码换取网页会话。服务端要求这个请求不带任何 Cookie 或 Authorization。
-    ///
-    /// 新会话经 `Set-Cookie` 落进客户端自己的 Cookie 罐，不会出现在返回值里。
-    pub async fn desktop_exchange(
-        &self,
-        input: &DesktopExchangeInput,
-        options: &RequestOptions<'_>,
-    ) -> Result<(), ClientError> {
-        if !input.is_valid() {
-            return Err(ClientError::InvalidRequest);
-        }
-        // 旧会话在登录开始时已清除；这里再确认一次，带着旧 Cookie 的换码一律不发出。
-        self.clear_session_cookie();
-        if self.session_cookie().is_some() {
-            return Err(ClientError::InvalidRequest);
-        }
-        let call = Call::get("/api/auth/desktop/exchange")
-            .post(Payload::Json(json(input)?))
-            .anonymous();
-        let response = self.send(call, options).await?;
-        checked(response).await?;
-        Ok(())
-    }
-
-    /// `GET /api/auth/me`：当前会话对应的账户。
-    pub async fn me(&self, options: &RequestOptions<'_>) -> Result<MeResponse, ClientError> {
-        self.call_json(Call::get("/api/auth/me"), options).await
-    }
-
-    /// 用网页会话换一条独立的 Bearer 设备会话。后台的全部请求只用它。
-    pub async fn device_session(
-        &self,
-        options: &RequestOptions<'_>,
-    ) -> Result<AuthResponse, ClientError> {
-        // 接口没有输入，但写请求必须带 JSON 内容类型。
-        self.call_json(empty_post("/api/auth/device-session"), options)
-            .await
-    }
-
-    /// `POST /api/auth/logout`：撤销当前凭据对应的会话。
-    pub async fn logout(
-        &self,
-        options: &RequestOptions<'_>,
-    ) -> Result<SuccessResponse, ClientError> {
-        self.call_json(empty_post("/api/auth/logout"), options)
-            .await
-    }
-
-    /// `POST /api/auth/sessions/:id/revoke`。
-    pub async fn revoke_session(
-        &self,
-        session_id: &str,
-        options: &RequestOptions<'_>,
-    ) -> Result<SuccessResponse, ClientError> {
-        let path = format!("/api/auth/sessions/{}/revoke", id_segment(session_id)?);
-        self.call_json(empty_post(&path), options).await
-    }
-
-    // ---- 泛型资源 ----
-
-    pub async fn list(
-        &self,
-        resource: ResourceName,
-        query: &ListQuery,
-        options: &RequestOptions<'_>,
-    ) -> Result<JarvisList, ClientError> {
-        if !query.is_valid() {
-            return Err(ClientError::InvalidRequest);
-        }
-        let path = format!("/api/jarvis/resources/{}", resource.as_str());
-        let mut call = Call::get(&path)
-            .query("limit", query.limit.to_string())
-            .query("offset", query.offset.to_string());
-        if let Some(search) = &query.search {
-            call = call.query("search", search.clone());
-        }
-        self.call_json(call, options).await
-    }
-
-    /// 一页一页地取出某种资源的全部记录。
-    pub async fn list_all(
-        &self,
-        resource: ResourceName,
-        options: &RequestOptions<'_>,
-    ) -> Result<Vec<JarvisRecord>, ClientError> {
-        let mut items = Vec::new();
-        let mut offset = 0u32;
-        loop {
-            let page = self
-                .list(
-                    resource,
-                    &ListQuery {
-                        search: None,
-                        limit: PAGE_SIZE,
-                        offset,
-                    },
-                    options,
-                )
-                .await?;
-            let got = page.items.len();
-            items.extend(page.items);
-            let fetched = u64::from(offset) + got as u64;
-            if got < PAGE_SIZE as usize || fetched >= page.total {
-                return Ok(items);
+/// 把本机文件变成一个边读边计数的字节流。
+fn metered(
+    file: tokio::fs::File,
+    stall: Duration,
+    sent: Arc<AtomicU64>,
+    stalled: Arc<AtomicBool>,
+) -> impl Stream<Item = io::Result<Bytes>> + Send + 'static {
+    let buffer = vec![0u8; UPLOAD_CHUNK_BYTES];
+    futures_util::stream::unfold(
+        (file, buffer, stall, sent, stalled),
+        |(mut file, mut buffer, stall, sent, stalled)| async move {
+            let read = match tokio::time::timeout(stall, file.read(&mut buffer)).await {
+                Ok(Ok(read)) => read,
+                Ok(Err(error)) => return Some((Err(error), (file, buffer, stall, sent, stalled))),
+                Err(_) => {
+                    stalled.store(true, Ordering::SeqCst);
+                    let error = io::Error::new(
+                        io::ErrorKind::TimedOut,
+                        "the local file stopped yielding data",
+                    );
+                    return Some((Err(error), (file, buffer, stall, sent, stalled)));
+                }
+            };
+            if read == 0 {
+                return None;
             }
-            offset += PAGE_SIZE;
-        }
-    }
-
-    pub async fn get(
-        &self,
-        resource: ResourceName,
-        id: &str,
-        options: &RequestOptions<'_>,
-    ) -> Result<JarvisRecord, ClientError> {
-        let item: JarvisItem = self
-            .call_json(Call::get(&record_path(resource, id)?), options)
-            .await?;
-        Ok(item.item)
-    }
-
-    /// 创建一条记录。请求体就是记录的数据本身。
-    pub async fn create<D: Serialize>(
-        &self,
-        resource: ResourceName,
-        data: &D,
-        options: &RequestOptions<'_>,
-    ) -> Result<JarvisRecord, ClientError> {
-        let path = format!("/api/jarvis/resources/{}", resource.as_str());
-        let call = Call::get(&path).post(Payload::Json(json(data)?));
-        let item: JarvisItem = self.call_json(call, options).await?;
-        Ok(item.item)
-    }
-
-    pub async fn update(
-        &self,
-        resource: ResourceName,
-        id: &str,
-        input: &UpdateInput,
-        options: &RequestOptions<'_>,
-    ) -> Result<JarvisRecord, ClientError> {
-        if !input.is_valid() {
-            return Err(ClientError::InvalidRequest);
-        }
-        let path = record_path(resource, id)?;
-        let call = Call::get(&path).with_payload(Method::PATCH, Payload::Json(json(input)?));
-        let item: JarvisItem = self.call_json(call, options).await?;
-        Ok(item.item)
-    }
-
-    pub async fn remove(
-        &self,
-        resource: ResourceName,
-        id: &str,
-        version: u64,
-        options: &RequestOptions<'_>,
-    ) -> Result<OkResponse, ClientError> {
-        let path = record_path(resource, id)?;
-        let call = Call::get(&path).with_payload(
-            Method::DELETE,
-            Payload::Json(json(&VersionInput { version })?),
-        );
-        self.call_json(call, options).await
-    }
-
-    pub async fn capabilities(
-        &self,
-        options: &RequestOptions<'_>,
-    ) -> Result<Vec<JarvisCapability>, ClientError> {
-        let response: CapabilitiesResponse = self
-            .call_json(Call::get("/api/jarvis/capabilities"), options)
-            .await?;
-        Ok(response.resources)
-    }
-
-    // ---- 文件 ----
-
-    /// `POST /api/jarvis/files/upload`：以 multipart 流式上传一个本机文件。
-    pub async fn upload(
-        &self,
-        source: &LocalSource,
-        metadata: &UploadMetadata,
-        options: &RequestOptions<'_>,
-    ) -> Result<JarvisRecord, ClientError> {
-        if source.size >= MAX_FILE_SIZE {
-            return Err(ClientError::InvalidRequest);
-        }
-        let file = tokio::fs::File::open(&source.path)
-            .await
-            .map_err(|_| ClientError::LocalSource)?;
-        let file_name = metadata.name.clone().or_else(|| {
-            source
-                .path
-                .file_name()
-                .map(|name| name.to_string_lossy().into_owned())
-        });
-        let Some(file_name) = file_name else {
-            return Err(ClientError::InvalidRequest);
-        };
-        let part = Part::stream_with_length(Body::from(file), source.size)
-            .file_name(file_name)
-            .mime_str(
-                source
-                    .mime_type
-                    .as_deref()
-                    .unwrap_or("application/octet-stream"),
-            )
-            .map_err(|_| ClientError::InvalidRequest)?;
-
-        let mut form = Form::new().part("file", part);
-        for (field, value) in [
-            ("name", &metadata.name),
-            ("deviceId", &metadata.device_id),
-            ("rootId", &metadata.root_id),
-            ("relativePath", &metadata.relative_path),
-            ("sourceModifiedAt", &metadata.source_modified_at),
-        ] {
-            if let Some(value) = value {
-                form = form.text(field, value.clone());
-            }
-        }
-        let call = Call::get("/api/jarvis/files/upload").post(Payload::Multipart(form));
-        let item: JarvisItem = self.call_json(call, options).await?;
-        Ok(item.item)
-    }
-
-    /// `GET /api/jarvis/files/:id/content`：取得云副本的字节流。
-    pub async fn download(
-        &self,
-        id: &str,
-        options: &RequestOptions<'_>,
-    ) -> Result<Download, ClientError> {
-        let path = format!("/api/jarvis/files/{}/content", id_segment(id)?);
-        let response = self.send(Call::get(&path).binary(), options).await?;
-        let response = checked(response).await?;
-        let content_length = response.content_length();
-        // 传输错误在离开客户端时转成 I/O 错误：调用方只需要处理一种错误。
-        let stream = response.bytes_stream().map_err(std::io::Error::other);
-        let stream: Pin<Box<dyn Stream<Item = std::io::Result<Bytes>> + Send>> = Box::pin(stream);
-        Ok(Download {
-            content_length,
-            reader: StreamReader::new(stream),
-        })
-    }
-
-    pub async fn resolve(
-        &self,
-        input: &FileResolveInput,
-        options: &RequestOptions<'_>,
-    ) -> Result<FileResolution, ClientError> {
-        if !input.has_identity() {
-            return Err(ClientError::InvalidRequest);
-        }
-        let call = Call::get("/api/jarvis/files/resolve").post(Payload::Json(json(input)?));
-        self.call_json(call, options).await
-    }
-
-    // ---- 设备 ----
-
-    pub async fn heartbeat(
-        &self,
-        device_id: &str,
-        input: &HeartbeatInput,
-        options: &RequestOptions<'_>,
-    ) -> Result<JarvisRecord, ClientError> {
-        let path = format!("/api/jarvis/devices/{}/heartbeat", id_segment(device_id)?);
-        self.device_item(&path, Payload::Json(json(input)?), options)
-            .await
-    }
-
-    /// 手动脱离：之后只有明确恢复才会再次上线。
-    pub async fn disconnect(
-        &self,
-        device_id: &str,
-        options: &RequestOptions<'_>,
-    ) -> Result<JarvisRecord, ClientError> {
-        self.device_action(device_id, "disconnect", options).await
-    }
-
-    /// 正常退出：立刻离线，但保留下次启动的连接意图。
-    pub async fn offline(
-        &self,
-        device_id: &str,
-        options: &RequestOptions<'_>,
-    ) -> Result<JarvisRecord, ClientError> {
-        self.device_action(device_id, "offline", options).await
-    }
-
-    async fn device_action(
-        &self,
-        device_id: &str,
-        action: &str,
-        options: &RequestOptions<'_>,
-    ) -> Result<JarvisRecord, ClientError> {
-        let path = format!("/api/jarvis/devices/{}/{}", id_segment(device_id)?, action);
-        self.device_item(&path, Payload::Json(empty_object()), options)
-            .await
-    }
-
-    async fn device_item(
-        &self,
-        path: &str,
-        payload: Payload,
-        options: &RequestOptions<'_>,
-    ) -> Result<JarvisRecord, ClientError> {
-        let call = Call::get(path).post(payload);
-        let item: JarvisItem = self.call_json(call, options).await?;
-        Ok(item.item)
-    }
-
-    /// 领取命令。带上等待秒数时服务端会压住请求，直到有命令或超时。
-    pub async fn commands(
-        &self,
-        device_id: &str,
-        wait: WaitSeconds,
-        options: &RequestOptions<'_>,
-    ) -> Result<Vec<DeviceCommand>, ClientError> {
-        let path = format!("/api/jarvis/devices/{}/commands", id_segment(device_id)?);
-        let call = Call::get(&path)
-            .query("waitSeconds", wait.get().to_string())
-            .long_poll();
-        let response: CommandsResponse = self.call_json(call, options).await?;
-        Ok(response.items)
-    }
-
-    /// 观察一条命令；带上等待秒数时压住请求，直到它到达终态。
-    pub async fn get_command(
-        &self,
-        command_id: &str,
-        wait: WaitSeconds,
-        device_id: Option<&str>,
-        options: &RequestOptions<'_>,
-    ) -> Result<DeviceCommand, ClientError> {
-        let path = format!("/api/jarvis/commands/{}", id_segment(command_id)?);
-        let mut call = Call::get(&path)
-            .query("waitSeconds", wait.get().to_string())
-            .long_poll();
-        if let Some(device) = device_id {
-            call = call.query("deviceId", id_segment(device)?.to_owned());
-        }
-        let response: CommandResponse = self.call_json(call, options).await?;
-        Ok(response.command)
-    }
-
-    pub async fn request_root(
-        &self,
-        device_id: &str,
-        input: &DirectoryRequestInput,
-        options: &RequestOptions<'_>,
-    ) -> Result<DeviceCommand, ClientError> {
-        let path = format!(
-            "/api/jarvis/devices/{}/directory-request",
-            id_segment(device_id)?
-        );
-        let call = Call::get(&path).post(Payload::Json(json(input)?));
-        let response: CommandResponse = self.call_json(call, options).await?;
-        Ok(response.command)
-    }
-
-    pub async fn inventory(
-        &self,
-        device_id: &str,
-        input: &InventoryInput,
-        options: &RequestOptions<'_>,
-    ) -> Result<JarvisList, ClientError> {
-        let path = format!("/api/jarvis/devices/{}/inventory", id_segment(device_id)?);
-        let call = Call::get(&path).post(Payload::Json(json(input)?));
-        self.call_json(call, options).await
-    }
-
-    pub async fn append_logs(
-        &self,
-        device_id: &str,
-        logs: &[LogData],
-        options: &RequestOptions<'_>,
-    ) -> Result<JarvisList, ClientError> {
-        if logs.len() > MAX_LOG_BATCH {
-            return Err(ClientError::InvalidRequest);
-        }
-        let path = format!("/api/jarvis/devices/{}/logs", id_segment(device_id)?);
-        let call = Call::get(&path).post(Payload::Json(json!({ "items": logs })));
-        self.call_json(call, options).await
-    }
-
-    pub async fn report(
-        &self,
-        command_id: &str,
-        report: &DeviceReport,
-        options: &RequestOptions<'_>,
-    ) -> Result<DeviceCommand, ClientError> {
-        let path = format!("/api/jarvis/commands/{}/report", id_segment(command_id)?);
-        let call = Call::get(&path).post(Payload::Json(json(report)?));
-        let response: CommandResponse = self.call_json(call, options).await?;
-        Ok(response.command)
-    }
-
-    // ---- 发送管线 ----
-
-    /// 发出请求，校验状态，再按约定结构解析。
-    async fn call_json<T: DeserializeOwned>(
-        &self,
-        call: Call<'_>,
-        options: &RequestOptions<'_>,
-    ) -> Result<T, ClientError> {
-        let response = self.send(call, options).await?;
-        decode(checked(response).await?).await
-    }
-
-    /// 所有请求的必经之路。
-    async fn send(
-        &self,
-        call: Call<'_>,
-        options: &RequestOptions<'_>,
-    ) -> Result<reqwest::Response, ClientError> {
-        ensure_allowed_path(call.path)?;
-        if options.cancel.is_cancelled() {
-            return Err(ClientError::Cancelled);
-        }
-
-        let is_write = call.method != Method::GET;
-        let mut request = self
-            .http
-            .request(call.method, self.deployment.api.join(call.path))
-            .header(ACCEPT, call.accept.value())
-            .query(&call.query);
-        if call.channel == Channel::Authenticated
-            && let Some(token) = self.bearer()
-        {
-            let header = Zeroizing::new(format!("Bearer {}", token.as_str()));
-            request = request.header(AUTHORIZATION, header.as_str());
-        }
-        if is_write {
-            // 服务端用 Origin 判断请求是否来自可信的网页来源。
-            request = request.header(ORIGIN, self.deployment.client.origin().as_str());
-        }
-        request = match call.payload {
-            Payload::None => request,
-            Payload::Json(value) => request.json(&value),
-            Payload::Multipart(form) => request.multipart(form),
-        };
-
-        let budget = options.budget(call.long_poll);
-        tokio::select! {
-            biased;
-            () = options.cancel.cancelled() => Err(ClientError::Cancelled),
-            outcome = tokio::time::timeout(budget, request.send()) => match outcome {
-                Ok(Ok(response)) => Ok(response),
-                Ok(Err(error)) => Err(transport(&error)),
-                Err(_) => Err(ClientError::Timeout),
-            },
-        }
-    }
-}
-
-/// 没有输入的写接口也要带一个 JSON 对象作为正文。
-fn empty_object() -> Value {
-    Value::Object(serde_json::Map::new())
-}
-
-fn empty_post(path: &str) -> Call<'_> {
-    Call::get(path).post(Payload::Json(empty_object()))
-}
-
-fn record_path(resource: ResourceName, id: &str) -> Result<String, ClientError> {
-    Ok(format!(
-        "/api/jarvis/resources/{}/{}",
-        resource.as_str(),
-        id_segment(id)?
-    ))
-}
-
-/// 只允许访问 API 与两个公开的探活地址，且路径里不能有需要特殊处理的片段。
-fn ensure_allowed_path(path: &str) -> Result<(), ClientError> {
-    let allowed = path.starts_with("/api/") || matches!(path, "/health" | "/ready");
-    let no_relative_segments = path
-        .split('/')
-        .all(|segment| !matches!(segment, "." | ".."));
-    if allowed && no_relative_segments && !path.contains(['%', '\\']) {
-        Ok(())
-    } else {
-        Err(ClientError::InvalidRequest)
-    }
+            sent.fetch_add(read as u64, Ordering::Relaxed);
+            Some((
+                Ok(Bytes::copy_from_slice(&buffer[..read])),
+                (file, buffer, stall, sent, stalled),
+            ))
+        },
+    )
 }
 
 /// 标识只含 `A-Z a-z 0-9 _ . -`，放进路径不需要再编码。
 ///
-/// 契约的正则也接受 `.` 与 `..`，但它们拼进路径后会被 URL 规范化吃掉一段，
-/// 所以在这里单独挡掉。
+/// `.` 与 `..` 拼进路径后会被 URL 规范化吃掉一段，所以单独挡掉。
 fn id_segment(id: &str) -> Result<&str, ClientError> {
     if is_valid_id(id) && !matches!(id, "." | "..") {
         Ok(id)
@@ -795,7 +829,14 @@ fn json<T: Serialize>(value: &T) -> Result<Value, ClientError> {
     serde_json::to_value(value).map_err(|_| ClientError::InvalidRequest)
 }
 
-fn transport(error: &reqwest::Error) -> ClientError {
+fn enum_spelling<T: Serialize>(value: T) -> Result<String, ClientError> {
+    match json(&value)? {
+        Value::String(spelling) => Ok(spelling),
+        _ => Err(ClientError::InvalidRequest),
+    }
+}
+
+pub(crate) fn transport(error: &reqwest::Error) -> ClientError {
     if error.is_timeout() {
         ClientError::Timeout
     } else if error.is_builder() {
@@ -806,20 +847,24 @@ fn transport(error: &reqwest::Error) -> ClientError {
 }
 
 /// 非 2xx 一律转成带状态码与远程错误码的错误。
-async fn checked(response: reqwest::Response) -> Result<reqwest::Response, ClientError> {
-    let status = response.status();
-    if status.is_success() {
-        return Ok(response);
-    }
+pub(crate) async fn rejection(status: u16, response: reqwest::Response) -> ClientError {
     let body = response.bytes().await.ok();
     let remote_code = body
         .as_deref()
         .and_then(|bytes| serde_json::from_slice::<ApiErrorBody>(bytes).ok())
         .map(|body| body.error.code);
-    Err(ClientError::Http {
-        status: status.as_u16(),
+    ClientError::Http {
+        status,
         remote_code,
-    })
+    }
+}
+
+async fn checked(response: reqwest::Response) -> Result<reqwest::Response, ClientError> {
+    let status = response.status();
+    if status.is_success() {
+        return Ok(response);
+    }
+    Err(rejection(status.as_u16(), response).await)
 }
 
 async fn decode<T: DeserializeOwned>(response: reqwest::Response) -> Result<T, ClientError> {

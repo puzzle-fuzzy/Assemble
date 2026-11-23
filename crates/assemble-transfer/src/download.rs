@@ -13,7 +13,6 @@ use std::path::{Path, PathBuf};
 
 use tokio::io::{AsyncRead, AsyncReadExt};
 use tokio_util::sync::CancellationToken;
-use url::Url;
 
 use crate::hash::{Sha256Sink, digests_match};
 use crate::staged::{PublishOutcome, SealedStaging, StagedFile};
@@ -195,20 +194,6 @@ fn check_cancelled(cancel: &CancellationToken) -> Result<(), TransferError> {
     } else {
         Ok(())
     }
-}
-
-/// 检查一个下载链接：只接受不带账户信息的 HTTP(S) 地址。
-pub fn parse_download_url(value: &str) -> Result<Url, TransferError> {
-    let url = Url::parse(value).map_err(|_| TransferError::InvalidUrl)?;
-    if url.scheme() == "magnet" {
-        return Err(TransferError::MagnetNotConfigured);
-    }
-    let is_http = matches!(url.scheme(), "http" | "https");
-    let has_credentials = !url.username().is_empty() || url.password().is_some();
-    if !is_http || has_credentials {
-        return Err(TransferError::InvalidUrl);
-    }
-    Ok(url)
 }
 
 #[cfg(test)]
@@ -446,29 +431,5 @@ mod tests {
         assert!(matches!(error, TransferError::Cancelled), "{error}");
         assert!(!mid.exists());
         assert_eq!(entries(dir.path()), Vec::<String>::new());
-    }
-
-    #[test]
-    fn only_plain_http_urls_are_accepted_as_download_sources() {
-        let ok = parse_download_url("https://example.com/a.zip?x=1").unwrap();
-        assert_eq!(ok.path(), "/a.zip");
-        assert_eq!(
-            parse_download_url("http://127.0.0.1:8080/a")
-                .unwrap()
-                .host_str(),
-            Some("127.0.0.1")
-        );
-
-        for (value, code) in [
-            ("magnet:?xt=urn:btih:abc", "MAGNET_NOT_CONFIGURED"),
-            ("ftp://example.com/a", "INVALID_URL"),
-            ("file:///etc/passwd", "INVALID_URL"),
-            ("https://user:pass@example.com/a", "INVALID_URL"),
-            ("https://user@example.com/a", "INVALID_URL"),
-            ("not a url", "INVALID_URL"),
-        ] {
-            let error = parse_download_url(value).unwrap_err();
-            assert_eq!(error.code(), code, "{value}");
-        }
     }
 }

@@ -1,20 +1,18 @@
-//! 设备运行时：云端能要求这台电脑做什么，以及什么才算被授权。
+//! 本机落盘的边界。
 //!
-//! 四个模块各管一条边界：
+//! 新产品里，这台电脑写文件只有一种来源：别的设备发来的、或从云盘取回的文件。
+//! 它们一律落到一个接收目录里，所以这里只管三件事：
 //!
-//! - [`paths`]：只有明确授权的目录、且不经过链接的路径才能被访问；
-//! - [`grants`]：云端记录必须与本机私有授权取交集，改云端不会扩大本机权限；
-//! - [`receipts`]：本机副作用先落盘再回执，租约丢失也不会重复执行；
-//! - [`gateway`]：MCP 服务器经回环端口使用的本机入口，必须与原协议保持一致。
+//! - [`receive::validate_directory`]：接收目录必须是一个真实的目录，不能是整块磁盘；
+//! - [`receive::safe_file_name`]：网络上来的名字收敛成单个、在 Windows 上也合法的文件名；
+//! - [`receive::choose_file_name`]：同名时加序号，绝不覆盖。
 //!
-//! 真正的心跳、长轮询与扫描循环不在这里；它们由应用壳编排，并只通过
-//! 这些模块触碰文件系统。
+//! "先暂存、校验后再发布、绝不覆盖"由 `assemble-transfer` 负责；
+//! 这里的结果交给它之前，路径一定落在接收目录之内。
 
 // 测试代码以可读性优先，不套用库代码的严格检查。
 #![cfg_attr(test, allow(clippy::pedantic))]
 
-pub mod error;
-pub mod gateway;
-pub mod grants;
-pub mod paths;
-pub mod receipts;
+pub mod receive;
+
+pub use receive::{BoundaryError, choose_file_name, safe_file_name, validate_directory};

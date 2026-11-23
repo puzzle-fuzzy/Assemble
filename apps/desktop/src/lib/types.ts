@@ -4,16 +4,26 @@
 // Rust 在测试里把同一样本读进来再原样写出去。任何一边改了形状，测试都会失败。
 // 凭据、路径与系统诊断永远不在这里出现。
 
+/** 运行桌面端的平台，与服务端的拼法一致。 */
+export type Platform = "windows" | "macos" | "linux";
+
 export interface AccountView {
   id: string;
   username: string;
   displayName: string;
 }
 
+/** 一台设备在界面上的样子：这台安装在本账户里的身份。 */
+export interface DeviceView {
+  id: string;
+  name: string;
+  platform: Platform;
+}
+
 export type SessionView =
   | { phase: "signedOut" }
   | { phase: "signingIn" }
-  | { phase: "signedIn"; account: AccountView };
+  | { phase: "signedIn"; account: AccountView; device: DeviceView };
 
 export type LaunchState = "enabled" | "disabled" | "unsupported" | "unknown";
 

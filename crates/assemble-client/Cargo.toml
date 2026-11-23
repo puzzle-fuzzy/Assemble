@@ -4,26 +4,29 @@ version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true
-description = "访问 Jarvis 云端的唯一 HTTP 出口：固定来源、会话凭据、长轮询与回环登录"
+description = "桌面端访问 Assemble 服务端的唯一出口：固定来源、设备令牌、流式传输、事件流与回环登录"
 
 [dependencies]
 assemble-protocol.workspace = true
 assemble-store.workspace = true
+assemble-transfer.workspace = true
 axum.workspace = true
 base64.workspace = true
 bytes.workspace = true
 futures-core.workspace = true
 futures-util.workspace = true
 getrandom.workspace = true
+mime_guess.workspace = true
 reqwest.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
 subtle.workspace = true
 thiserror.workspace = true
-tracing.workspace = true
 tokio.workspace = true
+tokio-stream.workspace = true
 tokio-util = { workspace = true, features = ["io", "rt"] }
+tracing.workspace = true
 url.workspace = true
 zeroize.workspace = true
 

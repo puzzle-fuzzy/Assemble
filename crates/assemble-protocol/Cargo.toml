@@ -4,11 +4,13 @@ version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true
-description = "Jarvis 线上契约的 Rust 映射：资源、设备命令、文件、本机网关与桌面登录"
+description = "Assemble 服务端与桌面端之间的线上契约：账户、设备、云盘、发送、事件与桌面登录"
 
 [dependencies]
+chrono.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+url.workspace = true
 
 [lints]
 workspace = true

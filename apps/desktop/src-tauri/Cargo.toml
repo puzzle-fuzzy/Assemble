@@ -15,18 +15,18 @@ tauri-build.workspace = true
 
 [dependencies]
 assemble-client.workspace = true
-assemble-device.workspace = true
 assemble-protocol.workspace = true
 assemble-store.workspace = true
+hostname = "0.4.2"
 serde.workspace = true
 serde_json.workspace = true
 tauri.workspace = true
 tauri-plugin-autostart.workspace = true
 tauri-plugin-opener.workspace = true
 tauri-plugin-single-instance.workspace = true
+thiserror.workspace = true
 tokio.workspace = true
 tokio-util.workspace = true
-thiserror.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
 

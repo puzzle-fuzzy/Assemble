@@ -4,21 +4,11 @@ version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true
-description = "设备运行时：路径边界、目录授权、命令回执与供 MCP 使用的本机网关"
+description = "本机落盘的边界：接收目录、文件名收敛、同名加序号"
 
 [dependencies]
-assemble-protocol.workspace = true
-assemble-store.workspace = true
-assemble-transfer.workspace = true
-axum.workspace = true
-getrandom.workspace = true
-serde.workspace = true
-serde_json.workspace = true
-subtle.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
-tokio-util.workspace = true
-tracing.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true

@@ -14,9 +14,19 @@ const ACCOUNT = {
   displayName: "Example",
 };
 
+const DEVICE = {
+  id: "device-1",
+  name: "MacBook-Pro",
+  platform: "macos",
+} as const;
+
 type Overrides = Partial<Omit<Snapshot, "session">> & {
   phase?: Snapshot["session"]["phase"];
 };
+
+function signedIn(account: typeof ACCOUNT = ACCOUNT): Snapshot["session"] {
+  return { phase: "signedIn", account, device: { ...DEVICE } };
+}
 
 function snapshot(overrides: Overrides = {}): Snapshot {
   const { phase, ...rest } = overrides;
@@ -24,7 +34,7 @@ function snapshot(overrides: Overrides = {}): Snapshot {
     phase === "signingIn"
       ? { phase: "signingIn" }
       : phase === "signedIn"
-        ? { phase: "signedIn", account: ACCOUNT }
+        ? signedIn()
         : { phase: "signedOut" };
   return {
     service: { target: "production", reachable: true },
@@ -276,15 +286,34 @@ describe("账户", () => {
     const source = new FakeBridge(snapshot({ phase: "signedIn" }));
     source.current = {
       ...source.current,
-      session: {
-        phase: "signedIn",
-        account: { ...ACCOUNT, displayName: "example" },
-      },
+      session: signedIn({ ...ACCOUNT, displayName: "example" }),
     };
     const view = await render(<App bridge={source} />);
     await settle();
     expect(text(view.host)).toContain("example");
     expect(text(view.host)).not.toContain("（example）");
+  });
+
+  test("已登录时显示这台设备在账户里的名字", async () => {
+    const source = new FakeBridge(snapshot({ phase: "signedIn" }));
+    const view = await render(<App bridge={source} />);
+    await settle();
+
+    expect(text(view.host)).toContain("这台设备：MacBook-Pro");
+
+    // 设备在别的设备上被改名后，随状态推送更新。
+    await act(async () => {
+      source.push({
+        ...snapshot({ phase: "signedIn" }),
+        session: {
+          phase: "signedIn",
+          account: ACCOUNT,
+          device: { ...DEVICE, name: "家里的 Mac" },
+        },
+      });
+    });
+    expect(text(view.host)).toContain("这台设备：家里的 Mac");
+    expect(text(view.host)).not.toContain("MacBook-Pro");
   });
 
   test("命令失败时显示固定文案，不回显技术细节", async () => {

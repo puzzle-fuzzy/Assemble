@@ -1,6 +1,6 @@
 // 应用主界面。
 //
-// 本阶段只有两类真实内容：账户与连接、本机设置。文件传输与日程的视图
+// 本阶段只有两类真实内容：账户与连接、本机设置。设备、文件传输与日程的视图
 // 在对应的后台能力接通之后再加入，不放空页面占位。
 
 import { useState } from "react";
@@ -163,6 +163,13 @@ function SessionCard({ source, snapshot, onError }: CardProps) {
         <CardDescription>{describe(session, unreachable)}</CardDescription>
         <CardAction>{action}</CardAction>
       </CardHeader>
+      {session?.phase === "signedIn" ? (
+        <CardContent>
+          <p className="text-sm text-muted-foreground">
+            这台设备：{session.device.name}
+          </p>
+        </CardContent>
+      ) : null}
     </Card>
   );
 }

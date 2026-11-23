@@ -12,6 +12,9 @@ const VALID: Snapshot = {
   notice: null,
 };
 
+const ACCOUNT = { id: "a", username: "u", displayName: "U" };
+const DEVICE = { id: "d", name: "MacBook", platform: "macos" };
+
 describe("状态守卫", () => {
   test("认得合法的状态", () => {
     expect(isSnapshot(VALID)).toBe(true);
@@ -19,10 +22,7 @@ describe("状态守卫", () => {
       isSnapshot({
         ...VALID,
         service: { target: "development", reachable: null },
-        session: {
-          phase: "signedIn",
-          account: { id: "a", username: "u", displayName: "U" },
-        },
+        session: { phase: "signedIn", account: ACCOUNT, device: DEVICE },
         launchAtLogin: "unknown",
         notice: { kind: "info", message: "ok" },
       }),
@@ -38,7 +38,27 @@ describe("状态守卫", () => {
       { ...VALID, service: { target: "production" } },
       { ...VALID, service: { target: "staging", reachable: true } },
       { ...VALID, session: { phase: "signedIn" } },
-      { ...VALID, session: { phase: "signedIn", account: { username: "u" } } },
+      { ...VALID, session: { phase: "signedIn", account: ACCOUNT } },
+      {
+        ...VALID,
+        session: {
+          phase: "signedIn",
+          account: { username: "u" },
+          device: DEVICE,
+        },
+      },
+      {
+        ...VALID,
+        session: {
+          phase: "signedIn",
+          account: ACCOUNT,
+          device: { ...DEVICE, platform: "darwin" },
+        },
+      },
+      {
+        ...VALID,
+        session: { phase: "signedIn", account: ACCOUNT, device: { id: "d" } },
+      },
       { ...VALID, session: { phase: "retired" } },
       { ...VALID, launchAtLogin: "maybe" },
       { ...VALID, notice: { kind: "warning", message: "x" } },

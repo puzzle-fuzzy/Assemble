@@ -19,6 +19,11 @@
         "id": "3d1c0a5e-6cf4-4d3a-9a67-1f2f4c1f6f01",
         "username": "example",
         "displayName": "Example"
+      },
+      "device": {
+        "id": "9b2e7c4d1a5f4e3b8c6d0a1b2c3d4e5f",
+        "name": "MacBook-Pro",
+        "platform": "macos"
       }
     },
     "launchAtLogin": "enabled",
@@ -38,6 +43,11 @@
         "id": "account-1",
         "username": "example",
         "displayName": "Example"
+      },
+      "device": {
+        "id": "c1d2e3f4a5b64c7d8e9f0a1b2c3d4e5f",
+        "name": "工作电脑",
+        "platform": "windows"
       }
     },
     "launchAtLogin": "enabled",

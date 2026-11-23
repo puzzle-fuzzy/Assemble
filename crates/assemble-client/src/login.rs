@@ -3,11 +3,13 @@
 //! 桌面端不保存密码，也不在自己的窗口里加载登录页。流程是：
 //!
 //! 1. 本机监听 `127.0.0.1` 的随机端口；
-//! 2. 生成 PKCE 校验器与 state，在系统浏览器打开日常网页的授权页；
-//! 3. 用户在浏览器里登录并确认，网页把单次授权码交回回调地址；
-//! 4. 本机收回调，核对 state 后用授权码换取会话。
+//! 2. 生成 PKCE 校验器与 state，在系统浏览器打开服务端的授权页；
+//! 3. 用户在浏览器里登录并确认，服务端把单次授权码交回回调地址；
+//! 4. 本机收回调，核对 state 后用授权码换取设备令牌。
 //!
 //! 回调只认一次：方法、路径、主机头、参数个数与 state 任何一项不符都直接拒绝。
+//! 用户在网页上点了"取消"时，服务端带 `error=access_denied` 回来，
+//! 这里把它变成 [`LoginError::Denied`]，应用据此不显示错误。
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -25,13 +27,20 @@ use subtle::ConstantTimeEq;
 use tokio::net::TcpListener;
 use tokio_util::sync::CancellationToken;
 
-use assemble_protocol::desktop_login::{
-    CALLBACK_PATH, DesktopAuthorizationInput, DesktopExchangeInput, LOGIN_DEADLINE, is_proof,
+use assemble_protocol::device::NewDevice;
+use assemble_protocol::login::{
+    AuthorizationRequest, CALLBACK_PATH, ExchangeInput, LOGIN_DEADLINE, is_proof,
 };
 use assemble_store::secret::SecretString;
 
 /// 回调成功后给浏览器看的页面。页面上不出现授权码。
 const CALLBACK_PAGE: &str = "<!doctype html><html lang=\"zh-CN\"><head><meta charset=\"utf-8\"><title>登录完成</title></head><body><p>已完成网页登录，请返回 Assemble。可以关闭此页面。</p></body></html>";
+
+/// 用户在网页上取消之后给浏览器看的页面。
+const DENIED_PAGE: &str = "<!doctype html><html lang=\"zh-CN\"><head><meta charset=\"utf-8\"><title>已取消</title></head><body><p>已取消登录 Assemble。可以关闭此页面。</p></body></html>";
+
+/// 用户在授权页上点"取消"时，服务端带回的错误码。
+const ACCESS_DENIED: &str = "access_denied";
 
 const PAGE_HEADERS: [(&str, &str); 3] = [
     ("content-type", "text/html; charset=utf-8"),
@@ -53,6 +62,9 @@ pub enum LoginError {
     Bind,
     #[error("login was cancelled")]
     Cancelled,
+    /// 用户在浏览器的授权页上点了"取消"。这不是故障。
+    #[error("the user declined the login in the browser")]
+    Denied,
     #[error("no login confirmation arrived in time")]
     TimedOut,
     #[error("a random login secret could not be generated")]
@@ -84,8 +96,8 @@ impl LoginRequest {
     }
 
     /// 发给授权页的三个字段。
-    pub fn authorization_input(&self) -> DesktopAuthorizationInput {
-        DesktopAuthorizationInput {
+    pub fn authorization_request(&self) -> AuthorizationRequest {
+        AuthorizationRequest {
             redirect_uri: self.redirect_uri.clone(),
             code_challenge: self.code_challenge.clone(),
             state: self.state.clone(),
@@ -95,16 +107,17 @@ impl LoginRequest {
     /// 授权页地址里携带的请求：JSON 的 base64url 编码。
     pub fn encoded_request(&self) -> String {
         // 三个普通字符串字段的序列化不会失败。
-        let json = serde_json::to_vec(&self.authorization_input()).unwrap_or_default();
+        let json = serde_json::to_vec(&self.authorization_request()).unwrap_or_default();
         URL_SAFE_NO_PAD.encode(json)
     }
 
-    /// 用收回的授权码组装换取会话的请求。
-    pub fn exchange_input(&self, code: String) -> DesktopExchangeInput {
-        DesktopExchangeInput {
+    /// 用收回的授权码组装换码请求。换码的同时注册这台设备。
+    pub fn exchange_input(&self, code: String, device: NewDevice) -> ExchangeInput {
+        ExchangeInput {
             code,
             code_verifier: self.verifier.expose().to_owned(),
             redirect_uri: self.redirect_uri.clone(),
+            device,
         }
     }
 }
@@ -170,7 +183,7 @@ impl LoginListener {
         if options.cancel.is_cancelled() {
             return Err(LoginError::Cancelled);
         }
-        let (sender, receiver) = tokio::sync::oneshot::channel::<String>();
+        let (sender, receiver) = tokio::sync::oneshot::channel::<Result<String, LoginError>>();
         let stop = CancellationToken::new();
         let state = Arc::new(CallbackState {
             expected_state: request.state.as_bytes().to_vec(),
@@ -194,7 +207,7 @@ impl LoginListener {
             biased;
             () = options.cancel.cancelled() => Err(LoginError::Cancelled),
             () = tokio::time::sleep(options.deadline) => Err(LoginError::TimedOut),
-            code = receiver => code.map_err(|_| LoginError::Cancelled),
+            outcome = receiver => outcome.map_err(|_| LoginError::Cancelled)?,
             () = serving => Err(LoginError::Cancelled),
         };
         stop.cancel();
@@ -205,14 +218,14 @@ impl LoginListener {
 struct CallbackState {
     expected_state: Vec<u8>,
     host: String,
-    sender: Mutex<Option<tokio::sync::oneshot::Sender<String>>>,
+    sender: Mutex<Option<tokio::sync::oneshot::Sender<Result<String, LoginError>>>>,
     completed: AtomicBool,
     stop: CancellationToken,
 }
 
 async fn callback(State(state): State<Arc<CallbackState>>, request: Request<Body>) -> Response {
-    let code = match validate(&request, &state.host, &state.expected_state) {
-        Ok(code) => code,
+    let outcome = match validate(&request, &state.host, &state.expected_state) {
+        Ok(outcome) => outcome,
         Err(reason) => {
             return (StatusCode::BAD_REQUEST, REFUSAL_HEADERS, reason).into_response();
         }
@@ -226,22 +239,32 @@ async fn callback(State(state): State<Arc<CallbackState>>, request: Request<Body
         )
             .into_response();
     }
+    let (delivered, page) = match outcome {
+        Callback::Code(code) => (Ok(code), CALLBACK_PAGE),
+        Callback::Denied => (Err(LoginError::Denied), DENIED_PAGE),
+    };
     if let Ok(mut sender) = state.sender.lock() {
         // 取走发送端：之后的回调再也送不进来。
         if let Some(sender) = sender.take() {
-            let _ = sender.send(code);
+            let _ = sender.send(delivered);
         }
     }
     state.stop.cancel();
-    (StatusCode::OK, PAGE_HEADERS, CALLBACK_PAGE).into_response()
+    (StatusCode::OK, PAGE_HEADERS, page).into_response()
 }
 
-/// 核对一个回调请求，通过则取出授权码。
+/// 一个通过了核对的回调。
+enum Callback {
+    Code(String),
+    Denied,
+}
+
+/// 核对一个回调请求，通过则取出授权码（或"用户取消了"这个事实）。
 fn validate(
     request: &Request<Body>,
     host: &str,
     expected_state: &[u8],
-) -> Result<String, &'static str> {
+) -> Result<Callback, &'static str> {
     if request
         .headers()
         .get(header::HOST)
@@ -264,11 +287,13 @@ fn validate(
     }
 
     let mut code: Option<&str> = None;
+    let mut error: Option<&str> = None;
     let mut state: Option<&str> = None;
     for pair in query.split('&') {
         let (key, value) = pair.split_once('=').ok_or("Malformed parameter")?;
         let slot = match key {
             "code" => &mut code,
+            "error" => &mut error,
             "state" => &mut state,
             _ => return Err("Unexpected parameter"),
         };
@@ -276,15 +301,16 @@ fn validate(
             return Err("Duplicate parameter");
         }
     }
-    let code = code.ok_or("Missing code")?;
     let state = state.ok_or("Missing state")?;
-    if !is_proof(code) {
-        return Err("Invalid code");
-    }
     if !same_secret(state.as_bytes(), expected_state) {
         return Err("Invalid state");
     }
-    Ok(code.to_owned())
+    match (code, error) {
+        // 授权码与"取消"互斥；只认这一个错误码，别的错误一律按被拒绝处理。
+        (Some(code), None) if is_proof(code) => Ok(Callback::Code(code.to_owned())),
+        (None, Some(ACCESS_DENIED)) => Ok(Callback::Denied),
+        _ => Err("Invalid parameters"),
+    }
 }
 
 fn same_secret(given: &[u8], expected: &[u8]) -> bool {
@@ -297,6 +323,7 @@ mod tests {
     use tokio::net::TcpStream;
 
     use super::*;
+    use assemble_protocol::primitives::Platform;
 
     const CODE: &str = "abcdefghijklmnopqrstuvwxyz0123456789-_ABCDE";
 
@@ -361,7 +388,8 @@ mod tests {
     #[test]
     fn a_login_request_carries_matching_challenge_verifier_and_state() {
         let request = LoginRequest::generate("http://127.0.0.1:54321/callback").unwrap();
-        let input = request.authorization_input();
+        let input = request.authorization_request();
+        assert!(input.is_valid());
         assert!(is_proof(&input.code_challenge));
         assert!(is_proof(&request.state));
         assert_ne!(input.code_challenge, request.state);
@@ -369,7 +397,13 @@ mod tests {
         assert_eq!(request.redirect_uri, "http://127.0.0.1:54321/callback");
 
         // S256：挑战等于校验器的 SHA-256。
-        let exchange = request.exchange_input("c".repeat(43));
+        let exchange = request.exchange_input(
+            "c".repeat(43),
+            NewDevice {
+                name: "MacBook".into(),
+                platform: Platform::Macos,
+            },
+        );
         assert_eq!(
             input.code_challenge,
             URL_SAFE_NO_PAD.encode(Sha256::digest(exchange.code_verifier.as_bytes()))
@@ -389,7 +423,9 @@ mod tests {
         let other = LoginRequest::generate("http://127.0.0.1:54321/callback").unwrap();
         assert_ne!(other.state, request.state);
         assert_ne!(
-            other.exchange_input(String::new()).code_verifier,
+            other
+                .exchange_input(String::new(), exchange.device.clone())
+                .code_verifier,
             exchange.code_verifier
         );
     }
@@ -444,6 +480,19 @@ mod tests {
                 &host,
                 &format!("/callback?code={CODE}&state={state}&extra=1"),
             ),
+            get(
+                &host,
+                &format!("/callback?error=access_denied&state={wrong_state}"),
+            ),
+            get(&host, "/callback?error=access_denied"),
+            get(
+                &host,
+                &format!("/callback?error=server_error&state={state}"),
+            ),
+            get(
+                &host,
+                &format!("/callback?code={CODE}&error=access_denied&state={state}"),
+            ),
             get(&host, &format!("/callback?code={too_short}&state={state}")),
             get(&host, &format!("/callback?code={CODE}&state={state}&")),
             get(&host, &format!("/callback?code{CODE}&state={state}")),
@@ -477,6 +526,22 @@ mod tests {
         .await;
         assert_eq!(status, 200);
         assert_eq!(running.outcome.await.unwrap().unwrap(), CODE);
+    }
+
+    #[tokio::test]
+    async fn declining_in_the_browser_ends_the_wait_without_an_error_page() {
+        let running = start(Duration::from_secs(5)).await;
+        let host = running.host.clone();
+        let target = format!("/callback?error=access_denied&state={}", running.state);
+
+        let (status, _, body) = send(&host, &get(&host, &target)).await;
+        assert_eq!(status, 200);
+        assert!(body.contains("已取消登录 Assemble"));
+        assert!(!body.contains("已完成网页登录"));
+        assert_eq!(
+            running.outcome.await.unwrap().unwrap_err(),
+            LoginError::Denied
+        );
     }
 
     #[tokio::test]

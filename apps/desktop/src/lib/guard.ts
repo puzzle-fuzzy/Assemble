@@ -5,8 +5,10 @@
 
 import type {
   AccountView,
+  DeviceView,
   LaunchState,
   Notice,
+  Platform,
   ServiceTarget,
   SessionView,
   Snapshot,
@@ -26,6 +28,19 @@ export function isAccountView(value: unknown): value is AccountView {
     hasString(value, "id") &&
     hasString(value, "username") &&
     hasString(value, "displayName")
+  );
+}
+
+export function isPlatform(value: unknown): value is Platform {
+  return value === "windows" || value === "macos" || value === "linux";
+}
+
+export function isDeviceView(value: unknown): value is DeviceView {
+  return (
+    isRecord(value) &&
+    hasString(value, "id") &&
+    hasString(value, "name") &&
+    isPlatform(value.platform)
   );
 }
 
@@ -57,7 +72,7 @@ export function isSessionView(value: unknown): value is SessionView {
     case "signingIn":
       return true;
     case "signedIn":
-      return isAccountView(value.account);
+      return isAccountView(value.account) && isDeviceView(value.device);
     default:
       return false;
   }

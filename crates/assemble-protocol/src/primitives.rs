@@ -1,17 +1,16 @@
-//! 各契约域共用的值原语。
+//! 各协议域共用的值原语。
 
-use serde::{Deserialize, Serialize};
+use std::borrow::Cow;
+use std::ops::Add;
+use std::time::Duration;
 
-/// 单个文件的字节数上限（不含）：严格小于该值才可扫描上云。
+use chrono::{DateTime, SecondsFormat, Utc};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
+/// 单个文件的大小上限（含）：100,000,000 字节。
 pub const MAX_FILE_SIZE: u64 = 100_000_000;
 
-/// `text` 字段的最大长度（以 UTF-16 单元计）。
-pub const TEXT_MAX_UNITS: usize = 1_000;
-
-/// `notes` 字段的最大长度（以 UTF-16 单元计）。
-pub const NOTES_MAX_UNITS: usize = 20_000;
-
-/// 资源、设备与命令标识：1 到 200 个 `A-Z a-z 0-9 _ . -` 字符。
+/// 资源、设备与发送的标识：1 到 200 个 `A-Z a-z 0-9 _ . -` 字符。
 pub fn is_valid_id(value: &str) -> bool {
     !value.is_empty()
         && value.len() <= 200
@@ -39,53 +38,25 @@ pub fn to_hex(bytes: &[u8]) -> String {
     hex
 }
 
-/// 非空且不超过上限的 UTF-16 单元数，对应 zod 的 `.trim().min(1).max(n)`。
+/// 非空且不超过上限的 UTF-16 单元数。
 pub fn is_text(value: &str, max_units: usize) -> bool {
     !value.trim().is_empty() && value.encode_utf16().count() <= max_units
 }
 
-/// 相对路径在契约层的安全形式：不以分隔符或盘符开头，不含空段、`.` 与 `..`。
-///
-/// 本机落盘前还要再过一遍 `assemble-device` 的文件系统校验；
-/// 这里只保证不会把明显越界的路径发到服务端。
-pub fn is_safe_relative_path(value: &str) -> bool {
-    if value.is_empty()
-        || value.encode_utf16().count() > 4_096
-        || value.contains('\0')
-        || value.starts_with(['/', '\\'])
-    {
-        return false;
-    }
-    // `^[a-z]:`（不区分大小写）被当作盘符前缀拒绝。
-    if let Some(prefix) = value.get(..2) {
-        let is_drive = prefix.ends_with(':')
-            && prefix
-                .chars()
-                .next()
-                .is_some_and(|first| first.to_lowercase().any(|lower| lower.is_ascii_lowercase()));
-        if is_drive {
-            return false;
-        }
-    }
-    !value
-        .split(['/', '\\'])
-        .any(|part| matches!(part, "" | "." | ".."))
-}
-
-/// 运行桌面端的平台，对应服务端的 `platformSchema`。
+/// 运行桌面端的平台。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Platform {
-    Win32,
-    Darwin,
+    Windows,
+    Macos,
     Linux,
 }
 
 impl Platform {
     pub fn as_str(self) -> &'static str {
         match self {
-            Self::Win32 => "win32",
-            Self::Darwin => "darwin",
+            Self::Windows => "windows",
+            Self::Macos => "macos",
             Self::Linux => "linux",
         }
     }
@@ -93,17 +64,70 @@ impl Platform {
     /// 当前编译目标对应的平台。
     pub const fn current() -> Self {
         if cfg!(target_os = "windows") {
-            Self::Win32
+            Self::Windows
         } else if cfg!(target_os = "macos") {
-            Self::Darwin
+            Self::Macos
         } else {
             Self::Linux
         }
     }
 }
 
+/// 一个时间点。线上是 UTC 的 RFC 3339 字符串，精确到毫秒。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct Timestamp(DateTime<Utc>);
+
+impl Timestamp {
+    pub fn now() -> Self {
+        Self(Utc::now())
+    }
+
+    /// 从 Unix 纪元起的毫秒数；超出可表示范围时为 `None`。
+    pub fn from_millis(millis: i64) -> Option<Self> {
+        DateTime::from_timestamp_millis(millis).map(Self)
+    }
+
+    /// 从 Unix 纪元起的毫秒数。
+    pub fn as_millis(self) -> i64 {
+        self.0.timestamp_millis()
+    }
+
+    /// 比另一个时间点晚多久；对方更晚时为零。
+    pub fn elapsed_since(self, earlier: Self) -> Duration {
+        self.0
+            .signed_duration_since(earlier.0)
+            .to_std()
+            .unwrap_or_default()
+    }
+}
+
+impl Add<Duration> for Timestamp {
+    type Output = Self;
+
+    fn add(self, duration: Duration) -> Self::Output {
+        Self(self.0 + chrono::Duration::from_std(duration).unwrap_or(chrono::Duration::MAX))
+    }
+}
+
+impl Serialize for Timestamp {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(&self.0.to_rfc3339_opts(SecondsFormat::Millis, true))
+    }
+}
+
+impl<'de> Deserialize<'de> for Timestamp {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        // 借得到就借，借不到（比如从 `Value` 里读）再复制一份。
+        let text = Cow::<str>::deserialize(deserializer)?;
+        let parsed = DateTime::parse_from_rfc3339(&text).map_err(serde::de::Error::custom)?;
+        Ok(Self(parsed.with_timezone(&Utc)))
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    use serde_json::json;
+
     use super::*;
 
     #[test]
@@ -137,33 +161,17 @@ mod tests {
 
     #[test]
     fn text_must_be_non_blank_and_bounded() {
-        assert!(is_text("标题", TEXT_MAX_UNITS));
-        assert!(!is_text("   ", TEXT_MAX_UNITS));
-        assert!(!is_text(&"a".repeat(TEXT_MAX_UNITS + 1), TEXT_MAX_UNITS));
+        assert!(is_text("标题", 1_000));
+        assert!(!is_text("   ", 1_000));
+        assert!(!is_text(&"a".repeat(1_001), 1_000));
         assert!(!is_text("备注", 0));
     }
 
     #[test]
-    fn relative_path_rejects_escapes_and_drive_prefixes() {
-        assert!(is_safe_relative_path("a/b.txt"));
-        assert!(is_safe_relative_path("a\\b.txt"));
-        assert!(!is_safe_relative_path(""));
-        assert!(!is_safe_relative_path("/etc/passwd"));
-        assert!(!is_safe_relative_path("\\\\server\\share"));
-        assert!(!is_safe_relative_path("C:/Windows"));
-        assert!(!is_safe_relative_path("c:relative"));
-        assert!(!is_safe_relative_path("a/../b"));
-        assert!(!is_safe_relative_path("./a"));
-        assert!(!is_safe_relative_path("a//b"));
-        assert!(!is_safe_relative_path("a/b/"));
-        assert!(!is_safe_relative_path("a\0b"));
-    }
-
-    #[test]
-    fn platform_round_trips_with_server_spelling() {
+    fn platform_round_trips_with_its_spelling() {
         for (platform, spelling) in [
-            (Platform::Win32, "\"win32\""),
-            (Platform::Darwin, "\"darwin\""),
+            (Platform::Windows, "\"windows\""),
+            (Platform::Macos, "\"macos\""),
             (Platform::Linux, "\"linux\""),
         ] {
             assert_eq!(serde_json::to_string(&platform).unwrap(), spelling);
@@ -173,5 +181,39 @@ mod tests {
                 platform
             );
         }
+    }
+
+    #[test]
+    fn timestamps_travel_as_utc_rfc3339_with_milliseconds() {
+        let at = Timestamp::from_millis(1_794_400_000_123).unwrap();
+        assert_eq!(at.as_millis(), 1_794_400_000_123);
+        assert_eq!(
+            serde_json::to_value(at).unwrap(),
+            json!("2026-11-11T12:26:40.123Z")
+        );
+        // 带时区偏移的写法读进来之后换算成 UTC。
+        let parsed: Timestamp =
+            serde_json::from_value(json!("2026-11-11T20:26:40.123+08:00")).unwrap();
+        assert_eq!(parsed, at);
+        for rejected in [
+            json!("2026-11-11T12:26:40"),
+            json!(1_794_400_000_123_i64),
+            json!("yesterday"),
+        ] {
+            assert!(serde_json::from_value::<Timestamp>(rejected).is_err());
+        }
+        assert!(Timestamp::from_millis(i64::MAX).is_none());
+    }
+
+    #[test]
+    fn timestamps_add_durations_and_measure_elapsed_time() {
+        let at = Timestamp::from_millis(1_794_400_000_000).unwrap();
+        let later = at + Duration::from_millis(86_400_000);
+        assert_eq!(later.as_millis() - at.as_millis(), 86_400_000);
+        assert_eq!(later.elapsed_since(at), Duration::from_millis(86_400_000));
+        // 对方更晚时为零，不出负数。
+        assert_eq!(at.elapsed_since(later), Duration::ZERO);
+        assert!(later > at);
+        assert!(Timestamp::now() > at);
     }
 }

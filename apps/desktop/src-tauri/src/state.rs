@@ -4,8 +4,9 @@
 
 use std::sync::{Arc, Mutex, PoisonError};
 
-use assemble_client::JarvisClient;
-use assemble_protocol::auth::Account;
+use assemble_client::Client;
+use assemble_protocol::account::Account;
+use assemble_protocol::device::Device;
 use assemble_store::secret::{SecretKey, SecretStore, SecretString};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager};
@@ -78,6 +79,26 @@ impl From<&Account> for AccountView {
     }
 }
 
+/// 界面上显示的设备信息：这台安装在本账户里的身份。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeviceView {
+    pub id: String,
+    pub name: String,
+    /// `windows`、`macos` 或 `linux`。
+    pub platform: String,
+}
+
+impl From<&Device> for DeviceView {
+    fn from(device: &Device) -> Self {
+        Self {
+            id: device.id.clone(),
+            name: device.name.clone(),
+            platform: device.platform.as_str().to_owned(),
+        }
+    }
+}
+
 /// 会话所处的阶段。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "phase", rename_all = "camelCase")]
@@ -87,6 +108,7 @@ pub enum SessionView {
     SigningIn,
     SignedIn {
         account: AccountView,
+        device: DeviceView,
     },
 }
 
@@ -154,17 +176,26 @@ pub enum SessionStoreError {
     Rejected,
 }
 
-/// 保存在系统钥匙串里的设备会话。
+/// 保存在系统钥匙串里的设备令牌与它对应的公开信息。
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct StoredSession {
     token: String,
     account: Account,
+    device: Device,
+}
+
+/// 钥匙串里取出来的一整套会话。令牌只以 [`SecretString`] 的形式存在。
+#[derive(Debug, Clone)]
+pub struct Stored {
+    pub token: SecretString,
+    pub account: Account,
+    pub device: Device,
 }
 
 pub struct AppState {
     app: AppHandle,
-    pub client: JarvisClient,
+    pub client: Client,
     /// 系统钥匙串。不可用时为 `None`，此时拒绝登录，而不是把凭据放在别处。
     secrets: Option<Arc<dyn SecretStore>>,
     stored_session_key: SecretKey,
@@ -182,16 +213,13 @@ struct Inner {
 }
 
 impl AppState {
-    pub fn new(
-        app: AppHandle,
-        client: JarvisClient,
-        secrets: Option<Arc<dyn SecretStore>>,
-    ) -> Self {
-        let origin = client.deployment().api.as_str().to_owned();
+    pub fn new(app: AppHandle, client: Client, secrets: Option<Arc<dyn SecretStore>>) -> Self {
+        let origin = client.origin().as_str().to_owned();
         Self {
             app,
             client,
             secrets,
+            // 条目名按服务来源区分：换一个服务端就是另一套登录状态。
             stored_session_key: SecretKey::new(
                 format!("assemble.device-session:{origin}"),
                 "current",
@@ -245,10 +273,6 @@ impl AppState {
         self.with(|inner| inner.service.reachable = Some(reachable));
     }
 
-    pub fn session(&self) -> SessionView {
-        self.with(|inner| inner.session.clone())
-    }
-
     pub fn set_notice(&self, notice: Option<Notice>) {
         self.with(|inner| inner.notice = notice);
     }
@@ -289,8 +313,8 @@ impl AppState {
         });
     }
 
-    /// 取出保存过的设备会话；没有保存过时为 `None`。
-    pub fn stored_session(&self) -> Result<Option<(SecretString, Account)>, SessionStoreError> {
+    /// 取出保存过的会话；没有保存过时为 `None`。
+    pub fn stored_session(&self) -> Result<Option<Stored>, SessionStoreError> {
         let Some(secrets) = &self.secrets else {
             return Err(SessionStoreError::Unavailable);
         };
@@ -302,21 +326,22 @@ impl AppState {
         };
         let document: StoredSession =
             serde_json::from_str(secret.expose()).map_err(|_| SessionStoreError::Unreadable)?;
-        Ok(Some((SecretString::new(document.token), document.account)))
+        Ok(Some(Stored {
+            token: SecretString::new(document.token),
+            account: document.account,
+            device: document.device,
+        }))
     }
 
-    pub fn store_session(
-        &self,
-        token: &SecretString,
-        account: &Account,
-    ) -> Result<(), SessionStoreError> {
+    pub fn store_session(&self, session: &Stored) -> Result<(), SessionStoreError> {
         let secrets = self
             .secrets
             .as_ref()
             .ok_or(SessionStoreError::Unavailable)?;
         let document = StoredSession {
-            token: token.expose().to_owned(),
-            account: account.clone(),
+            token: session.token.expose().to_owned(),
+            account: session.account.clone(),
+            device: session.device.clone(),
         };
         let encoded = SecretString::new(
             serde_json::to_string(&document).map_err(|_| SessionStoreError::Rejected)?,
@@ -382,5 +407,25 @@ mod tests {
             actual, expected,
             "the shell and the interface disagree about the state shape"
         );
+    }
+
+    #[test]
+    fn the_snapshot_never_carries_credentials() {
+        let text = SAMPLES;
+        for forbidden in ["token", "Bearer", "password", "cookie", "/Users/"] {
+            assert!(
+                !text.contains(forbidden),
+                "{forbidden} must not appear in samples"
+            );
+        }
+    }
+
+    #[test]
+    fn the_dev_build_target_and_the_unsupported_launch_state_follow_the_build_type() {
+        // 测试运行在调试构建里，所以这两条在调试构建下的取值是确定的。
+        assert_eq!(ServiceTarget::current(), ServiceTarget::Development);
+        assert!(!launch_at_login_supported());
+        assert_eq!(BACKGROUND_ARG, "--background");
+        assert_eq!(MAIN_WINDOW, "main");
     }
 }

@@ -1,0 +1,52 @@
+[package]
+name = "assemble-server"
+version.workspace = true
+edition.workspace = true
+# sqlx 0.9 要求 Rust 1.94；工作区其余部分声明的仍是 1.90，只有服务端需要更高的下限。
+rust-version = "1.94"
+publish.workspace = true
+description = "Assemble 服务端：账户、设备、云盘与文件中转"
+default-run = "assemble-server"
+
+[lib]
+name = "assemble_server"
+path = "src/lib.rs"
+
+[[bin]]
+name = "assemble-server"
+path = "src/main.rs"
+
+[dependencies]
+assemble-protocol.workspace = true
+assemble-transfer.workspace = true
+argon2.workspace = true
+axum.workspace = true
+axum-extra.workspace = true
+base64.workspace = true
+bytes.workspace = true
+chrono.workspace = true
+clap.workspace = true
+futures-core.workspace = true
+futures-util.workspace = true
+getrandom.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+sqlx.workspace = true
+subtle.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tokio-stream.workspace = true
+tokio-util.workspace = true
+tower.workspace = true
+tower-http.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+url.workspace = true
+
+[dev-dependencies]
+assemble-client.workspace = true
+tempfile.workspace = true
+
+[lints]
+workspace = true

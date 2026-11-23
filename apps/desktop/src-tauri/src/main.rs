@@ -2,5 +2,8 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 fn main() {
-    assemble_desktop_lib::run();
+    if let Err(error) = assemble_desktop_lib::run() {
+        eprintln!("Assemble could not start: {error}");
+        std::process::exit(1);
+    }
 }

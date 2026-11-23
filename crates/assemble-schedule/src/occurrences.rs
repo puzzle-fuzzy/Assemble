@@ -1,10 +1,14 @@
-//! 日程出现规则的推算，与云端 `schedule-occurrences.ts` 逐步对应。
+//! 日程出现规则的推算。
+//!
+//! 算法移植自 jarvis 的 `schedule-occurrences.ts`，并用同一批两万条用例对照过，
+//! 结果逐项一致；月重复的钳制规则不要轻易改动，否则界面显示的时间会和
+//! 实际提醒的时间对不上。
 //!
 //! 时间一律用毫秒时间戳。月重复遵循固定的北京时间业务日历（UTC+08:00，
 //! 不随夏令时变化）：先把时间戳整体平移八小时，在"平移后的日历"上做月份运算，
 //! 再平移回来。
 
-use assemble_protocol::resources::{Repeat, ScheduleData};
+use crate::model::{Repeat, ScheduleData};
 
 /// 一天的毫秒数。
 pub const DAY_MS: i64 = 86_400_000;
@@ -269,6 +273,7 @@ mod tests {
     use serde_json::json;
 
     use super::*;
+    use crate::model::ScheduleStatus;
 
     /// 北京时间某年某月某日某时对应的毫秒时间戳。用 chrono 独立算出期望值，
     /// 不依赖被测代码里的日历换算。
@@ -294,7 +299,7 @@ mod tests {
             end_at: None,
             repeat,
             repeat_until: repeat_until.map(iso),
-            status: assemble_protocol::resources::ScheduleStatus::Upcoming,
+            status: ScheduleStatus::Upcoming,
             notes: None,
         }
     }
@@ -579,23 +584,14 @@ mod tests {
 
     #[test]
     fn schedules_deserialise_from_the_wire_into_usable_rules() {
-        let record: assemble_protocol::resources::JarvisRecord = serde_json::from_value(json!({
-            "id": "schedule-1",
-            "resource": "schedules",
-            "version": 1,
-            "createdAt": "2026-11-23T00:00:00.000Z",
-            "updatedAt": "2026-11-23T00:00:00.000Z",
-            "data": {
-                "title": "周会",
-                "startAt": "2026-11-02T10:00:00.000+08:00",
-                "repeat": "weekly",
-                "status": "upcoming"
-            }
+        let data: ScheduleData = serde_json::from_value(json!({
+            "title": "周会",
+            "startAt": "2026-11-02T10:00:00.000+08:00",
+            "repeat": "weekly",
+            "status": "upcoming",
+            "futureField": 1
         }))
         .unwrap();
-        let assemble_protocol::resources::ResourceData::Schedules(data) = record.data else {
-            panic!("expected a schedule");
-        };
         let rule = Recurrence::from_schedule(&data).unwrap();
         assert_eq!(rule.repeat, Repeat::Weekly);
         assert_eq!(rule.repeat_until, None);

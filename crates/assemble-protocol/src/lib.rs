@@ -1,21 +1,26 @@
-//! Jarvis 线上契约在桌面端的 Rust 映射。
+//! Assemble 服务端与桌面端之间的线上契约。
 //!
-//! 这里只放类型与纯校验，不做任何 I/O。字段名、取值范围和默认值与
-//! `jarvis/packages/jarvis-contracts` 的 zod 定义一一对应。
+//! 这里只放类型与纯校验，不做任何 I/O。服务端（`apps/server`）用它解析请求、
+//! 生成应答；桌面端（`assemble-client`）用同一份类型发请求、读应答。
+//! 两边对着同一份类型编译，线上格式就不会各说各话。
 //!
-//! 服务端对入参使用 strictObject，所以序列化时值为 `None` 的可选字段一律省略；
-//! 反序列化则接受未知字段，服务端新增字段不会让旧客户端失效。
+//! 约定：
+//!
+//! - 字段名一律 camelCase，查询参数也是；
+//! - 时间一律是 UTC 的 RFC 3339，精确到毫秒，例如 `2026-11-24T01:26:55.123Z`；
+//! - 序列化时值为 `None` 的可选字段省略，反序列化则接受未知字段——
+//!   服务端新增字段不会让旧桌面端失效。
 
 // 测试代码以可读性优先，不套用库代码的严格检查。
 #![cfg_attr(test, allow(clippy::pedantic))]
 
-pub mod auth;
-pub mod catalog;
-pub mod commands;
-pub mod desktop_login;
+pub mod account;
+pub mod device;
+pub mod drive;
 pub mod error;
-pub mod files;
-pub mod gateway;
+pub mod events;
 pub mod health;
+pub mod login;
+pub mod origin;
 pub mod primitives;
-pub mod resources;
+pub mod sends;
