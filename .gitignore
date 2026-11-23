@@ -1,0 +1,32 @@
+# Rust 构建产物
+/target/
+
+# Tauri 生成物（权限 schema 与移动端工程）
+apps/desktop/src-tauri/gen/
+
+# 依赖与前端产物
+node_modules/
+dist/
+
+# 本机环境与数据
+.env
+.env.*
+!.env.example
+data/local/
+data/runtime/
+*.local
+
+# 验证与测试产物
+.artifacts/
+coverage/
+test-results/
+playwright-report/
+*.tsbuildinfo
+*.log
+
+# 系统与编辑器
+.DS_Store
+.idea/
+
+# 会话工具生成的计划文件（按会话编号命名，不属于项目）
+.zcode/plans/

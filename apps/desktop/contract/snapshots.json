@@ -1,0 +1,46 @@
+[
+  {
+    "service": { "target": "development", "reachable": null },
+    "session": { "phase": "signedOut" },
+    "launchAtLogin": "unsupported",
+    "notice": null
+  },
+  {
+    "service": { "target": "production", "reachable": true },
+    "session": { "phase": "signingIn" },
+    "launchAtLogin": "disabled",
+    "notice": null
+  },
+  {
+    "service": { "target": "production", "reachable": true },
+    "session": {
+      "phase": "signedIn",
+      "account": {
+        "id": "3d1c0a5e-6cf4-4d3a-9a67-1f2f4c1f6f01",
+        "username": "example",
+        "displayName": "Example"
+      }
+    },
+    "launchAtLogin": "enabled",
+    "notice": null
+  },
+  {
+    "service": { "target": "production", "reachable": false },
+    "session": { "phase": "signedOut" },
+    "launchAtLogin": "unknown",
+    "notice": { "kind": "error", "message": "等待浏览器登录超时，请重试。" }
+  },
+  {
+    "service": { "target": "production", "reachable": true },
+    "session": {
+      "phase": "signedIn",
+      "account": {
+        "id": "account-1",
+        "username": "example",
+        "displayName": "Example"
+      }
+    },
+    "launchAtLogin": "enabled",
+    "notice": { "kind": "info", "message": "登录已失效，请重新登录。" }
+  }
+]

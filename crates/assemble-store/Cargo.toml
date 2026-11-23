@@ -1,0 +1,30 @@
+[package]
+name = "assemble-store"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+description = "本机状态与密钥存储：原子私有写入、分段隔离的系统钥匙串"
+
+[dependencies]
+assemble-protocol.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+tempfile.workspace = true
+thiserror.workspace = true
+zeroize.workspace = true
+
+# 只在 macOS 与 Windows 上接入系统钥匙串。`v1` 同时提供 `Entry` 接口并启用
+# 登录钥匙串后端与 Windows 凭据管理器后端；Linux 的 D-Bus 后端按平台不会进入构建。
+[target.'cfg(any(target_os = "macos", target_os = "windows"))'.dependencies]
+keyring = { version = "4.2.0", optional = true, default-features = false, features = [
+  "v1",
+] }
+
+[features]
+default = ["keyring"]
+keyring = ["dep:keyring"]
+
+[lints]
+workspace = true

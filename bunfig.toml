@@ -1,0 +1,7 @@
+[install]
+linker = "isolated"
+
+[test]
+timeout = 10000
+coverageDir = ".artifacts/coverage"
+preload = ["./apps/desktop/src/test-setup.ts"]

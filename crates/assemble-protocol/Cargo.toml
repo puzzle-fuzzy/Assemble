@@ -1,0 +1,14 @@
+[package]
+name = "assemble-protocol"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+description = "Jarvis 线上契约的 Rust 映射：资源、设备命令、文件、本机网关与桌面登录"
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+
+[lints]
+workspace = true

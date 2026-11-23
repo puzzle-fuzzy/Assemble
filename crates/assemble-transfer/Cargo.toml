@@ -1,0 +1,23 @@
+[package]
+name = "assemble-transfer"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+description = "传输原语：流式摘要、同目录暂存、校验后原子发布、绝不覆盖"
+
+[dependencies]
+assemble-protocol.workspace = true
+getrandom.workspace = true
+sha2.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
+tracing.workspace = true
+url.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[lints]
+workspace = true

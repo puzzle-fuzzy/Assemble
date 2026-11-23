@@ -1,0 +1,32 @@
+{
+  "name": "assemble",
+  "version": "0.1.0",
+  "private": true,
+  "packageManager": "bun@1.4.4",
+  "engines": {
+    "bun": ">=1.4.4"
+  },
+  "workspaces": [
+    "apps/*"
+  ],
+  "scripts": {
+    "dev": "bun run --filter @assemble/desktop dev",
+    "build": "bun run --filter @assemble/desktop build",
+    "typecheck": "bun run --filter @assemble/desktop typecheck && bun run typecheck:tools",
+    "typecheck:tools": "tsc --noEmit",
+    "test": "bun test",
+    "lint": "biome check .",
+    "format": "biome check --write .",
+    "icons": "bun scripts/release/generate-icons.ts",
+    "rust:fmt": "cargo fmt --all -- --check",
+    "rust:fmt:write": "cargo fmt --all",
+    "rust:clippy": "cargo clippy --workspace --all-targets -- -D warnings",
+    "rust:test": "cargo test --workspace",
+    "verify": "bun scripts/verify/run.ts"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.6.8",
+    "@types/bun": "1.4.4",
+    "typescript": "7.0.2"
+  }
+}
