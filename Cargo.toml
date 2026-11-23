@@ -41,6 +41,7 @@ futures-util = { version = "0.3", default-features = false, features = [
 getrandom = "0.4"
 mime_guess = "2.0.5"
 # system-proxy：公司网络里常有系统级代理设置，桌面端应当遵从它。
+rpassword = "7.5.5"
 reqwest = { version = "0.13.5", default-features = false, features = [
   "json",
   "query",
@@ -67,6 +68,8 @@ tauri-plugin-opener = "2.7.3"
 tauri-plugin-single-instance = "2.5.5"
 tempfile = "3.27.0"
 thiserror = "2.0.21"
+# cookie 的 Max-Age 用的是这个库的时长类型。
+time = "0.3.55"
 tokio = { version = "1.54.1", features = [
   "fs",
   "io-util",

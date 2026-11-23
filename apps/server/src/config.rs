@@ -85,12 +85,15 @@ impl Config {
         let addr = optional(ADDR, get(ADDR), |value| {
             value
                 .parse::<SocketAddr>()
-                .map_err(|error| error.to_string())
+                .map_err(|_| "要写成 地址:端口，例如 127.0.0.1:8787".to_owned())
         })?
         .unwrap_or_else(|| DEFAULT_ADDR.parse().expect("the default address is valid"));
         let data_dir = PathBuf::from(required(&get, DATA_DIR)?);
         let public_origin = optional(PUBLIC_ORIGIN, get(PUBLIC_ORIGIN), |value| {
-            ServerOrigin::parse(value).map_err(|error| error.to_string())
+            ServerOrigin::parse(value).map_err(|_| {
+                "必须是 HTTPS 地址（本机开发可以用 http://127.0.0.1:端口），不带路径、查询和用户信息"
+                    .to_owned()
+            })
         })?
         .ok_or(ConfigError::Missing {
             variable: PUBLIC_ORIGIN,
@@ -119,6 +122,26 @@ impl Config {
             send_history,
             web_session_ttl,
         })
+    }
+
+    /// 本地开发与测试用的配置：只监听回环地址的随机端口，其余取默认值。
+    pub fn development(data_dir: impl Into<PathBuf>) -> Self {
+        Self {
+            addr: "127.0.0.1:0".parse().expect("a loopback address parses"),
+            data_dir: data_dir.into(),
+            public_origin: ServerOrigin::development(),
+            drive_quota_bytes: DEFAULT_DRIVE_QUOTA_BYTES,
+            send_ttl: DEFAULT_SEND_TTL,
+            send_history: DEFAULT_SEND_HISTORY,
+            web_session_ttl: DEFAULT_WEB_SESSION_TTL,
+        }
+    }
+
+    /// 把对外地址换成指定的来源。测试里端口要到监听之后才知道。
+    #[must_use]
+    pub fn with_public_origin(mut self, origin: ServerOrigin) -> Self {
+        self.public_origin = origin;
+        self
     }
 }
 
@@ -150,14 +173,14 @@ fn optional<T>(
         .map_err(|reason| ConfigError::Invalid { variable, reason })
 }
 
-/// 一个落在区间内的整数。说明里不回显填进去的值。
+/// 一个落在区间内的整数。说明会原样出现在命令行上，所以用中文；不回显填进去的值。
 fn whole(min: u64, max: u64) -> impl Fn(&str) -> Result<u64, String> {
     move |value| {
         value
             .parse::<u64>()
             .ok()
             .filter(|number| (min..=max).contains(number))
-            .ok_or_else(|| format!("expected a whole number from {min} to {max}"))
+            .ok_or_else(|| format!("需要是 {min} 到 {max} 之间的整数"))
     }
 }
 

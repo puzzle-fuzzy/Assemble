@@ -18,6 +18,7 @@ path = "src/main.rs"
 
 [dependencies]
 assemble-protocol.workspace = true
+assemble-store.workspace = true
 assemble-transfer.workspace = true
 argon2.workspace = true
 axum.workspace = true
@@ -29,12 +30,14 @@ clap.workspace = true
 futures-core.workspace = true
 futures-util.workspace = true
 getrandom.workspace = true
+rpassword.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
 sqlx.workspace = true
 subtle.workspace = true
 thiserror.workspace = true
+time.workspace = true
 tokio.workspace = true
 tokio-stream.workspace = true
 tokio-util.workspace = true
@@ -46,6 +49,8 @@ url.workspace = true
 
 [dev-dependencies]
 assemble-client.workspace = true
+futures-util.workspace = true
+reqwest = { workspace = true, features = ["cookies", "form"] }
 tempfile.workspace = true
 
 [lints]

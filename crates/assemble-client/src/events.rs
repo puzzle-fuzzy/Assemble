@@ -139,6 +139,8 @@ impl Client {
         let response = tokio::select! {
             biased;
             () = cancel.cancelled() => return Ended::Cancelled,
+            // 没人收事件了：立刻收工，连接也随之中断，服务端据此把这台设备记成离线。
+            () = sender.closed() => return Ended::Cancelled,
             outcome = request.send() => match outcome {
                 Ok(response) => response,
                 Err(error) => {
@@ -183,6 +185,8 @@ impl Client {
             let chunk: Bytes = tokio::select! {
                 biased;
                 () = cancel.cancelled() => return Ended::Cancelled,
+                // 调用方丢掉了流：不必等到下一次要写事件时才发现。
+                () = sender.closed() => return Ended::Cancelled,
                 chunk = tokio::time::timeout(idle, futures_util::StreamExt::next(&mut stream)) => {
                     match chunk {
                         Ok(Some(Ok(bytes))) => bytes,

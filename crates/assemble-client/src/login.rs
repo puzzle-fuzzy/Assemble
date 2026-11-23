@@ -69,6 +69,8 @@ pub enum LoginError {
     TimedOut,
     #[error("a random login secret could not be generated")]
     RandomUnavailable,
+    #[error("the device name or platform is not acceptable to the server")]
+    InvalidDevice,
 }
 
 /// 一次登录请求：交给浏览器的东西，和只留在本机的校验器。
@@ -77,12 +79,20 @@ pub struct LoginRequest {
     redirect_uri: String,
     code_challenge: String,
     state: String,
+    device: NewDevice,
     verifier: SecretString,
 }
 
 impl LoginRequest {
-    /// 为一个回调地址生成新的请求。校验器与 state 各取 32 字节随机数。
-    pub fn generate(redirect_uri: impl Into<String>) -> Result<Self, LoginError> {
+    /// 为一台设备生成新的登录请求。校验器与 state 各取 32 字节随机数。
+    pub fn generate(
+        redirect_uri: impl Into<String>,
+        device: NewDevice,
+    ) -> Result<Self, LoginError> {
+        // 服务端不会接受不合法的设备信息，在这里先拦下，免得白开一次浏览器。
+        if !device.is_valid() {
+            return Err(LoginError::InvalidDevice);
+        }
         let verifier = random_proof()?;
         let state = random_proof()?;
         // S256：挑战是校验器的 SHA-256。
@@ -91,33 +101,35 @@ impl LoginRequest {
             redirect_uri: redirect_uri.into(),
             code_challenge,
             state,
+            device,
             verifier: SecretString::new(verifier),
         })
     }
 
-    /// 发给授权页的三个字段。
+    /// 发给授权页的内容。设备信息只用于在确认页上显示是哪台机器。
     pub fn authorization_request(&self) -> AuthorizationRequest {
         AuthorizationRequest {
             redirect_uri: self.redirect_uri.clone(),
             code_challenge: self.code_challenge.clone(),
             state: self.state.clone(),
+            device: self.device.clone(),
         }
     }
 
     /// 授权页地址里携带的请求：JSON 的 base64url 编码。
     pub fn encoded_request(&self) -> String {
-        // 三个普通字符串字段的序列化不会失败。
+        // 几个普通字段的序列化不会失败。
         let json = serde_json::to_vec(&self.authorization_request()).unwrap_or_default();
         URL_SAFE_NO_PAD.encode(json)
     }
 
-    /// 用收回的授权码组装换码请求。换码的同时注册这台设备。
-    pub fn exchange_input(&self, code: String, device: NewDevice) -> ExchangeInput {
+    /// 用收回的授权码组装换码请求。注册的就是授权页上显示的那台设备。
+    pub fn exchange_input(&self, code: String) -> ExchangeInput {
         ExchangeInput {
             code,
             code_verifier: self.verifier.expose().to_owned(),
             redirect_uri: self.redirect_uri.clone(),
-            device,
+            device: self.device.clone(),
         }
     }
 }
@@ -327,6 +339,13 @@ mod tests {
 
     const CODE: &str = "abcdefghijklmnopqrstuvwxyz0123456789-_ABCDE";
 
+    fn macbook() -> NewDevice {
+        NewDevice {
+            name: "MacBook".into(),
+            platform: Platform::Macos,
+        }
+    }
+
     struct Running {
         host: String,
         state: String,
@@ -338,7 +357,7 @@ mod tests {
     async fn start(deadline: Duration) -> Running {
         let cancel = CancellationToken::new();
         let listener = LoginListener::bind().await.unwrap();
-        let request = LoginRequest::generate(listener.redirect_uri()).unwrap();
+        let request = LoginRequest::generate(listener.redirect_uri(), macbook()).unwrap();
         let state = request.state.clone();
         let host = listener.host.clone();
         let task_cancel = cancel.clone();
@@ -386,8 +405,8 @@ mod tests {
     }
 
     #[test]
-    fn a_login_request_carries_matching_challenge_verifier_and_state() {
-        let request = LoginRequest::generate("http://127.0.0.1:54321/callback").unwrap();
+    fn a_login_request_carries_matching_challenge_verifier_state_and_device() {
+        let request = LoginRequest::generate("http://127.0.0.1:54321/callback", macbook()).unwrap();
         let input = request.authorization_request();
         assert!(input.is_valid());
         assert!(is_proof(&input.code_challenge));
@@ -395,38 +414,47 @@ mod tests {
         assert_ne!(input.code_challenge, request.state);
         assert_eq!(input.redirect_uri, "http://127.0.0.1:54321/callback");
         assert_eq!(request.redirect_uri, "http://127.0.0.1:54321/callback");
+        assert_eq!(input.device, macbook());
 
         // S256：挑战等于校验器的 SHA-256。
-        let exchange = request.exchange_input(
-            "c".repeat(43),
-            NewDevice {
-                name: "MacBook".into(),
-                platform: Platform::Macos,
-            },
-        );
+        let exchange = request.exchange_input("c".repeat(43));
         assert_eq!(
             input.code_challenge,
             URL_SAFE_NO_PAD.encode(Sha256::digest(exchange.code_verifier.as_bytes()))
         );
         assert!(exchange.is_valid());
         assert_eq!(exchange.redirect_uri, "http://127.0.0.1:54321/callback");
+        // 换码时注册的就是授权页上显示的那台设备。
+        assert_eq!(exchange.device, input.device);
 
-        // 授权页地址里的请求能原样解码回来。
+        // 授权页地址里的请求能原样解码回来，带着设备。
         let decoded: serde_json::Value =
             serde_json::from_slice(&URL_SAFE_NO_PAD.decode(request.encoded_request()).unwrap())
                 .unwrap();
         assert_eq!(decoded["redirectUri"], "http://127.0.0.1:54321/callback");
         assert_eq!(decoded["codeChallenge"], input.code_challenge);
         assert_eq!(decoded["state"], input.state);
+        assert_eq!(decoded["device"]["name"], "MacBook");
+        assert_eq!(decoded["device"]["platform"], "macos");
 
         // 每次生成的值都不一样。
-        let other = LoginRequest::generate("http://127.0.0.1:54321/callback").unwrap();
+        let other = LoginRequest::generate("http://127.0.0.1:54321/callback", macbook()).unwrap();
         assert_ne!(other.state, request.state);
         assert_ne!(
-            other
-                .exchange_input(String::new(), exchange.device.clone())
-                .code_verifier,
+            other.exchange_input(String::new()).code_verifier,
             exchange.code_verifier
+        );
+    }
+
+    #[test]
+    fn a_request_for_an_unacceptable_device_is_refused_before_a_browser_opens() {
+        let blank = NewDevice {
+            name: "   ".into(),
+            platform: Platform::Windows,
+        };
+        assert_eq!(
+            LoginRequest::generate("http://127.0.0.1:54321/callback", blank).unwrap_err(),
+            LoginError::InvalidDevice
         );
     }
 
@@ -590,7 +618,7 @@ mod tests {
     #[tokio::test]
     async fn a_cancelled_wait_returns_before_listening_for_long() {
         let listener = LoginListener::bind().await.unwrap();
-        let request = LoginRequest::generate(listener.redirect_uri()).unwrap();
+        let request = LoginRequest::generate(listener.redirect_uri(), macbook()).unwrap();
         let cancel = CancellationToken::new();
         cancel.cancel();
         let outcome = listener

@@ -6,13 +6,27 @@
 // 测试代码以可读性优先，不套用库代码的严格检查。
 #![cfg_attr(test, allow(clippy::pedantic))]
 
+pub mod accounts;
+pub mod audit;
+pub mod auth;
 pub mod config;
 pub mod db;
+pub mod desktop_login;
+pub mod devices;
+pub mod error;
+pub mod events;
 pub mod http;
+pub mod presence;
+pub mod secrets;
+pub mod templates;
+pub mod web;
+
+use std::io::BufRead;
 
 use sqlx::SqlitePool;
 use tokio_util::sync::CancellationToken;
 
+pub use assemble_store::secret::SecretString;
 pub use config::Config;
 
 #[derive(Debug, thiserror::Error)]
@@ -25,7 +39,7 @@ pub enum StartupError {
     Serve(#[from] http::ServeError),
 }
 
-/// 读取配置并打开数据库。两个子命令共用的准备步骤。
+/// 读取配置并打开数据库。所有子命令共用的准备步骤。
 pub async fn load() -> Result<(Config, SqlitePool), StartupError> {
     let config = Config::from_env()?;
     let pool = db::open(&config.data_dir).await?;
@@ -40,9 +54,14 @@ pub async fn run_server() -> Result<(), StartupError> {
         origin = %config.public_origin,
         "starting Assemble server"
     );
+    // 重启之后没有任何设备连着：先把它们都记成"离线到现在"。
+    devices::mark_all_offline(&pool)
+        .await
+        .map_err(db::DbError::from)?;
+    let state = std::sync::Arc::new(http::AppState::new(pool, config));
     let stop = CancellationToken::new();
     watch_for_shutdown(stop.clone());
-    http::serve(config, pool, stop).await?;
+    http::serve((*state.config).clone(), state, stop).await?;
     tracing::info!("server stopped");
     Ok(())
 }
@@ -105,4 +124,139 @@ pub async fn check_config() -> Result<String, StartupError> {
         config.drive_quota_bytes,
         accounts
     ))
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum CreateAccountError {
+    #[error(transparent)]
+    Startup(#[from] StartupError),
+    #[error(transparent)]
+    Password(#[from] PasswordError),
+    #[error(transparent)]
+    Account(#[from] accounts::CreateAccountError),
+}
+
+/// `create-account`：建一个账户。密码从终端或标准输入读，绝不作为参数传入。
+pub async fn create_account(
+    username: &str,
+    display_name: Option<&str>,
+    password: SecretString,
+) -> Result<accounts::AccountRow, CreateAccountError> {
+    // 用户名先校验再连库、再读密码：拼错了不该让人白输一遍密码。
+    let username =
+        accounts::normalize_username(username).map_err(accounts::CreateAccountError::Username)?;
+    let (_config, pool) = load().await?;
+    let account =
+        accounts::create(&pool, &username, display_name.unwrap_or_default(), password).await?;
+    audit::record(
+        &pool,
+        Some(&account.id),
+        None,
+        audit::actions::ACCOUNT_CREATED,
+        None,
+    )
+    .await;
+    pool.close().await;
+    Ok(account)
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum PasswordError {
+    #[error("the password could not be read: {0}")]
+    Io(std::io::Error),
+    #[error("the two passwords did not match")]
+    Mismatch,
+    #[error("no password was provided on standard input")]
+    Missing,
+    #[error("the password is too long")]
+    TooLong,
+}
+
+/// 密码的长度上限（字符）。正常密码远不到这个数，超出多半是管道接错了。
+pub const PASSWORD_MAX_CHARS: usize = 1024;
+
+/// 从终端读两遍密码（不回显），两遍必须一致。
+pub fn prompt_password(
+    first: impl FnOnce() -> std::io::Result<String>,
+    second: impl FnOnce() -> std::io::Result<String>,
+) -> Result<SecretString, PasswordError> {
+    let first = first().map_err(PasswordError::Io)?;
+    let second = second().map_err(PasswordError::Io)?;
+    if first != second {
+        return Err(PasswordError::Mismatch);
+    }
+    checked(first)
+}
+
+/// 从一行输入读密码（脚本或管道）。只取第一行，行尾的换行符不算密码的一部分。
+pub fn piped_password(input: &mut impl BufRead) -> Result<SecretString, PasswordError> {
+    let mut line = String::new();
+    input.read_line(&mut line).map_err(PasswordError::Io)?;
+    // 只去掉行尾的换行：密码前后的空格是有意输入的。
+    let line = line.strip_suffix('\n').unwrap_or(&line);
+    let line = line.strip_suffix('\r').unwrap_or(line);
+    checked(line.to_owned())
+}
+
+fn checked(password: String) -> Result<SecretString, PasswordError> {
+    if password.is_empty() {
+        return Err(PasswordError::Missing);
+    }
+    if password.chars().count() > PASSWORD_MAX_CHARS {
+        return Err(PasswordError::TooLong);
+    }
+    Ok(SecretString::new(password))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_piped_password_is_one_line_without_its_line_ending() {
+        let mut input = &b"correct horse\nignored second line\n"[..];
+        assert_eq!(
+            piped_password(&mut input).unwrap().expose(),
+            "correct horse"
+        );
+        let mut crlf = &b"with-crlf\r\n"[..];
+        assert_eq!(piped_password(&mut crlf).unwrap().expose(), "with-crlf");
+        // 行尾的空格是密码的一部分。
+        let mut padded = &b"padded \n"[..];
+        assert_eq!(piped_password(&mut padded).unwrap().expose(), "padded ");
+        let mut blank = &b"\n"[..];
+        assert!(matches!(
+            piped_password(&mut blank),
+            Err(PasswordError::Missing)
+        ));
+        let mut empty = &b""[..];
+        assert!(matches!(
+            piped_password(&mut empty),
+            Err(PasswordError::Missing)
+        ));
+        let huge = format!("{}\n", "x".repeat(PASSWORD_MAX_CHARS + 1)).into_bytes();
+        let mut reader = huge.as_slice();
+        assert!(matches!(
+            piped_password(&mut reader),
+            Err(PasswordError::TooLong)
+        ));
+    }
+
+    #[test]
+    fn the_interactive_prompt_requires_two_matching_entries() {
+        let password = prompt_password(|| Ok("same".into()), || Ok("same".into())).unwrap();
+        assert_eq!(password.expose(), "same");
+        assert!(matches!(
+            prompt_password(|| Ok("one".into()), || Ok("two".into())),
+            Err(PasswordError::Mismatch)
+        ));
+        assert!(matches!(
+            prompt_password(|| Ok("x".into()), || Err(std::io::Error::other("closed"))),
+            Err(PasswordError::Io(_))
+        ));
+        assert!(matches!(
+            prompt_password(|| Ok(String::new()), || Ok(String::new())),
+            Err(PasswordError::Missing)
+        ));
+    }
 }

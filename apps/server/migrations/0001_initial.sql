@@ -37,14 +37,12 @@ CREATE TABLE devices (
 
 CREATE INDEX devices_account ON devices(account_id);
 
--- 桌面登录时签发的单次授权码，60 秒内有效。
+-- 桌面登录时签发的单次授权码，60 秒内有效，只能用一次。
 CREATE TABLE desktop_auth_codes (
     code_hash       TEXT PRIMARY KEY,
     account_id      TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
     redirect_uri    TEXT NOT NULL,
     code_challenge  TEXT NOT NULL,
-    device_name     TEXT NOT NULL,
-    device_platform TEXT NOT NULL,
     expires_at      INTEGER NOT NULL,
     used_at         INTEGER
 ) STRICT;

@@ -51,21 +51,26 @@ pub fn is_desktop_redirect_uri(value: &str) -> bool {
         && port.parse::<u16>().is_ok()
 }
 
-/// 发给授权页的请求：回调地址、S256 挑战与 state。
+/// 发给授权页的请求：回调地址、S256 挑战、state，以及想登录的那台设备。
+///
+/// 设备信息只用来在确认页上告诉用户"是哪台机器在请求登录"；
+/// 真正注册的是 [`ExchangeInput::device`]。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AuthorizationRequest {
     pub redirect_uri: String,
     pub code_challenge: String,
     pub state: String,
+    pub device: NewDevice,
 }
 
 impl AuthorizationRequest {
-    /// 三个字段的形式都正确，才值得让浏览器打开它。
+    /// 每个字段的形式都正确，才值得让浏览器打开它。
     pub fn is_valid(&self) -> bool {
         is_desktop_redirect_uri(&self.redirect_uri)
             && is_proof(&self.code_challenge)
             && is_proof(&self.state)
+            && self.device.is_valid()
     }
 }
 
@@ -158,12 +163,20 @@ mod tests {
         }
     }
 
+    fn macbook() -> NewDevice {
+        NewDevice {
+            name: "MacBook".into(),
+            platform: Platform::Macos,
+        }
+    }
+
     #[test]
     fn authorization_request_validates_every_field() {
         let request = AuthorizationRequest {
             redirect_uri: "http://127.0.0.1:54321/callback".into(),
             code_challenge: PROOF.into(),
             state: PROOF.into(),
+            device: macbook(),
         };
         assert!(request.is_valid());
         assert_eq!(
@@ -171,12 +184,23 @@ mod tests {
             json!({
                 "redirectUri": "http://127.0.0.1:54321/callback",
                 "codeChallenge": PROOF,
-                "state": PROOF
+                "state": PROOF,
+                "device": { "name": "MacBook", "platform": "macos" }
             })
         );
         assert!(
             !AuthorizationRequest {
                 state: "short".into(),
+                ..request.clone()
+            }
+            .is_valid()
+        );
+        assert!(
+            !AuthorizationRequest {
+                device: NewDevice {
+                    name: " ".into(),
+                    ..macbook()
+                },
                 ..request.clone()
             }
             .is_valid()
@@ -196,10 +220,7 @@ mod tests {
             code: PROOF.into(),
             code_verifier: PROOF.into(),
             redirect_uri: "http://127.0.0.1:54321/callback".into(),
-            device: NewDevice {
-                name: "MacBook".into(),
-                platform: Platform::Macos,
-            },
+            device: macbook(),
         };
         assert!(input.is_valid());
         assert_eq!(

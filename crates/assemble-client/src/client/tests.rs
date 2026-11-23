@@ -1218,6 +1218,79 @@ async fn an_expired_session_ends_the_event_stream() {
     assert!(matches!(ended, Ok(None)), "{ended:?}");
 }
 
+/// 一段发完一条就挂住的流。被丢弃时记一笔，用来观察服务端何时发现对端走了。
+struct Watched {
+    drops: Arc<AtomicUsize>,
+    sent: bool,
+    chunk: &'static str,
+}
+
+impl futures_core::Stream for Watched {
+    type Item = Result<Bytes, std::io::Error>;
+
+    fn poll_next(
+        mut self: Pin<&mut Self>,
+        _cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Option<Self::Item>> {
+        if self.sent {
+            return std::task::Poll::Pending;
+        }
+        self.sent = true;
+        std::task::Poll::Ready(Some(Ok(Bytes::from_static(self.chunk.as_bytes()))))
+    }
+}
+
+impl Drop for Watched {
+    fn drop(&mut self) {
+        self.drops.fetch_add(1, Ordering::SeqCst);
+    }
+}
+
+#[tokio::test]
+async fn dropping_the_stream_closes_the_connection_without_waiting_for_another_event() {
+    // 服务端靠"连接还在不在"判断一台设备在不在线。调用方丢掉流之后，
+    // 连接必须马上断，而不是等到下一次有事件要写、或者超时才断。
+    let drops = Arc::new(AtomicUsize::new(0));
+    let watched = Arc::clone(&drops);
+    let server = Server::start(with(move |_: Captured| {
+        let stream = Watched {
+            drops: Arc::clone(&watched),
+            sent: false,
+            chunk: HELLO,
+        };
+        (
+            [(header::CONTENT_TYPE, "text/event-stream")],
+            Body::from_stream(stream),
+        )
+            .into_response()
+    }))
+    .await;
+    let client = server.client();
+    client.set_bearer(Some(SecretString::new("device-token")));
+
+    let mut stream = client.events_with(CancellationToken::new(), Duration::from_secs(30));
+    let hello = tokio::time::timeout(Duration::from_secs(5), stream.next())
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+    assert_eq!(hello.kind(), "hello");
+    assert_eq!(drops.load(Ordering::SeqCst), 0);
+
+    drop(stream);
+    tokio::time::timeout(Duration::from_secs(3), async {
+        while drops.load(Ordering::SeqCst) == 0 {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("the server should notice the closed connection right away");
+
+    // 没人在听了，也就不会再重连。
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    assert_eq!(server.received(), 1);
+}
+
 #[tokio::test]
 async fn cancelling_ends_the_event_stream_and_the_connection() {
     let connections = Arc::new(AtomicUsize::new(0));

@@ -283,14 +283,21 @@ fn notice_for(error: &SessionError) -> Option<Notice> {
         }
         SessionError::Rejected(_) => Some(Notice::error("登录没有通过，请重试。")),
         SessionError::Unreachable(_) => Some(Notice::error("暂时连不上服务，请检查网络后重试。")),
-        SessionError::Callback(LoginError::Bind | LoginError::RandomUnavailable)
+        SessionError::Callback(
+            LoginError::Bind | LoginError::InvalidDevice | LoginError::RandomUnavailable,
+        )
         | SessionError::NotSaved => Some(Notice::error("登录没有完成，请重试。")),
     }
 }
 
 async fn login(state: &AppState, attempt: &CancellationToken) -> Result<(), SessionError> {
     let listener = LoginListener::bind().await?;
-    let request = LoginRequest::generate(listener.redirect_uri())?;
+    // 授权页上显示的、以及最终注册的，都是这台设备。
+    let device = NewDevice {
+        name: default_device_name(),
+        platform: Platform::current(),
+    };
+    let request = LoginRequest::generate(listener.redirect_uri(), device)?;
     let url = state
         .client
         .origin()
@@ -305,14 +312,12 @@ async fn login(state: &AppState, attempt: &CancellationToken) -> Result<(), Sess
         .wait(&request, WaitOptions::new(attempt, LOGIN_DEADLINE))
         .await?;
 
-    let device = NewDevice {
-        name: default_device_name(),
-        platform: Platform::current(),
-    };
-    let exchange = request.exchange_input(code, device);
     let (response, token) = state
         .client
-        .exchange(&exchange, &options(attempt, REQUEST_TIMEOUT))
+        .exchange(
+            &request.exchange_input(code),
+            &options(attempt, REQUEST_TIMEOUT),
+        )
         .await
         .map_err(classify)?;
 
