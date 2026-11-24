@@ -33,10 +33,13 @@ use crate::error::ApiError;
 use crate::events::{Hub, Message};
 use crate::http::Shared;
 
-/// 名单里保留最近多少毫秒之内改动过的记录：七天。
+/// 名单里"最近"的边界：七天。
 ///
-/// 刚标完成、刚取消的那一条不会当场从名单里消失：接口上按标识还取得到，日程也还能改回
-/// 进行中。桌面端的界面目前只摆还在进行中的，不给撤回的入口（所以那里的取消要先确认）。
+/// 名单不是"这个账户的全部记录"，是"还用得上的那一些"：还可能再提醒的，加上最近七天里
+/// 动过的（刚完成、刚取消、刚到点还没人处理的，以及没读的通知）。这样它才不会随着时间
+/// 只增不减——到了条数的上限，按时间排在前面的旧记录会先把新的挤出去。
+/// 刚标完成、刚取消的那一条不会当场消失：接口上按标识还取得到，日程也还能改回进行中。
+/// 桌面端的界面目前只摆还在进行中的，不给撤回的入口（所以那里的取消要先确认）。
 pub const RECENT_MILLIS: i64 = 7 * 24 * 60 * 60 * 1000;
 
 /// 每一类名单最多返回多少条。
@@ -61,23 +64,32 @@ pub async fn planner_of(
     now: Timestamp,
 ) -> Result<Planner, sqlx::Error> {
     let since = now.as_millis() - RECENT_MILLIS;
+    // 还可能再提醒的日程：一次性的，是最近七天里开始的；重复的，还没有停下来
+    // （或者刚停不到七天）。早就过去的一次性日程状态一直停在"进行中"，却再也不会提醒。
     let schedules: Vec<schedules::ScheduleRow> = sqlx::query_as(
         "SELECT * FROM schedules \
-         WHERE account_id = ? AND (status = 'upcoming' OR updated_at >= ?) \
+         WHERE account_id = ? AND ( \
+           (status = 'upcoming' AND (start_at >= ? \
+             OR (repeat != 'none' AND (repeat_until IS NULL OR repeat_until >= ?)))) \
+           OR (status != 'upcoming' AND updated_at >= ?)) \
          ORDER BY start_at, rowid LIMIT ?",
     )
     .bind(account_id)
     .bind(since)
+    .bind(since)
+    .bind(since)
     .bind(LISTING_LIMIT)
     .fetch_all(pool)
     .await?;
+    // 到点之后一直没人处理的提醒，和它的通知一样只留七天；还没到点的一直留着。
     let reminders: Vec<reminders::ReminderRow> = sqlx::query_as(
         "SELECT * FROM reminders \
          WHERE account_id = ? \
-         AND (status IN ('scheduled', 'fired') OR updated_at >= ?) \
+         AND (status = 'scheduled' OR (status = 'fired' AND due_at >= ?) OR updated_at >= ?) \
          ORDER BY due_at, rowid LIMIT ?",
     )
     .bind(account_id)
+    .bind(since)
     .bind(since)
     .bind(LISTING_LIMIT)
     .fetch_all(pool)

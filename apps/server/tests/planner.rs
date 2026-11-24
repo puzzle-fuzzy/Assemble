@@ -24,11 +24,21 @@ fn at(text: &str) -> Timestamp {
     serde_json::from_value(serde_json::json!(text)).unwrap()
 }
 
+/// 今天（UTC）零点起 `days` 天、再加 `offset_millis` 毫秒的那个时刻。
+///
+/// 名单只留"还可能提醒的"和最近七天里动过的，所以这里建的日程不能把时间写死在某个日期上：
+/// 写死了，过一阵它就成了"早就过去的一次性日程"，不再出现在名单里。
+/// 按天取整，所以同一天里两次调用是同一个时刻，可以拿来比较。
+fn soon(days: i64, offset_millis: i64) -> Timestamp {
+    let today = Timestamp::now().as_millis() / 86_400_000 * 86_400_000;
+    Timestamp::from_millis(today + days * 86_400_000 + offset_millis).unwrap()
+}
+
 fn train() -> ScheduleContent {
     ScheduleContent {
         title: " 火车 ".into(),
         location: None,
-        start_at: at("2026-11-25T01:00:00.000Z"),
+        start_at: soon(1, 0),
         end_at: None,
         repeat: Repeat::None,
         repeat_until: None,
@@ -190,7 +200,7 @@ async fn a_schedule_lives_through_create_edit_finish_and_reopen() {
         version: 1,
         content: ScheduleContent {
             title: "火车（改点）".into(),
-            start_at: at("2026-11-25T02:00:00.000Z"),
+            start_at: soon(1, 3_600_000),
             notes: Some(" 带身份证 ".into()),
             ..train()
         },
@@ -202,7 +212,7 @@ async fn a_schedule_lives_through_create_edit_finish_and_reopen() {
     assert_eq!(updated.version, 2);
     assert_eq!(updated.content.title, "火车（改点）");
     assert_eq!(updated.content.notes.as_deref(), Some("带身份证"));
-    assert_eq!(updated.content.start_at, at("2026-11-25T02:00:00.000Z"));
+    assert_eq!(updated.content.start_at, soon(1, 3_600_000));
     assert_eq!(updated.created_at, created.created_at);
 
     let done = pc
@@ -211,7 +221,7 @@ async fn a_schedule_lives_through_create_edit_finish_and_reopen() {
         .unwrap();
     assert_eq!(done.status, ScheduleStatus::Done);
     assert_eq!(done.version, 3);
-    // 刚完成的还留在名单里：界面上还能看一眼、还能撤回。
+    // 刚完成的还留在名单里：接口上取得到，也还能改回进行中。
     assert_eq!(planner_of(&pc).await.schedules, vec![done.clone()]);
     // 已经完成的不能再改内容。
     let again = ScheduleUpdate {
@@ -480,7 +490,7 @@ async fn rescheduling_only_withdraws_the_occurrences_that_no_longer_exist() {
     let shifted = ScheduleUpdate {
         version: 3,
         content: ScheduleContent {
-            start_at: at("2026-11-25T02:00:00.000Z"),
+            start_at: Timestamp::from_millis(first_day + 3_600_000).unwrap(),
             ..daily()
         },
     };
@@ -780,7 +790,7 @@ async fn every_change_reaches_every_device_of_the_account() {
 }
 
 #[tokio::test]
-async fn the_listing_keeps_recently_finished_items_but_forgets_old_ones() {
+async fn the_listing_holds_what_can_still_remind_and_what_was_touched_this_week() {
     let fixture = fixture().await;
     let pc = register(&fixture, 'p', "本机", Platform::Macos).await;
     let pool = &fixture.server.state.pool;
@@ -837,6 +847,80 @@ async fn the_listing_keeps_recently_finished_items_but_forgets_old_ones() {
         .map(|n| n.id)
         .collect();
     assert_eq!(ids, vec!["fresh-1"]);
+}
+
+#[tokio::test]
+async fn the_listing_drops_what_can_no_longer_remind() {
+    let fixture = fixture().await;
+    let pc = register(&fixture, 'p', "本机", Platform::Macos).await;
+    let pool = &fixture.server.state.pool;
+    let week = 7 * 24 * 60 * 60 * 1000;
+    let long_ago = Timestamp::now().as_millis() - week - 1000;
+
+    // 早就过去的一次性日程：状态还停在"进行中"，却再也不会提醒，不再出现在名单里。
+    let old = pc
+        .create_schedule(&train(), None, &pc.options())
+        .await
+        .unwrap();
+    sqlx::query("UPDATE schedules SET start_at = ?, updated_at = ? WHERE id = ?")
+        .bind(long_ago)
+        .bind(long_ago)
+        .bind(&old.id)
+        .execute(pool)
+        .await
+        .unwrap();
+    assert_eq!(planner_of(&pc).await.schedules, Vec::new());
+
+    // 天天有的日程从十周之前就开始了：还在重复，照常在名单里。
+    let forever = pc
+        .create_schedule(&daily(), None, &pc.options())
+        .await
+        .unwrap();
+    sqlx::query("UPDATE schedules SET start_at = ? WHERE id = ?")
+        .bind(Timestamp::now().as_millis() - 10 * week)
+        .bind(&forever.id)
+        .execute(pool)
+        .await
+        .unwrap();
+    let listed: Vec<String> = planner_of(&pc)
+        .await
+        .schedules
+        .into_iter()
+        .map(|schedule| schedule.id)
+        .collect();
+    assert_eq!(listed, vec![forever.id.clone()]);
+
+    // 重复早就停了的（截止在八天前）：不再出现。
+    sqlx::query("UPDATE schedules SET repeat_until = ? WHERE id = ?")
+        .bind(long_ago)
+        .bind(&forever.id)
+        .execute(pool)
+        .await
+        .unwrap();
+    assert_eq!(planner_of(&pc).await.schedules, Vec::new());
+
+    // 到点之后一直没人处理的提醒，和它的通知一样只留七天；还没到点的一直留着。
+    let due = |days: i64| ReminderContent {
+        title: "取快递".into(),
+        due_at: soon(days, 0),
+        notes: None,
+    };
+    let fired = pc
+        .create_reminder(&due(-9), None, &pc.options())
+        .await
+        .unwrap();
+    sqlx::query("UPDATE reminders SET status = 'fired', updated_at = ? WHERE id = ?")
+        .bind(long_ago)
+        .bind(&fired.id)
+        .execute(pool)
+        .await
+        .unwrap();
+    assert_eq!(planner_of(&pc).await.reminders, Vec::new());
+    let waiting = pc
+        .create_reminder(&due(30), None, &pc.options())
+        .await
+        .unwrap();
+    assert_eq!(planner_of(&pc).await.reminders, vec![waiting.clone()]);
 }
 
 #[tokio::test]
