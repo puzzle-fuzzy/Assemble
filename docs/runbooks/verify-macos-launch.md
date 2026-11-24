@@ -220,7 +220,7 @@ gh run download <运行编号> -n assemble-windows-x64
 - 产出没有签名、没有公证。macOS 上第一次打开要在"系统设置 → 隐私与安全性"里点"仍要打开"；用浏览器下载的 Windows 安装包会有 SmartScreen 的提醒（`gh run download` 下来的没有这个标记）。
 - 手边就有一台开发机时也可以本地打：`bun run build`，产物在 `target/release/bundle/`。在 macOS 上打出的是 macOS 的安装包，在 Windows 上打出的是 Windows 的。
 
-2026-11-24 实际跑过的情况：Windows 那一份构建成功，压缩包里是 `nsis/Assemble_0.1.0_x64-setup.exe` 与 `msi/Assemble_0.1.0_x64_en-US.msi`；macOS 那一份被整个取消，原因是 GitHub 的 arm64 机器当天容量紧张，任务一直没被接走——遇到这种情况重新触发就行，不是我们的问题。macOS 的安装包还没有成功打出过。
+2026-11-24 实际跑过的情况：Windows 那一份构建成功，压缩包里是 `nsis/Assemble_0.1.0_x64-setup.exe` 与 `msi/Assemble_0.1.0_x64_en-US.msi`；macOS 那一份第一次被整个取消，原因是 GitHub 的 arm64 机器当天容量紧张，任务一直没被接走——遇到这种情况重新触发就行，不是我们的问题。当天晚些时候重新触发后两个平台都成功了（运行 45427137385）。2026-11-25 从带日程与提醒的版本又打了一次，两个平台都成功（运行 45462145699，提交 `6ea66e6`）：`gh run download 45462145699 -n assemble-windows-x64`，macOS 的换 `-n assemble-macos-arm64`。验证流程的 macOS 那一栏同样会被容量挤掉（显示为 cancelled、一步都没跑），用 `gh run rerun <编号> --failed` 重跑那一栏。
 
 ## Windows 真机验收清单
 
