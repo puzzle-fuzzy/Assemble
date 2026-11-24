@@ -1,5 +1,5 @@
 # 构建服务端镜像只需要 Rust 工作区，其余一律不进构建上下文：
-# 桌面端、依赖、构建产物和本机数据都不该被送进守护进程。
+# 界面的源码、依赖、构建产物和本机数据都不该被送进守护进程。
 *
 !Cargo.toml
 !Cargo.lock
@@ -7,3 +7,11 @@
 !crates/**
 !apps/server/
 !apps/server/**
+# cargo 解析工作区时要读到每一个成员的清单，并核对它们的入口文件都在。桌面端只是工作区
+# 成员，不会被编译（只构建 assemble-server），它的清单与 Rust 源码却得在构建上下文里；
+# 少了它们，cargo 会报 "failed to load manifest for workspace member"。
+!apps/desktop/
+!apps/desktop/src-tauri/
+!apps/desktop/src-tauri/**
+# Tauri 在本机生成的权限清单，不属于源码。
+apps/desktop/src-tauri/gen

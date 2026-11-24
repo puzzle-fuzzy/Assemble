@@ -226,7 +226,7 @@ async fn a_file_can_be_renamed_and_removed_and_the_newest_is_listed_first() {
     // 删掉：列表里没有了，空间还回来了，内容也取不到了。
     pc.drive_delete(&stored.id, &pc.options()).await.unwrap();
     let listing = pc.drive(&pc.options()).await.unwrap();
-    assert!(listing.items.is_empty());
+    assert_eq!(listing.items, Vec::new());
     assert_eq!(listing.used_bytes, 0);
     let error = pc
         .drive_content(&stored.id, TransferOptions::new(&pc.cancel), None)
@@ -460,7 +460,7 @@ async fn a_large_upload_that_would_not_fit_is_refused_and_leaves_nothing_behind(
         .unwrap_err();
     assert_eq!(error, http(413, "QUOTA_EXCEEDED"));
     let listing = pc.drive(&pc.options()).await.unwrap();
-    assert!(listing.items.is_empty());
+    assert_eq!(listing.items, Vec::new());
     assert_eq!(listing.used_bytes, 0);
     assert!(!fixture.server.state.blobs.path_for(&big.sha256).exists());
 }
@@ -544,7 +544,7 @@ async fn uploads_are_refused_before_any_content_is_stored() {
         .unwrap();
     assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
 
-    assert!(pc.drive(&pc.options()).await.unwrap().items.is_empty());
+    assert_eq!(pc.drive(&pc.options()).await.unwrap().items, Vec::new());
     assert!(
         !fixture
             .server
@@ -581,13 +581,9 @@ async fn a_drive_is_private_to_its_account() {
         .unwrap();
 
     // 别的账户：云盘是空的，那个文件等于不存在。
-    assert!(
-        stranger
-            .drive(&stranger.options())
-            .await
-            .unwrap()
-            .items
-            .is_empty()
+    assert_eq!(
+        stranger.drive(&stranger.options()).await.unwrap().items,
+        Vec::new()
     );
     assert_eq!(
         stranger

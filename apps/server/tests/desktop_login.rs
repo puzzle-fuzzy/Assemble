@@ -51,7 +51,7 @@ async fn the_login_page_is_served_with_its_defences() {
 
     // 页面里的防伪值与 Cookie 里的成对；Cookie 不暴露给页面脚本。
     let csrf = hidden(&page.html, "csrf").unwrap();
-    assert!(!csrf.is_empty());
+    assert_ne!(csrf, "");
     let cookies = page.set_cookies().join("\n");
     assert!(
         cookies.contains(&format!("assemble_csrf={csrf}")),

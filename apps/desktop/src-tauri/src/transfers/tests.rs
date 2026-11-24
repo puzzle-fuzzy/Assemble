@@ -1098,7 +1098,7 @@ async fn a_device_that_is_offline_by_the_time_the_upload_lands_means_the_file_wa
         )
         .await
         .unwrap();
-    assert!(listed.is_empty());
+    assert_eq!(listed, Vec::new());
     f.finish().await;
 }
 

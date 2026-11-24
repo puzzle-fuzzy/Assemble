@@ -1,13 +1,17 @@
 # Assemble 服务端。完整步骤见 docs/runbooks/deploy.md。
 #
 #   cd deploy
-#   cp .env.example .env             # 至少填上对外地址
-#   docker compose up -d --build     # 起来并跟着系统重启
+#   cp .env.example .env             # 填上对外地址与镜像
+#   docker compose up -d             # 起来并跟着系统重启
 #   docker compose logs -f           # 看日志
+#
+# 本机自己构建镜像时，再叠加 compose.build.yaml：
+#
+#   docker compose -f compose.yaml -f compose.build.yaml up -d --build
 #
 # 建第一个账户（密码在终端里输，不回显；账户只能从这里建，不开放注册）：
 #
-#   docker compose exec assemble-server create-account <用户名>
+#   docker compose exec assemble assemble-server create-account <用户名>
 #
 # 别改下面 environment 里的两项：容器里的监听地址与数据目录和镜像里的健康检查是配套的。
 # 可调的都在 .env 里。
@@ -15,11 +19,8 @@
 name: assemble
 
 services:
-  assemble-server:
-    build:
-      context: ..
-      dockerfile: deploy/Dockerfile
-    image: assemble-server:local
+  assemble:
+    image: ${ASSEMBLE_IMAGE:?请在 deploy/.env 里设置 ASSEMBLE_IMAGE}
     container_name: assemble-server
     restart: unless-stopped
     env_file:
@@ -30,8 +31,10 @@ services:
     # 只交给本机的反向代理。正式服务一律走 HTTPS，TLS 在反向代理那里结束。
     ports:
       - "127.0.0.1:8787:8787"
+    # ASSEMBLE_DATA_PATH 不填时是一个由 Docker 管理的命名卷；填了绝对路径就落到那个目录，
+    # 按路径备份更直观。那个目录要属于容器里的账户（编号 10001）。
     volumes:
-      - assemble-data:/var/lib/assemble
+      - ${ASSEMBLE_DATA_PATH:-assemble-data}:/var/lib/assemble
     # 服务端收到 SIGTERM 后最多等十秒让在途连接收尾。
     stop_grace_period: 15s
     logging:

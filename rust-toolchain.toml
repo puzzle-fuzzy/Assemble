@@ -1,0 +1,11 @@
+# 工具链钉在一个具体的稳定版上：本机、持续集成（.github/workflows/）与镜像构建（deploy/Dockerfile）
+# 用同一个编译器。稳定版每六周更新一次，新版本会带来新的检查；钉住之后，验证只会在有人
+# 主动升级时才可能因为新检查变红。升级时改这里，同时改 Dockerfile 里的基础镜像。
+#
+# 第一次在这台机器上用这个仓库时，rustup 会自动下载这个版本。
+
+[toolchain]
+channel = "1.100.0"
+components = ["rustfmt", "clippy"]
+# 装上 Windows 目标，`bun run verify` 里针对 Windows 的静态检查才会跑；在 Windows 上它本来就是默认目标。
+targets = ["x86_64-pc-windows-msvc"]

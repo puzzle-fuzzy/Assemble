@@ -1,0 +1,51 @@
+# 推送到 main 或打标签时，构建服务端镜像并推到 GitHub 的镜像仓库。
+#
+# 服务器磁盘很紧，不在它上面编译：这里构建好，服务器只负责拉取。部署与升级见 docs/runbooks/deploy.md。
+# 只构建 linux/amd64——现有的服务器是 x86_64。苹果芯片上做本机验证时，用 deploy/Dockerfile 自己构建。
+
+name: 服务端镜像
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  IMAGE: ghcr.io/${{ github.repository_owner }}/assemble-server
+
+jobs:
+  image:
+    name: 服务端镜像（linux/amd64）
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7
+      - name: 登录镜像仓库
+        env:
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: echo "$TOKEN" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+      # 标记：提交号的前 12 位；推送到 main 时另加 latest，打标签时另加那个标签。
+      # 中间层存回仓库里，下一次构建可以直接复用。
+      - name: 构建并推送
+        env:
+          SHA: ${{ github.sha }}
+          REF: ${{ github.ref_name }}
+        run: |
+          set -eu
+          tags=( -t "$IMAGE:${SHA::12}" )
+          if [[ "$GITHUB_REF" == refs/tags/* ]]; then
+            tags+=( -t "$IMAGE:$REF" )
+          else
+            tags+=( -t "$IMAGE:latest" )
+          fi
+          docker buildx build \
+            --platform linux/amd64 \
+            -f deploy/Dockerfile \
+            --cache-from "type=registry,ref=$IMAGE:buildcache" \
+            --cache-to "type=registry,ref=$IMAGE:buildcache,mode=max" \
+            "${tags[@]}" \
+            --push .

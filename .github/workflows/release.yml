@@ -43,7 +43,8 @@ jobs:
             artifact: windows-x64
     steps:
       - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/checkout@v7
+      # 工具链由仓库根目录的 rust-toolchain.toml 决定，第一次调用 cargo 时自动装好。
       - uses: Swatinem/rust-cache@v2
       - uses: oven-sh/setup-bun@v2
       - run: bun install --frozen-lockfile

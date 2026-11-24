@@ -1,0 +1,14 @@
+# 只在本机自己构建镜像时，叠加到 compose.yaml 上：
+#
+#   docker compose -f compose.yaml -f compose.build.yaml up -d --build
+#
+# 构建上下文是仓库根目录（见 .dockerignore）。
+# 生产服务器不这样用：它直接拉取持续集成构建并推送的镜像（.github/workflows/server.yml），
+# 因为在它上面编译既占磁盘又占内存。
+
+services:
+  assemble:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    image: assemble-server:local

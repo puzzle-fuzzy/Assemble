@@ -227,7 +227,7 @@ fn an_update_about_an_unknown_send_is_ignored() {
         registry.updated(&settled("s-404", SendState::Delivered, None)),
         Updated::Ignored
     );
-    assert!(registry.views().is_empty());
+    assert_eq!(registry.views(), Vec::new());
 }
 
 // ---- 发出的 ----
@@ -253,10 +253,9 @@ fn a_draft_shows_names_and_sizes_but_never_a_location() {
     registry.drop_draft();
     assert!(registry.draft_view().is_none());
     // 没有草稿时发起发送：什么都不排。
-    assert!(
-        registry
-            .queue_draft(Destination::Device(target()))
-            .is_empty()
+    assert_eq!(
+        registry.queue_draft(Destination::Device(target())),
+        Vec::<String>::new()
     );
 }
 
@@ -518,7 +517,7 @@ fn clearing_forgets_everything_that_belongs_to_the_account() {
     registry.offer(&incoming("a"));
     queued(&mut registry);
     registry.clear();
-    assert!(registry.views().is_empty());
+    assert_eq!(registry.views(), Vec::new());
     assert!(registry.draft_view().is_none());
     assert_eq!(registry.next_job(Instant::now()), Next::Nothing);
     // 清过之后编号接着往下走，不会与界面还留着的旧标识撞上。

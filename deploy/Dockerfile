@@ -5,11 +5,15 @@
 # 服务端在 Linux 上只依赖 C 库：SQLite 是静态编进去的，钥匙串的依赖只在 macOS 与 Windows 上进入构建。
 
 # ---- 构建：官方 Rust 镜像自带编译 C 代码要用的工具链 ----
-FROM rust:1-bookworm AS build
+# 版本与仓库根目录的 rust-toolchain.toml 一致（官方镜像不用 rustup，那个文件在这里不生效）。升级时两处一起改。
+FROM rust:1.100.0-bookworm AS build
 WORKDIR /src
 COPY Cargo.toml Cargo.lock ./
 COPY crates/ crates/
 COPY apps/server/ apps/server/
+# 根目录的清单把桌面端也列为工作区成员，cargo 解析工作区时要读到它的清单与入口文件。
+# 它不会被编译（上面只构建 assemble-server）；见 .dockerignore。
+COPY apps/desktop/src-tauri/ apps/desktop/src-tauri/
 # 编译产物与下载的依赖放在缓存卷里，不进镜像层；成品拷出来交给下一阶段。
 ENV CARGO_TARGET_DIR=/target
 RUN --mount=type=cache,target=/target \
@@ -24,6 +28,8 @@ RUN useradd --system --uid 10001 --home-dir /var/lib/assemble --shell /usr/sbin/
     && mkdir -p /var/lib/assemble \
     && chown assemble:assemble /var/lib/assemble
 COPY --from=build /out/assemble-server /usr/local/bin/assemble-server
+# 从这里起以专用账户运行；少了这一行，容器会以 root 跑。
+USER assemble:assemble
 
 # 容器里的回环地址外面连不上，所以监听所有网卡；对不对外，由部署时的端口映射与反向代理决定。
 ENV ASSEMBLE_DATA_DIR=/var/lib/assemble \

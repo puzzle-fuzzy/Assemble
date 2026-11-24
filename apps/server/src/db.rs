@@ -29,7 +29,7 @@ pub async fn open(data_dir: &Path) -> Result<SqlitePool, DbError> {
     let created = !data_dir.exists();
     tokio::fs::create_dir_all(data_dir).await?;
     if created {
-        restrict_to_owner(data_dir).await?;
+        restrict_to_owner(data_dir)?;
     }
     let options = SqliteConnectOptions::new()
         .filename(data_dir.join(DATABASE_FILE))
@@ -48,14 +48,17 @@ pub async fn open(data_dir: &Path) -> Result<SqlitePool, DbError> {
 }
 
 /// 把目录权限收成"仅本人"。
-async fn restrict_to_owner(data_dir: &Path) -> Result<(), std::io::Error> {
+///
+/// 只在启动时做一次，用的是同步接口。写成异步的话，`await` 全都在 Unix 那一段里，
+/// 到了 Windows 上函数体里一个都不剩，静态检查会报"没有 await 的异步函数"。
+fn restrict_to_owner(data_dir: &Path) -> Result<(), std::io::Error> {
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
 
-        let mut permissions = tokio::fs::metadata(data_dir).await?.permissions();
+        let mut permissions = std::fs::metadata(data_dir)?.permissions();
         permissions.set_mode(0o700);
-        tokio::fs::set_permissions(data_dir, permissions).await?;
+        std::fs::set_permissions(data_dir, permissions)?;
     }
     #[cfg(not(unix))]
     let _ = data_dir;

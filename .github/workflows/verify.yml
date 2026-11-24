@@ -34,11 +34,8 @@ jobs:
             os: windows-2025
     steps:
       - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@stable
-      # macOS 上顺便给不依赖窗口的五个基础库做针对 Windows 目标的静态检查：
-      # `bun run verify` 里有这一步，装了那个目标才会跑。
-      - run: rustup target add x86_64-pc-windows-msvc
-        if: runner.os == 'macOS'
+      # 工具链由仓库根目录的 rust-toolchain.toml 决定：第一次调用 cargo 时 rustup 自动把它装好，
+      # 连同 clippy、rustfmt 和 Windows 目标（macOS 上给五个基础库做针对 Windows 的静态检查要用）。
       - uses: Swatinem/rust-cache@v2
       # 版本取根目录 package.json 的 packageManager 字段。
       - uses: oven-sh/setup-bun@v2

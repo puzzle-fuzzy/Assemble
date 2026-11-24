@@ -312,7 +312,7 @@ async fn a_device_that_is_offline_cannot_be_sent_to() {
         )
         .await
         .unwrap();
-    assert!(listed.is_empty());
+    assert_eq!(listed, Vec::new());
 }
 
 /// 大到发送方不可能一口气塞进连接的那种文件。
