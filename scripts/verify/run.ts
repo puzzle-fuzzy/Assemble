@@ -19,7 +19,11 @@ interface Step {
   skipped?: string;
 }
 
-/** 装了 Windows 的 Rust 目标时，顺便给不依赖窗口的 crate 做一次类型检查。 */
+/**
+ * 装了 Windows 的 Rust 目标时，顺便给能在本机上检查的 crate 做一次针对 Windows 的静态检查：
+ * 不依赖窗口，也不需要交叉编译 C 代码的那五个。客户端（TLS）与服务端（SQLite）
+ * 带本机依赖，从 macOS 上检查不了，只能到 Windows 环境里去验。
+ */
 async function windowsTargetInstalled(): Promise<boolean> {
   const listed = Bun.spawn(["rustup", "target", "list", "--installed"], {
     cwd: root,
@@ -43,7 +47,7 @@ const STEPS: Step[] = [
   { name: "Rust 格式", command: ["bun", "run", "rust:fmt"] },
   { name: "Rust 静态检查", command: ["bun", "run", "rust:clippy"] },
   {
-    name: "Rust 静态检查：Windows 目标（不依赖窗口的 crate）",
+    name: "Rust 静态检查：Windows 目标（能在本机检查的 crate）",
     command: ["bun", "run", "rust:clippy:windows"],
     onlyWhen: windowsTargetInstalled,
     skipped:

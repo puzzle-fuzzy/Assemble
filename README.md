@@ -47,7 +47,7 @@ bun run verify       # 一键验证，提交前运行
 | `bun run dev`（调试） | 本地开发服务 `http://127.0.0.1:8787` | 不用指定；设了 `ASSEMBLE_SERVER_ORIGIN` 就连它             |
 | 发布构建              | 构建时给定的地址                     | `ASSEMBLE_SERVER_ORIGIN=https://…`；没给就拒绝启动，不去猜 |
 
-`bun run verify` 依次执行 Biome、类型检查、界面测试、前端构建、Rust 格式、Rust 静态检查与全部 Rust 测试（含服务端），任一步失败即停止。装了 Windows 的 Rust 目标时，它还会给不依赖窗口的 crate 做一次针对 Windows 目标的静态检查。
+`bun run verify` 依次执行 Biome、类型检查、界面测试、前端构建、Rust 格式、Rust 静态检查与全部 Rust 测试（含服务端），任一步失败即停止。装了 Windows 的 Rust 目标时，它还会给能在本机上检查的五个基础库做一次针对 Windows 目标的静态检查；客户端与服务端带着 TLS 与 SQLite 的本机依赖，要到 Windows 环境里才能检查。
 
 ## 目录
 

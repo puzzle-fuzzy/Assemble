@@ -24,7 +24,7 @@
     "rust:fmt:write": "cargo fmt --all",
     "rust:clippy": "cargo clippy --workspace --all-targets -- -D warnings",
     "rust:test": "cargo test --workspace",
-    "rust:clippy:windows": "cargo clippy -p assemble-device --target x86_64-pc-windows-msvc --all-targets -- -D warnings",
+    "rust:clippy:windows": "cargo clippy -p assemble-protocol -p assemble-transfer -p assemble-store -p assemble-device -p assemble-schedule --target x86_64-pc-windows-msvc --all-targets -- -D warnings",
     "verify": "bun scripts/verify/run.ts"
   },
   "devDependencies": {

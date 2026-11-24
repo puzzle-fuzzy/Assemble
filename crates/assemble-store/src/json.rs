@@ -80,7 +80,10 @@ pub fn write_private_json<T: Serialize + ?Sized>(path: &Path, value: &T) -> Resu
     }
     staging.as_file().sync_all()?;
     replace_with_retry(staging, path)?;
-    set_private_file(path)
+    // "仅本人可读写"是类 Unix 上的文件权限位；Windows 上没有对应的东西可设。
+    #[cfg(unix)]
+    set_private_file(path)?;
+    Ok(())
 }
 
 #[cfg(unix)]
@@ -99,15 +102,10 @@ fn create_private_dir(path: &Path) -> std::io::Result<()> {
 }
 
 #[cfg(unix)]
-fn set_private_file(path: &Path) -> Result<(), StoreError> {
+fn set_private_file(path: &Path) -> std::io::Result<()> {
     use std::os::unix::fs::PermissionsExt;
 
     fs::set_permissions(path, fs::Permissions::from_mode(0o600))?;
-    Ok(())
-}
-
-#[cfg(not(unix))]
-fn set_private_file(_path: &Path) -> Result<(), StoreError> {
     Ok(())
 }
 
@@ -252,8 +250,10 @@ mod tests {
         let denied = std::io::Error::from_raw_os_error(5);
         let sharing = std::io::Error::from_raw_os_error(32);
         let missing = std::io::Error::from_raw_os_error(2);
-        #[cfg(not(windows))]
-        {
+        if cfg!(windows) {
+            assert!(is_retryable_rename(&denied));
+            assert!(is_retryable_rename(&sharing));
+        } else {
             assert!(!is_retryable_rename(&denied));
             assert!(!is_retryable_rename(&sharing));
         }

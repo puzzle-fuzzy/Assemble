@@ -31,8 +31,8 @@ Assemble 是一个全新的、自带服务端的项目，用来完全替换 jarv
 
 ## 验证
 
-- 提交前运行 `bun run verify`。它覆盖 Biome、类型检查、界面测试、前端构建、Rust 格式、静态检查与全部 Rust 测试（含服务端）。装了 Windows 的 Rust 目标时，它还会给不依赖窗口的 crate 做一次针对 Windows 目标的静态检查；没装则如实跳过。
-- Windows 专用的代码放在不依赖 Tauri 的 crate 里，这样它至少能被类型检查。真正在 Windows 上跑过没有，只有真机验收能回答。
+- 提交前运行 `bun run verify`。它覆盖 Biome、类型检查、界面测试、前端构建、Rust 格式、静态检查与全部 Rust 测试（含服务端）。装了 Windows 的 Rust 目标时，它还会给能在本机上检查的五个基础库做一次针对 Windows 目标的静态检查；没装则如实跳过。客户端与服务端带着 TLS 与 SQLite 的本机依赖，从 macOS 上检查不了 Windows 目标，它们在 Windows 上对不对，只能到 Windows 环境里验证。
+- Windows 专用的代码放在不依赖 Tauri 的 crate 里，这样它至少能被类型检查。只在 Windows 上才会出现的编译错误和静态检查错误，这一步抓得到（已经抓到过五处）；真正在 Windows 上跑起来对不对，只有 Windows 环境能回答。
 - 汇报时区分三种证据，不能互相替代：
   - 自动化测试（`bun run verify`）；
   - 真实启动（在 macOS 上构建并运行服务端与桌面端，核对窗口、托盘、登录、退出清理，步骤见 [运行手册](docs/runbooks/verify-macos-launch.md)）；
