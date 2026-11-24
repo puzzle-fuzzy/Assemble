@@ -7,7 +7,7 @@
 //!   流断了由客户端自动重连；登录失效时收摊，并请用户重新登录；
 //! - [`transfers::run`]：把别的设备发来的文件一个一个收到本机，把排队的文件发出去。
 //!
-//! 事件流不补送断线期间的变化，所以每次连上（收到 `hello`）都重新拉一遍设备列表、
+//! 事件流不补送断线期间的变化，所以每次连上（收到 `hello`）都重新拉一遍设备列表、云盘名单、
 //! 问一遍还有哪些文件在等我；连着的时候也隔一段时间问一次。
 
 use std::time::Duration;
@@ -155,6 +155,7 @@ async fn follow_events(app: AppHandle) {
                         if catch_up(&state, &cancel).await {
                             break;
                         }
+                        transfers::refresh_drive(&state).await;
                     }
                     Next::Devices(devices) => state.set_devices(devices),
                     Next::Offered(send) => state.offer(&send),

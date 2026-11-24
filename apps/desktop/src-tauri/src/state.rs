@@ -16,7 +16,9 @@ use assemble_client::{Client, OutgoingFile};
 use assemble_device::inbox::ReceiveFailure;
 use assemble_protocol::account::Account;
 use assemble_protocol::device::Device;
+use assemble_protocol::drive::{DriveFile, DriveListing};
 use assemble_protocol::origin::ServerOrigin;
+use assemble_protocol::primitives::Timestamp;
 use assemble_protocol::sends::{Direction, Send as SendRecord};
 use assemble_store::secret::{SecretKey, SecretStore, SecretString};
 use serde::{Deserialize, Serialize};
@@ -25,7 +27,8 @@ use tauri_plugin_autostart::ManagerExt;
 use tokio_util::sync::CancellationToken;
 
 use crate::registry::{
-    Cancellation, DraftView, Next, Outgoing, Registry, TransferFailure, TransferView, Updated,
+    Cancellation, Delivery, Destination, DraftView, Next, Outgoing, Registry, TransferFailure,
+    TransferView, Updated,
 };
 
 /// 一次进行中的登录尝试。
@@ -230,9 +233,50 @@ pub struct Snapshot {
     pub transfers: Vec<TransferView>,
     /// 用户挑好、还没决定发给谁的文件。没有草稿时为 `None`。
     pub draft: Option<DraftView>,
+    /// 云盘里的文件与空间。没登录时为 `None`。
+    pub drive: Option<DriveView>,
     pub receive: ReceiveView,
     pub launch_at_login: LaunchState,
     pub notice: Option<Notice>,
+}
+
+/// 云盘里的一个文件在界面上的样子。摘要不给界面：用不上。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DriveFileView {
+    pub id: String,
+    pub name: String,
+    pub size: u64,
+    pub created_at: Timestamp,
+}
+
+/// 云盘在界面上的样子：有哪些文件，空间用了多少。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DriveView {
+    /// 新的在前。
+    pub items: Vec<DriveFileView>,
+    pub used_bytes: u64,
+    pub limit_bytes: u64,
+}
+
+impl From<&DriveListing> for DriveView {
+    fn from(listing: &DriveListing) -> Self {
+        Self {
+            items: listing
+                .items
+                .iter()
+                .map(|file| DriveFileView {
+                    id: file.id.clone(),
+                    name: file.name.clone(),
+                    size: file.size,
+                    created_at: file.created_at,
+                })
+                .collect(),
+            used_bytes: listing.used_bytes,
+            limit_bytes: listing.limit_bytes,
+        }
+    }
 }
 
 /// 文件收到之后怎么告诉用户。桌面壳用系统通知；测试里用一个不弹窗的实现，
@@ -286,6 +330,8 @@ pub struct View {
     devices: Vec<DeviceView>,
     /// 收发的记录与待发送的草稿。它同时是后台任务的队列。
     registry: Registry,
+    /// 云盘最近一次的名单；拿不到时留着上一份。
+    drive: Option<DriveListing>,
     receive: ReceiveView,
     notice: Option<Notice>,
 }
@@ -304,6 +350,7 @@ impl View {
             devices: self.devices.clone(),
             transfers: self.registry.views(),
             draft: self.registry.draft_view(),
+            drive: self.drive.as_ref().map(DriveView::from),
             receive: self.receive.clone(),
             launch_at_login,
             notice: self.notice.clone(),
@@ -320,6 +367,7 @@ impl View {
             session: SessionView::SignedOut,
             devices: Vec::new(),
             registry: Registry::default(),
+            drive: None,
             receive: ReceiveView {
                 custom_folder: None,
             },
@@ -540,6 +588,7 @@ impl<R: tauri::Runtime> AppState<R> {
         // 传输记录属于那个账户：文件留在接收目录里，但名单不留给下一个登录的人。
         self.set_devices(Vec::new());
         self.registry(Registry::clear);
+        self.set_drive(None);
         self.set_stream(StreamState::Off);
     }
 
@@ -623,8 +672,8 @@ impl<R: tauri::Runtime> AppState<R> {
         self.transfers_changed.notified().await;
     }
 
-    /// 领取一个排着队的文件去收。
-    pub fn begin_receive(&self, id: &str) -> Option<SendRecord> {
+    /// 领取一个排着队的文件去收：别的设备发来的，或者云盘里的。
+    pub fn begin_receive(&self, id: &str) -> Option<Delivery> {
         self.registry(|registry| registry.begin_receive(id))
     }
 
@@ -670,7 +719,7 @@ impl<R: tauri::Runtime> AppState<R> {
     }
 
     /// 收不下来。回执还没发。
-    pub fn receive_failed(&self, id: &str, failure: ReceiveFailure) {
+    pub fn receive_failed(&self, id: &str, failure: TransferFailure) {
         self.registry(|registry| registry.receive_failed(id, failure));
         self.transfers_changed.notify_one();
     }
@@ -719,6 +768,33 @@ impl<R: tauri::Runtime> AppState<R> {
 
     // ---- 发出的 ----
 
+    // ---- 云盘 ----
+
+    /// 换上服务端给的云盘名单。
+    pub fn set_drive(&self, listing: Option<DriveListing>) {
+        self.update(|view| view.drive = listing);
+    }
+
+    /// 云盘名单上的一个文件；名单上没有时为 `None`。
+    pub fn drive_file(&self, id: &str) -> Option<DriveFile> {
+        self.view
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .drive
+            .as_ref()?
+            .items
+            .iter()
+            .find(|file| file.id == id)
+            .cloned()
+    }
+
+    /// 把挑好的文件发往某处（不经过草稿）。返回每一条记录的标识。
+    pub fn queue_files(&self, destination: Destination, files: Vec<OutgoingFile>) -> Vec<String> {
+        let ids = self.registry(|registry| registry.queue(destination, files));
+        self.transfers_changed.notify_one();
+        ids
+    }
+
     /// 用户挑好了要发的文件。
     pub fn set_draft(&self, files: Vec<OutgoingFile>) {
         self.registry(|registry| registry.set_draft(files));
@@ -729,11 +805,25 @@ impl<R: tauri::Runtime> AppState<R> {
         self.registry(Registry::drop_draft);
     }
 
-    /// 把草稿里的文件发给一台设备。返回每一条记录的标识。
-    pub fn queue_draft(&self, target: &DeviceView) -> Vec<String> {
-        let ids = self.registry(|registry| registry.queue_draft(target));
+    /// 把草稿里的文件发往某处：一台设备，或者云盘。返回每一条记录的标识。
+    pub fn queue_draft(&self, destination: Destination) -> Vec<String> {
+        let ids = self.registry(|registry| registry.queue_draft(destination));
         self.transfers_changed.notify_one();
         ids
+    }
+
+    /// 排队去云盘里取一个文件回来。
+    pub fn fetch_from_drive(&self, file: &DriveFile) -> String {
+        let id = self.registry(|registry| registry.fetch_from_drive(file));
+        self.transfers_changed.notify_one();
+        id
+    }
+
+    /// 文件存进云盘了。
+    pub fn drive_uploaded(&self, id: &str) -> bool {
+        let stored = self.registry(|registry| registry.drive_uploaded(id));
+        self.transfers_changed.notify_one();
+        stored
     }
 
     /// 服务端收下了文件，正在等对方接收。返回 `true` 表示文件得去服务端撤回。

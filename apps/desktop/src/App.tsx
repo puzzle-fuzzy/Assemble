@@ -1,10 +1,10 @@
 // 应用主界面。
 //
-// 现在有四类真实内容：账户与连接、账户里的设备、文件传输、本机设置。
+// 现在有五类真实内容：账户与连接、账户里的设备、文件传输、云盘、本机设置。
 // 日程的视图在对应的后台能力接通之后再加入，不放空页面占位。
 
 import { ArrowDownToLine, ArrowUpToLine } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -22,9 +22,15 @@ import { Switch } from "@/components/ui/switch";
 import { useSnapshot } from "@/hooks/use-snapshot";
 import { type Bridge, bridge, toBridgeError } from "@/lib/bridge";
 import { messageFor } from "@/lib/messages";
-import { formatSize, transferStatus } from "@/lib/transfer-text";
+import {
+  formatSize,
+  formatSpace,
+  isSavedHere,
+  transferStatus,
+} from "@/lib/transfer-text";
 import type {
   DeviceView,
+  DriveFileView,
   LaunchState,
   Notice,
   Platform,
@@ -85,6 +91,7 @@ export function App({ bridge: source = bridge }: AppProps) {
         snapshot={snapshot}
         onError={setActionError}
       />
+      <DriveCard source={source} snapshot={snapshot} onError={setActionError} />
       <LaunchCard
         source={source}
         snapshot={snapshot}
@@ -584,7 +591,7 @@ function TransferRow({
           ) : null}
         </div>
         <div className="flex shrink-0 gap-2">
-          {transfer.phase === "complete" && receiving ? (
+          {isSavedHere(transfer) ? (
             // 只在文件夹里选中它，不打开：收到的东西要不要打开由用户自己决定。
             <Button
               size="sm"
@@ -634,6 +641,165 @@ function TransferRow({
       >
         {transferStatus(transfer)}
       </p>
+    </div>
+  );
+}
+
+/** 云盘：账户在服务端的文件。从这台电脑存进去的，别的设备也取得到。 */
+function DriveCard({ source, snapshot, onError }: CardProps) {
+  const [pending, setPending] = useState(false);
+  const [confirming, setConfirming] = useState<string | null>(null);
+  // 名单由 Rust 在连上服务时去拿；万一没拿到（比如刚登录时断了一下），这里补要一次。
+  const requested = useRef<string | null>(null);
+  const signedInAs =
+    snapshot?.session.phase === "signedIn" ? snapshot.session.device.id : null;
+  const drive = snapshot?.drive ?? null;
+
+  useEffect(() => {
+    if (!signedInAs || drive || requested.current === signedInAs) return;
+    requested.current = signedInAs;
+    source.driveRefresh().catch((error: unknown) => {
+      onError(messageFor(toBridgeError(error)));
+    });
+  }, [signedInAs, drive, source, onError]);
+
+  if (snapshot == null || snapshot.session.phase !== "signedIn") return null;
+
+  async function act(what: () => Promise<unknown>) {
+    setPending(true);
+    onError(null);
+    try {
+      await what();
+    } catch (error: unknown) {
+      onError(messageFor(toBridgeError(error)));
+    } finally {
+      setPending(false);
+      setConfirming(null);
+    }
+  }
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>云盘</CardTitle>
+        <CardDescription>
+          {drive
+            ? `已用 ${formatSpace(drive.usedBytes)}，共 ${formatSpace(drive.limitBytes)}`
+            : "正在读取云盘…"}
+        </CardDescription>
+        <CardAction>
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={pending}
+            onClick={() => void act(() => source.driveUpload())}
+          >
+            上传…
+          </Button>
+        </CardAction>
+      </CardHeader>
+      {drive ? (
+        <CardContent className="flex flex-col gap-2">
+          <Progress
+            role="progressbar"
+            aria-label="云盘空间"
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-valuenow={Math.round(
+              (drive.usedBytes / drive.limitBytes) * 100,
+            )}
+            value={(drive.usedBytes / drive.limitBytes) * 100}
+          />
+          {drive.items.length === 0 ? (
+            <p className="text-sm text-muted-foreground">云盘里还没有文件。</p>
+          ) : (
+            drive.items.map((file) => (
+              <DriveRow
+                key={file.id}
+                source={source}
+                file={file}
+                confirming={confirming === file.id}
+                pending={pending}
+                onConfirm={() => setConfirming(file.id)}
+                onCancel={() => setConfirming(null)}
+                act={act}
+              />
+            ))
+          )}
+        </CardContent>
+      ) : null}
+    </Card>
+  );
+}
+
+function DriveRow({
+  source,
+  file,
+  confirming,
+  pending,
+  onConfirm,
+  onCancel,
+  act,
+}: {
+  source: Bridge;
+  file: DriveFileView;
+  confirming: boolean;
+  pending: boolean;
+  onConfirm: () => void;
+  onCancel: () => void;
+  act: (what: () => Promise<unknown>) => Promise<void>;
+}) {
+  return (
+    <div className="flex items-start gap-3 rounded-lg border border-border px-3 py-2">
+      <div className="min-w-0 flex-1">
+        <p className="truncate text-sm font-medium" title={file.name}>
+          {file.name}
+        </p>
+        <p className="text-xs text-muted-foreground">
+          {formatSize(file.size)} · {file.createdAt.slice(0, 10)}
+        </p>
+      </div>
+      <div className="flex shrink-0 gap-2">
+        {confirming ? (
+          <>
+            <Button
+              size="sm"
+              variant="destructive"
+              disabled={pending}
+              onClick={() => void act(() => source.driveDelete(file.id))}
+            >
+              确认删除
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={pending}
+              onClick={onCancel}
+            >
+              取消
+            </Button>
+          </>
+        ) : (
+          <>
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={pending}
+              onClick={() => void act(() => source.driveDownload(file.id))}
+            >
+              取回
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={pending}
+              onClick={onConfirm}
+            >
+              删除
+            </Button>
+          </>
+        )}
+      </div>
     </div>
   );
 }

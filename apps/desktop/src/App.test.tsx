@@ -22,6 +22,7 @@ import {
 import {
   ACCOUNT,
   DEVICE,
+  DRIVE,
   FakeBridge,
   OTHER,
   service,
@@ -495,7 +496,7 @@ describe("传输", () => {
     expect(page).toContain("已发出，等对方接收");
     expect(page).toContain("对方已收下");
     expect(page).toContain("对方拒收了。");
-    expect(page).toContain("已撤回。");
+    expect(page).toContain("已取消。");
     expect(page).toContain("对方没有在时限内接收。");
     expect(page).toContain("发送失败：那台设备刚刚下线了。");
     expect(page).toContain("发送失败：对方设备没能把文件写下来。");
@@ -550,6 +551,134 @@ describe("传输", () => {
       "有文件读不出来，可能已被移走或没有权限。",
     );
     expect(text(view.host)).not.toContain("EACCES");
+  });
+});
+
+describe("云盘", () => {
+  test("列出云盘里的文件与已用空间；没登录时没有这一块", async () => {
+    const signedOut = await render(<App bridge={new FakeBridge(snapshot())} />);
+    await settle();
+    expect(text(signedOut.host)).not.toContain("云盘");
+
+    const source = new FakeBridge(snapshot({ phase: "signedIn" }));
+    const view = await render(<App bridge={source} />);
+    await settle();
+    const page = text(view.host);
+    expect(page).toContain("已用 1.5 MB，共 2.0 GB");
+    expect(page).toContain("季度报表.xlsx");
+    expect(page).toContain("512 KB · 2026-11-24");
+    expect(page).toContain("合同.pdf");
+    expect(source.calls).toEqual([]);
+  });
+
+  test("名单还没拿回来时向 Rust 要一次，不反复要", async () => {
+    const source = new FakeBridge(snapshot({ phase: "signedIn", drive: null }));
+    const view = await render(<App bridge={source} />);
+    await settle();
+    expect(source.calls).toEqual(["driveRefresh"]);
+    expect(text(view.host)).toContain("正在读取云盘…");
+
+    // 还是没拿到：不重复要。
+    await act(async () => {
+      source.push(snapshot({ phase: "signedIn", drive: null }));
+    });
+    await settle();
+    expect(source.calls).toEqual(["driveRefresh"]);
+  });
+
+  test("上传交给系统选择器；取回只交出文件的标识", async () => {
+    const source = new FakeBridge(snapshot({ phase: "signedIn" }));
+    const view = await render(<App bridge={source} />);
+    await settle();
+
+    await click(button(view.host, "上传…"));
+    await click(button(view.host, "取回"));
+    expect(source.calls).toEqual(["driveUpload", "driveDownload:file-1"]);
+  });
+
+  test("删除要先确认，取消就什么都不做", async () => {
+    const source = new FakeBridge(snapshot({ phase: "signedIn" }));
+    const view = await render(<App bridge={source} />);
+    await settle();
+
+    await click(button(view.host, "删除"));
+    expect(source.calls).toEqual([]);
+    expect(button(view.host, "确认删除")).toBeDefined();
+
+    await click(button(view.host, "取消"));
+    expect(source.calls).toEqual([]);
+    expect(button(view.host, "确认删除")).toBeUndefined();
+
+    await click(button(view.host, "删除"));
+    await click(button(view.host, "确认删除"));
+    expect(source.calls).toEqual(["driveDelete:file-1"]);
+  });
+
+  test("存进云盘、从云盘取回，各说各的", async () => {
+    const toDrive = (extra: Partial<TransferView>) =>
+      transfer({
+        direction: "out",
+        target: "drive",
+        peer: "云盘",
+        progress: 0,
+        ...extra,
+      });
+    const source = new FakeBridge(
+      snapshot({
+        phase: "signedIn",
+        transfers: [
+          toDrive({ id: "t5", phase: "queued" }),
+          toDrive({ id: "t4", phase: "inProgress", progress: 0.6 }),
+          toDrive({ id: "t3", phase: "complete", progress: 1 }),
+          toDrive({
+            id: "t2",
+            phase: "failed",
+            failure: "quotaExceeded",
+            retryable: true,
+          }),
+          transfer({
+            id: "t1b",
+            target: "drive",
+            peer: "云盘",
+            name: "旧资料.pdf",
+            phase: "failed",
+            failure: "vanished",
+          }),
+          transfer({
+            id: "t1",
+            target: "drive",
+            peer: "云盘",
+            name: "合同.pdf",
+          }),
+        ],
+      }),
+    );
+    const view = await render(<App bridge={source} />);
+    await settle();
+    const page = text(view.host);
+    expect(page).toContain("等待上传…");
+    expect(page).toContain("正在上传到云盘 60%");
+    expect(page).toContain("已存到云盘");
+    expect(page).toContain("没能存进云盘：云盘空间不够。");
+    expect(page).toContain("取回失败：云盘里已经没有这个文件了。");
+    expect(page).toContain("已取回");
+    // 存进云盘的文件不经过接收位置：只有取回来的那个能"在文件夹中显示"。
+    expect(buttons(view.host, "在文件夹中显示")).toHaveLength(1);
+    // 空间不够的可以重发；云盘里已经没有的不能。
+    expect(buttons(view.host, "重发")).toHaveLength(1);
+  });
+
+  test("云盘是空的时候如实说", async () => {
+    const source = new FakeBridge(
+      snapshot({
+        phase: "signedIn",
+        drive: { ...DRIVE, items: [], usedBytes: 0 },
+      }),
+    );
+    const view = await render(<App bridge={source} />);
+    await settle();
+    expect(text(view.host)).toContain("云盘里还没有文件。");
+    expect(text(view.host)).toContain("已用 0 B，共 2.0 GB");
   });
 });
 

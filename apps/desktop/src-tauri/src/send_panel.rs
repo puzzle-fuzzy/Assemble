@@ -60,23 +60,26 @@ pub async fn pick_files<R: Runtime>(app: &AppHandle<R>) -> Vec<PathBuf> {
     answer.await.unwrap_or_default()
 }
 
-/// 用户要发送文件：先挑文件，再打开发送面板。
+/// 让用户挑几个文件，并逐个核对好（大小合规、算出摘要）。
 ///
-/// 没登录时发不了：把主窗口叫到前面，请用户先登录。
-pub async fn start<R: Runtime>(app: &AppHandle<R>) -> Result<(), StartError> {
+/// 没登录时什么都挑不了：把主窗口叫到前面，请用户先登录。`purpose` 用在那句提示里。
+/// 关掉选择框、或者没登录时得到空列表。
+pub async fn pick<R: Runtime>(
+    app: &AppHandle<R>,
+    purpose: &str,
+) -> Result<Vec<OutgoingFile>, StartError> {
     let state = app.state::<AppState>();
     if state.device_id().is_none() {
-        state.set_notice(Some(Notice::info("请先登录，再发送文件。")));
+        state.set_notice(Some(Notice::info(format!("请先登录，再{purpose}。"))));
         show_main(app);
-        return Ok(());
+        return Ok(Vec::new());
     }
-
     let paths = pick_files(app).await;
     // 什么都没挑：什么都不做。
     if paths.is_empty() {
-        return Ok(());
+        return Ok(Vec::new());
     }
-    // 现在就把每个文件核对好：大小合规、算出摘要。之后面板与上传用的都是这份结果。
+    // 现在就把每个文件核对好：之后面板与上传用的都是这份结果。
     let cancel = state.lifetime.child_token();
     let mut files = Vec::with_capacity(paths.len());
     for path in paths {
@@ -87,7 +90,16 @@ pub async fn start<R: Runtime>(app: &AppHandle<R>) -> Result<(), StartError> {
             Err(_) => return Err(StartError::Unreadable(name)),
         }
     }
-    state.set_draft(files);
+    Ok(files)
+}
+
+/// 用户要发送文件：先挑文件，再打开发送面板。
+pub async fn start<R: Runtime>(app: &AppHandle<R>) -> Result<(), StartError> {
+    let files = pick(app, "发送文件").await?;
+    if files.is_empty() {
+        return Ok(());
+    }
+    app.state::<AppState>().set_draft(files);
     open(app).map_err(StartError::Window)
 }
 

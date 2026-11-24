@@ -3,7 +3,7 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { act } from "react";
 import { BridgeError } from "@/lib/bridge";
-import type { Snapshot } from "@/lib/types";
+import type { Snapshot, TransferView } from "@/lib/types";
 import { SendPanel } from "@/SendPanel";
 import {
   button,
@@ -22,11 +22,18 @@ import {
   transfer,
 } from "@/test-support/fakes";
 
-/** 面板里"发往设备"的那几个按钮。 */
+/** 面板里"发往哪里"的全部去处：云盘，加上账户里的设备。 */
 function destinations(host: HTMLElement): HTMLButtonElement[] {
   return [
     ...host.querySelectorAll<HTMLButtonElement>("ul[aria-label] > li > button"),
   ];
+}
+
+/** 其中属于设备的那几个（不是云盘）。 */
+function devices(host: HTMLElement): HTMLButtonElement[] {
+  return destinations(host).filter(
+    (choice) => !choice.textContent?.startsWith("云盘"),
+  );
 }
 
 /** 模拟 Rust 推来新的状态。 */
@@ -97,15 +104,60 @@ describe("发送面板", () => {
     expect(page).toContain("512 KB");
     expect(page).toContain("说明.txt");
     expect(page).toContain("2.0 KB");
-    // 本机不在名单里。
+    // 云盘排在最前面，永远能选；本机不在设备名单里；离线的设备点不了。
     const choices = destinations(view.host);
     expect(choices.map((choice) => choice.textContent)).toEqual([
+      "云盘存到服务端",
       "工作电脑Windows · 在线",
       "家里的台式机Linux · 离线",
     ]);
     expect(choices[0].disabled).toBe(false);
-    expect(choices[1].disabled).toBe(true);
+    expect(choices[1].disabled).toBe(false);
+    expect(choices[2].disabled).toBe(true);
     expect(page).not.toContain("MacBook-Pro");
+  });
+
+  test("点「云盘」就把文件存进云盘，存好后自动收起", async () => {
+    const source = new FakeBridge(
+      snapshot({
+        phase: "signedIn",
+        draft: {
+          id: "draft-1",
+          files: [{ name: "季度报表.xlsx", size: 524288 }],
+        },
+      }),
+    );
+    source.sentAs = ["t9"];
+    const view = await render(<SendPanel bridge={source} />);
+    await settle();
+
+    await click(destinations(view.host)[0]);
+    expect(source.calls).toEqual(["sendToDrive"]);
+
+    const stored = (phase: TransferView["phase"], progress: number) =>
+      transfer({
+        id: "t9",
+        direction: "out",
+        target: "drive",
+        peer: "云盘",
+        name: "季度报表.xlsx",
+        size: 524288,
+        phase,
+        progress,
+      });
+    await push(source, {
+      ...snapshot({ phase: "signedIn" }),
+      transfers: [stored("inProgress", 0.5)],
+    });
+    expect(text(view.host)).toContain("正在上传到云盘 50%");
+
+    await push(source, {
+      ...snapshot({ phase: "signedIn" }),
+      transfers: [stored("complete", 1)],
+    });
+    expect(text(view.host)).toContain("已存到云盘");
+    await wait(1700);
+    expect(source.calls).toContain("closeSendPanel");
   });
 
   test("点一台在线设备就发过去，传完后自动收起", async () => {
@@ -123,7 +175,7 @@ describe("发送面板", () => {
     const view = await render(<SendPanel bridge={source} />);
     await settle();
 
-    await click(destinations(view.host)[0]);
+    await click(devices(view.host)[0]);
     expect(source.calls).toEqual(["sendToDevice:device-2"]);
 
     // Rust 那边开始上传了。
@@ -166,7 +218,7 @@ describe("发送面板", () => {
     source.sentAs = ["t1"];
     const view = await render(<SendPanel bridge={source} />);
     await settle();
-    await click(destinations(view.host)[0]);
+    await click(devices(view.host)[0]);
     await push(source, {
       ...snapshot({ phase: "signedIn" }),
       transfers: [
@@ -180,7 +232,7 @@ describe("发送面板", () => {
       ],
     });
 
-    expect(text(view.host)).toContain("没有全部发出去");
+    expect(text(view.host)).toContain("没有全部传完");
     expect(text(view.host)).toContain("发送失败：那台设备刚刚下线了。");
     expect(button(view.host, "重发没发出去的")).toBeDefined();
     await wait(1700);
@@ -207,8 +259,8 @@ describe("发送面板", () => {
     const view = await render(<SendPanel bridge={source} />);
     await settle();
 
-    await click(destinations(view.host)[0]);
+    await click(devices(view.host)[0]);
     expect(text(view.host)).toContain("那台设备刚刚下线了，没法发送。");
-    expect(destinations(view.host)).toHaveLength(1);
+    expect(devices(view.host)).toHaveLength(1);
   });
 });

@@ -3,6 +3,7 @@
 // 它是一个单独的窗口，只认标识：要发的文件、账户里的设备、每一条传输。
 // 文件在哪、怎么上传，都在 Rust 那边。挑文件、选设备、发出去，点三下就结束。
 
+import { Cloud } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
 import { Button } from "@/components/ui/button";
@@ -59,11 +60,16 @@ export function SendPanel({ bridge: source = bridge }: SendPanelProps) {
     return () => clearTimeout(timer);
   }, [outcome, source]);
 
-  async function sendTo(deviceId: string) {
+  // 云盘不是一个设备：在面板里它排在设备名单的最前面，永远可以选。
+  async function sendTo(destination: string | "drive") {
     setPending(true);
     setProblem(null);
     try {
-      setSent(await source.sendToDevice(deviceId));
+      setSent(
+        destination === "drive"
+          ? await source.sendToDrive()
+          : await source.sendToDevice(destination),
+      );
     } catch (error: unknown) {
       setProblem(messageFor(toBridgeError(error)));
     } finally {
@@ -154,7 +160,26 @@ export function SendPanel({ bridge: source = bridge }: SendPanelProps) {
               </li>
             ))}
           </ul>
-          <ul className="flex flex-col gap-2" aria-label="选择要发往的设备">
+          <ul className="flex flex-col gap-2" aria-label="选择要发往哪里">
+            <li>
+              <button
+                type="button"
+                className="flex w-full items-center justify-between gap-3 rounded-lg border border-border px-3 py-2 text-left text-sm hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
+                disabled={pending}
+                onClick={() => void sendTo("drive")}
+              >
+                <span className="flex min-w-0 items-center gap-2">
+                  <Cloud
+                    aria-hidden
+                    className="size-3.5 shrink-0 text-muted-foreground"
+                  />
+                  <span className="truncate">云盘</span>
+                </span>
+                <span className="shrink-0 text-xs text-muted-foreground">
+                  存到服务端
+                </span>
+              </button>
+            </li>
             {destinations.map((device) => (
               <li key={device.id}>
                 <button
@@ -193,7 +218,7 @@ export function SendPanel({ bridge: source = bridge }: SendPanelProps) {
       {sent ? (
         <>
           <h1 className="text-base leading-none font-semibold">
-            {outcome === "failed" ? "没有全部发出去" : "正在发送…"}
+            {outcome === "failed" ? "没有全部传完" : "正在传送…"}
           </h1>
           <ul className="flex flex-col gap-2">
             {mine.map((transfer) => (

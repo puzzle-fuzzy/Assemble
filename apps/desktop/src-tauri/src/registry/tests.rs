@@ -4,6 +4,7 @@ use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 use assemble_client::OutgoingFile;
+use assemble_protocol::drive::DriveFile;
 use assemble_protocol::primitives::Timestamp;
 use assemble_protocol::sends::{Direction, FailReason, Send as SendRecord, SendState};
 
@@ -67,7 +68,7 @@ fn queued(registry: &mut Registry) -> (String, String) {
         file("合同.pdf", 10, &"a".repeat(64)),
         file("照片.jpg", 20, &"b".repeat(64)),
     ]);
-    let mut ids = registry.queue_draft(&target());
+    let mut ids = registry.queue_draft(Destination::Device(target()));
     (ids.remove(0), ids.remove(0))
 }
 
@@ -135,7 +136,7 @@ fn receipts_go_out_after_the_files_and_stop_once_the_server_knows() {
     let mut registry = Registry::default();
     registry.offer(&incoming("a"));
     registry.set_draft(vec![file("x.bin", 1, &"c".repeat(64))]);
-    let send = registry.queue_draft(&target())[0].clone();
+    let send = registry.queue_draft(Destination::Device(target()))[0].clone();
     // 先收文件，再发文件，最后补回执。
     assert!(matches!(
         registry.next_job(now),
@@ -252,7 +253,11 @@ fn a_draft_shows_names_and_sizes_but_never_a_location() {
     registry.drop_draft();
     assert!(registry.draft_view().is_none());
     // 没有草稿时发起发送：什么都不排。
-    assert!(registry.queue_draft(&target()).is_empty());
+    assert!(
+        registry
+            .queue_draft(Destination::Device(target()))
+            .is_empty()
+    );
 }
 
 #[test]
@@ -283,7 +288,10 @@ fn a_sent_file_waits_for_the_other_device_and_then_takes_its_verdict() {
     let mut registry = Registry::default();
     let (first, _) = queued(&mut registry);
     let outgoing = registry.begin_send(&first).expect("queued");
-    assert_eq!(outgoing.target.name, "工作电脑");
+    assert!(matches!(
+        &outgoing.destination,
+        Destination::Device(device) if device.name == "工作电脑"
+    ));
     assert_eq!(outgoing.file.name(), "合同.pdf");
     assert!(outgoing.send.is_none());
     assert_eq!(view_of(&registry, &first).phase, TransferPhase::InProgress);
@@ -550,4 +558,169 @@ fn reason_to_receive(reason: FailReason) -> ReceiveFailure {
         FailReason::VerificationFailed => ReceiveFailure::VerificationFailed,
         FailReason::Cancelled => ReceiveFailure::Cancelled,
     }
+}
+
+// ---- 云盘 ----
+
+fn kept(id: &str, name: &str, size: u64, sha: &str) -> DriveFile {
+    DriveFile {
+        id: id.into(),
+        name: name.into(),
+        size,
+        mime_type: None,
+        sha256: sha.to_owned(),
+        created_at: Timestamp::now(),
+    }
+}
+
+#[test]
+fn a_draft_can_be_sent_to_the_drive_instead_of_a_device() {
+    let now = Instant::now();
+    let mut registry = Registry::default();
+    registry.set_draft(vec![file("合同.pdf", 10, &"a".repeat(64))]);
+    let ids = registry.queue_draft(Destination::Drive);
+    assert_eq!(ids, ["out-1"]);
+    assert!(registry.draft_view().is_none());
+
+    let view = &registry.views()[0];
+    assert_eq!(view.direction, Direction::Out);
+    assert_eq!(view.target, TransferTarget::Drive);
+    assert_eq!(view.peer, "云盘");
+    assert_eq!(serde_json::to_value(view).unwrap()["target"], "drive");
+
+    let outgoing = registry.begin_send(&ids[0]).expect("queued");
+    assert_eq!(outgoing.destination, Destination::Drive);
+    assert_eq!(registry.next_job(now), Next::Nothing);
+
+    // 存进云盘就完事了：没有"等对方接收"，也不欠谁回执。
+    assert!(registry.drive_uploaded(&ids[0]));
+    let view = view_of(&registry, &ids[0]);
+    assert_eq!(view.phase, TransferPhase::Complete);
+    assert!(nearly(view.progress, 1.0));
+    assert!(!view.retryable);
+    assert_eq!(registry.next_job(now), Next::Nothing);
+    // 再报一次"存好了"不改变什么。
+    assert!(!registry.drive_uploaded(&ids[0]));
+}
+
+#[test]
+fn a_drive_upload_that_did_not_fit_can_be_tried_again() {
+    let now = Instant::now();
+    let mut registry = Registry::default();
+    registry.set_draft(vec![file("备份.zip", 10, &"a".repeat(64))]);
+    let ids = registry.queue_draft(Destination::Drive);
+    registry.begin_send(&ids[0]);
+    registry.send_failed(&ids[0], TransferFailure::QuotaExceeded);
+    let view = view_of(&registry, &ids[0]);
+    assert_eq!(view.phase, TransferPhase::Failed);
+    assert_eq!(view.failure, Some(TransferFailure::QuotaExceeded));
+    assert!(view.retryable);
+    // 失败之后不会自己重试：得用户点"重发"。
+    assert_eq!(registry.next_job(now), Next::Nothing);
+    assert!(registry.retry_failed_send(&ids[0], now));
+    assert!(registry.begin_send(&ids[0]).is_some());
+}
+
+#[test]
+fn a_drive_file_is_queued_for_fetching_and_lands_like_any_other_delivery() {
+    let now = Instant::now();
+    let mut registry = Registry::default();
+    let remote = kept("f1", "合同.pdf", 10, &"a".repeat(64));
+    let id = registry.fetch_from_drive(&remote);
+    assert_eq!(id, "drive-f1");
+    // 同一个文件已经排着：不重复排。
+    assert_eq!(registry.fetch_from_drive(&remote), "drive-f1");
+    assert_eq!(registry.views().len(), 1);
+
+    let view = &registry.views()[0];
+    assert_eq!(view.direction, Direction::In);
+    assert_eq!(view.target, TransferTarget::Drive);
+    assert_eq!(view.peer, "云盘");
+    assert_eq!(view.name, "合同.pdf");
+    assert_eq!(view.size, 10);
+    assert_eq!(view.phase, TransferPhase::Queued);
+
+    // 取回排在收文件那一队里。
+    assert_eq!(
+        registry.next_job(now),
+        Next::Work(Job::Receive {
+            id: "drive-f1".into()
+        })
+    );
+    assert_eq!(
+        registry.begin_receive(&id),
+        Some(Delivery::FromDrive(remote.clone()))
+    );
+    // 取回不欠服务端回执。
+    registry.receive_completed(&id, "合同.pdf", PathBuf::from("/x/合同.pdf"), 3);
+    let view = view_of(&registry, &id);
+    assert_eq!(view.phase, TransferPhase::Complete);
+    assert_eq!(view.target, TransferTarget::Drive);
+    assert_eq!(registry.next_job(now), Next::Nothing);
+    assert_eq!(registry.settlement_of(&id), None);
+    assert_eq!(registry.saved_file(&id), Some(PathBuf::from("/x/合同.pdf")));
+    assert_eq!(
+        registry.saved_file_for_handle(3),
+        Some(PathBuf::from("/x/合同.pdf"))
+    );
+
+    // 取回来之后又排一次：这是一次新的取回。
+    assert_eq!(registry.fetch_from_drive(&remote), "drive-f1");
+    assert_eq!(registry.views().len(), 1);
+    assert_eq!(view_of(&registry, &id).phase, TransferPhase::Queued);
+}
+
+#[test]
+fn a_drive_file_that_is_gone_is_said_so_and_nothing_is_owed_to_the_server() {
+    let now = Instant::now();
+    let mut registry = Registry::default();
+    let remote = kept("f9", "旧资料.pdf", 10, &"b".repeat(64));
+    let id = registry.fetch_from_drive(&remote);
+    assert!(registry.begin_receive(&id).is_some());
+    registry.receive_failed(&id, TransferFailure::Vanished);
+    let view = view_of(&registry, &id);
+    assert_eq!(view.phase, TransferPhase::Failed);
+    assert_eq!(view.failure, Some(TransferFailure::Vanished));
+    assert!(!view.retryable);
+    assert_eq!(registry.next_job(now), Next::Nothing);
+    assert_eq!(registry.settlement_of(&id), None);
+    // 服务端关于"发送"的通知与云盘无关：不改这条记录。
+    assert_eq!(
+        registry.updated(&settled("f9", SendState::Delivered, None)),
+        Updated::Ignored
+    );
+    assert_eq!(view_of(&registry, &id).phase, TransferPhase::Failed);
+}
+
+#[test]
+fn a_fetched_drive_file_can_be_cancelled_without_telling_anyone() {
+    let mut registry = Registry::default();
+    let remote = kept("f1", "合同.pdf", 10, &"a".repeat(64));
+    let id = registry.fetch_from_drive(&remote);
+    assert_eq!(registry.cancel(&id), Cancellation::Local);
+    assert_eq!(view_of(&registry, &id).phase, TransferPhase::Cancelled);
+    assert_eq!(registry.next_job(Instant::now()), Next::Nothing);
+    assert_eq!(registry.settlement_of(&id), None);
+    // 已经排着队的取回被取消之后，还能重新排。
+    assert_eq!(registry.fetch_from_drive(&remote), "drive-f1");
+    assert_eq!(view_of(&registry, &id).phase, TransferPhase::Queued);
+}
+
+#[test]
+fn files_queued_without_a_draft_end_up_where_they_are_told() {
+    let mut registry = Registry::default();
+    let ids = registry.queue(
+        Destination::Drive,
+        vec![
+            file("a.txt", 1, &"a".repeat(64)),
+            file("b.txt", 2, &"b".repeat(64)),
+        ],
+    );
+    assert_eq!(ids, ["out-1", "out-2"]);
+    assert!(
+        registry
+            .views()
+            .iter()
+            .all(|view| view.target == TransferTarget::Drive && view.peer == "云盘")
+    );
 }

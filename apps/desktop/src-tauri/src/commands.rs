@@ -8,6 +8,7 @@ use tauri::{AppHandle, Manager};
 use tauri_plugin_autostart::ManagerExt;
 use tauri_plugin_dialog::DialogExt;
 
+use crate::registry::Destination;
 use crate::session;
 use crate::state::{AppState, LaunchState, launch_state};
 use crate::tray;
@@ -258,29 +259,24 @@ pub fn reveal_received(app: AppHandle, transfer_id: String) -> Result<(), Comman
 pub async fn start_send(app: AppHandle) -> Result<crate::state::Snapshot, CommandError> {
     match crate::send_panel::start(&app).await {
         Ok(()) => Ok(app.state::<AppState>().snapshot()),
-        Err(error) => {
-            // 面板没打开时界面还在主窗口里：把原因作为错误码交给它去显示。
-            let code = match &error {
-                crate::send_panel::StartError::TooLarge(_) => "FILE_TOO_LARGE",
-                crate::send_panel::StartError::Unreadable(_) => "FILE_UNREADABLE",
-                crate::send_panel::StartError::Window(cause) => {
-                    tracing::warn!(%cause, "the send panel could not be opened");
-                    "PANEL_UNAVAILABLE"
-                }
-            };
-            Err(CommandError::local(code, error_to_string(&error)))
-        }
+        Err(error) => Err(start_failed(&error)),
     }
 }
 
-/// 一句话的说明，只进日志。
-fn error_to_string(error: &crate::send_panel::StartError) -> String {
+/// 挑文件没成：把原因作为稳定错误码交给界面去显示，技术细节只进日志。
+fn start_failed(error: &crate::send_panel::StartError) -> CommandError {
+    use crate::send_panel::StartError;
     match error {
-        crate::send_panel::StartError::TooLarge(_) => "a chosen file is too large".to_owned(),
-        crate::send_panel::StartError::Unreadable(_) => {
-            "a chosen file could not be read".to_owned()
+        StartError::TooLarge(_) => {
+            CommandError::local("FILE_TOO_LARGE", "a chosen file is too large")
         }
-        crate::send_panel::StartError::Window(cause) => cause.to_string(),
+        StartError::Unreadable(_) => {
+            CommandError::local("FILE_UNREADABLE", "a chosen file could not be read")
+        }
+        StartError::Window(cause) => {
+            tracing::warn!(%cause, "the send panel could not be opened");
+            CommandError::local("PANEL_UNAVAILABLE", cause.to_string())
+        }
     }
 }
 
@@ -307,7 +303,7 @@ pub fn send_to_device(app: AppHandle, device_id: String) -> Result<Vec<String>, 
             "the target device is offline",
         ));
     }
-    let ids = state.queue_draft(&device);
+    let ids = state.queue_draft(Destination::Device(device));
     if ids.is_empty() {
         return Err(CommandError::local(
             "NO_DRAFT",
@@ -315,6 +311,101 @@ pub fn send_to_device(app: AppHandle, device_id: String) -> Result<Vec<String>, 
         ));
     }
     Ok(ids)
+}
+
+/// 把挑好的文件存进云盘。返回每一条传输的标识。
+#[tauri::command]
+pub fn send_to_drive(app: AppHandle) -> Result<Vec<String>, CommandError> {
+    let state = app.state::<AppState>();
+    let ids = state.queue_draft(Destination::Drive);
+    if ids.is_empty() {
+        return Err(CommandError::local(
+            "NO_DRAFT",
+            "there are no files waiting to be sent",
+        ));
+    }
+    Ok(ids)
+}
+
+/// 向服务端要一份最新的云盘名单。
+#[tauri::command]
+pub async fn drive_refresh(app: AppHandle) -> Result<crate::state::Snapshot, CommandError> {
+    let state = app.state::<AppState>();
+    let listing = state
+        .client
+        .drive(&RequestOptions::new(&state.lifetime))
+        .await
+        .map_err(|error| {
+            if error.is_unauthorized() {
+                session::revoked(&state);
+            }
+            CommandError::from(&error)
+        })?;
+    state.set_drive(Some(listing));
+    Ok(state.snapshot())
+}
+
+/// 挑几个文件存进云盘。位置由系统选择器直接交给 Rust，不经过界面。
+#[tauri::command]
+pub async fn drive_upload(app: AppHandle) -> Result<crate::state::Snapshot, CommandError> {
+    let state = app.state::<AppState>();
+    let files = crate::send_panel::pick(&app, "往云盘里存文件")
+        .await
+        .map_err(|error| start_failed(&error))?;
+    if !files.is_empty() {
+        state.queue_files(Destination::Drive, files);
+    }
+    Ok(state.snapshot())
+}
+
+/// 把云盘里的一个文件取回到这台电脑的接收位置。
+#[tauri::command]
+pub fn drive_download(
+    app: AppHandle,
+    file_id: String,
+) -> Result<crate::state::Snapshot, CommandError> {
+    let state = app.state::<AppState>();
+    let Some(file) = state.drive_file(&file_id) else {
+        return Err(CommandError::local(
+            "FILE_GONE",
+            "this file is not in the drive listing",
+        ));
+    };
+    state.fetch_from_drive(&file);
+    Ok(state.snapshot())
+}
+
+/// 从云盘里删掉一个文件。
+#[tauri::command]
+pub async fn drive_delete(
+    app: AppHandle,
+    file_id: String,
+) -> Result<crate::state::Snapshot, CommandError> {
+    let state = app.state::<AppState>();
+    let deleted = state
+        .client
+        .drive_delete(&file_id, &RequestOptions::new(&state.lifetime))
+        .await;
+    match deleted {
+        Ok(()) => {}
+        Err(error) => {
+            if error.is_unauthorized() {
+                session::revoked(&state);
+            }
+            tracing::debug!(%error, "a drive file could not be removed");
+            return Err(CommandError::from(&error));
+        }
+    }
+    // 以服务端的名单为准：别处的改动也一并带回来。
+    match state
+        .client
+        .drive(&RequestOptions::new(&state.lifetime))
+        .await
+    {
+        Ok(listing) => state.set_drive(Some(listing)),
+        Err(error) => tracing::debug!(%error, "the drive could not be listed after a removal"),
+    }
+    Ok(state.snapshot())
 }
 
 /// 关掉发送面板。挑好却没发的文件不再留着。

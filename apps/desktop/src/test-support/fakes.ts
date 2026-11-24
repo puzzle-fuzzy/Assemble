@@ -4,6 +4,7 @@
 import type { Bridge, BridgeError, UnlistenFn } from "@/lib/bridge";
 import type {
   DeviceView,
+  DriveView,
   LaunchState,
   ServiceView,
   Snapshot,
@@ -46,6 +47,26 @@ export function signedIn(
   return { phase: "signedIn", account, device: { ...DEVICE } };
 }
 
+/** 云盘名单的一份样本：两个文件，空间用了一点。 */
+export const DRIVE: DriveView = {
+  items: [
+    {
+      id: "file-1",
+      name: "季度报表.xlsx",
+      size: 524288,
+      createdAt: "2026-11-24T02:30:00.000Z",
+    },
+    {
+      id: "file-2",
+      name: "合同.pdf",
+      size: 1048576,
+      createdAt: "2026-11-23T09:05:00.000Z",
+    },
+  ],
+  usedBytes: 1572864,
+  limitBytes: 2147483648,
+};
+
 export function snapshot(overrides: Overrides = {}): Snapshot {
   const { phase, ...rest } = overrides;
   const session: Snapshot["session"] =
@@ -57,10 +78,12 @@ export function snapshot(overrides: Overrides = {}): Snapshot {
   return {
     service: service(),
     session,
-    // 没登录时 Rust 不会给出设备列表，也不会留着传输记录或草稿。
+    // 没登录时 Rust 不会给出设备列表，也不会留着传输记录、草稿或云盘名单。
+    // 登录之后连上服务时，Rust 会把云盘名单拿回来。
     devices: phase === "signedIn" ? [{ ...DEVICE }] : [],
     transfers: [],
     draft: null,
+    drive: phase === "signedIn" ? DRIVE : null,
     receive: { customFolder: null },
     launchAtLogin: "disabled",
     notice: null,
@@ -68,7 +91,7 @@ export function snapshot(overrides: Overrides = {}): Snapshot {
   };
 }
 
-/** 一条传输记录；不说明阶段时，是一个已经收好的文件。 */
+/** 一条传输记录；不说明阶段时，是一个从别的设备收到、已经存好的文件。 */
 export function transfer(overrides: Partial<TransferView> = {}): TransferView {
   return {
     id: "t1",
@@ -81,6 +104,7 @@ export function transfer(overrides: Partial<TransferView> = {}): TransferView {
     savedAs: null,
     failure: null,
     retryable: false,
+    target: "device",
     ...overrides,
   };
 }
@@ -165,6 +189,28 @@ export class FakeBridge implements Bridge {
     this.calls.push(`sendToDevice:${deviceId}`);
     if (this.failWith) throw this.failWith;
     return Promise.resolve(this.sentAs);
+  }
+
+  sendToDrive() {
+    this.calls.push("sendToDrive");
+    if (this.failWith) throw this.failWith;
+    return Promise.resolve(this.sentAs);
+  }
+
+  driveRefresh() {
+    return this.answer("driveRefresh", this.current);
+  }
+
+  driveUpload() {
+    return this.answer("driveUpload", this.current);
+  }
+
+  driveDownload(fileId: string) {
+    return this.answer(`driveDownload:${fileId}`, this.current);
+  }
+
+  driveDelete(fileId: string) {
+    return this.answer(`driveDelete:${fileId}`, this.current);
   }
 
   closeSendPanel() {

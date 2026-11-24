@@ -13,6 +13,7 @@ const STATE: Snapshot = {
   devices: [],
   transfers: [],
   draft: null,
+  drive: null,
   receive: { customFolder: null },
   launchAtLogin: "disabled",
   notice: null,
@@ -73,7 +74,13 @@ describe("桥接", () => {
     // 发起发送的命令交回的是一组标识，不是状态。
     respondWith = ["transfer-1"];
     await bridge.sendToDevice("device-2");
+    respondWith = ["transfer-1"];
+    await bridge.sendToDrive();
     respondWith = STATE;
+    await bridge.driveRefresh();
+    await bridge.driveUpload();
+    await bridge.driveDownload("file-1");
+    await bridge.driveDelete("file-1");
     await bridge.closeSendPanel();
     await bridge.openMain();
     await bridge.cancelTransfer("transfer-1");
@@ -97,6 +104,11 @@ describe("桥接", () => {
       { command: "reveal_received", args: { transferId: "transfer-1" } },
       { command: "start_send", args: {} },
       { command: "send_to_device", args: { deviceId: "device-2" } },
+      { command: "send_to_drive", args: {} },
+      { command: "drive_refresh", args: {} },
+      { command: "drive_upload", args: {} },
+      { command: "drive_download", args: { fileId: "file-1" } },
+      { command: "drive_delete", args: { fileId: "file-1" } },
       { command: "close_send_panel", args: {} },
       { command: "open_main", args: {} },
       { command: "cancel_transfer", args: { transferId: "transfer-1" } },

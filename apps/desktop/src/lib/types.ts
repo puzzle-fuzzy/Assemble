@@ -71,7 +71,14 @@ export type TransferFailure =
   /** 要发的文件读不出来了：被移走、被改动，或者没有权限。 */
   | "fileUnreadable"
   /** 服务端拒绝了这次发送。 */
-  | "rejected";
+  | "rejected"
+  /** 云盘空间不够。 */
+  | "quotaExceeded"
+  /** 云盘里的文件在取回之前就被删掉了。 */
+  | "vanished";
+
+/** 一条传输的另一头是谁。 */
+export type TransferTarget = /** 一台设备。 */ "device" /** 云盘。 */ | "drive";
 
 /** 一次传输在界面上的样子。 */
 export interface TransferView {
@@ -90,6 +97,24 @@ export interface TransferView {
   failure: TransferFailure | null;
   /** 能不能再发一次。规则在 Rust 里，界面照着显示按钮。 */
   retryable: boolean;
+  /** 另一头是谁。文案据此措辞。 */
+  target: TransferTarget;
+}
+
+export interface DriveFileView {
+  id: string;
+  name: string;
+  size: number;
+  /** 放进云盘的时间。 */
+  createdAt: string;
+}
+
+/** 云盘里的文件与空间。 */
+export interface DriveView {
+  /** 新的在前。 */
+  items: DriveFileView[];
+  usedBytes: number;
+  limitBytes: number;
 }
 
 export interface DraftFile {
@@ -128,6 +153,8 @@ export interface Snapshot {
   transfers: TransferView[];
   /** 用户挑好、还没决定发给谁的文件。没有草稿时为 null。 */
   draft: DraftView | null;
+  /** 云盘里的文件与空间。没登录时为 null。 */
+  drive: DriveView | null;
   receive: ReceiveView;
   launchAtLogin: LaunchState;
   notice: Notice | null;

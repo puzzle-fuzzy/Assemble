@@ -11,6 +11,7 @@
     "devices": [],
     "transfers": [],
     "draft": null,
+    "drive": null,
     "receive": {
       "customFolder": null
     },
@@ -29,6 +30,7 @@
     "devices": [],
     "transfers": [],
     "draft": null,
+    "drive": null,
     "receive": {
       "customFolder": null
     },
@@ -71,6 +73,7 @@
     ],
     "transfers": [],
     "draft": null,
+    "drive": null,
     "receive": {
       "customFolder": null
     },
@@ -89,6 +92,7 @@
     "devices": [],
     "transfers": [],
     "draft": null,
+    "drive": null,
     "receive": {
       "customFolder": null
     },
@@ -110,6 +114,7 @@
     "devices": [],
     "transfers": [],
     "draft": null,
+    "drive": null,
     "receive": {
       "customFolder": null
     },
@@ -155,6 +160,7 @@
     ],
     "transfers": [],
     "draft": null,
+    "drive": null,
     "receive": {
       "customFolder": null
     },
@@ -197,6 +203,7 @@
     ],
     "transfers": [],
     "draft": null,
+    "drive": null,
     "receive": {
       "customFolder": null
     },
@@ -248,7 +255,8 @@
         "progress": 0.45,
         "savedAs": null,
         "failure": null,
-        "retryable": false
+        "retryable": false,
+        "target": "device"
       },
       {
         "id": "0f1e2d3c4b5a69788796a5b4c3d2e1f2",
@@ -260,7 +268,8 @@
         "progress": 0.0,
         "savedAs": null,
         "failure": null,
-        "retryable": false
+        "retryable": false,
+        "target": "device"
       },
       {
         "id": "1a2b3c4d5e6f708192a3b4c5d6e7f809",
@@ -272,7 +281,8 @@
         "progress": 1.0,
         "savedAs": "照片 (2).jpg",
         "failure": null,
-        "retryable": false
+        "retryable": false,
+        "target": "device"
       },
       {
         "id": "2b3c4d5e6f708192a3b4c5d6e7f8091a",
@@ -284,7 +294,8 @@
         "progress": 0.0,
         "savedAs": null,
         "failure": "diskFull",
-        "retryable": false
+        "retryable": false,
+        "target": "device"
       },
       {
         "id": "3c4d5e6f708192a3b4c5d6e7f8091a2b",
@@ -296,7 +307,8 @@
         "progress": 0.0,
         "savedAs": null,
         "failure": null,
-        "retryable": false
+        "retryable": false,
+        "target": "device"
       },
       {
         "id": "4d5e6f708192a3b4c5d6e7f8091a2b3c",
@@ -308,10 +320,12 @@
         "progress": 0.0,
         "savedAs": null,
         "failure": null,
-        "retryable": false
+        "retryable": false,
+        "target": "device"
       }
     ],
     "draft": null,
+    "drive": null,
     "receive": {
       "customFolder": null
     },
@@ -363,10 +377,12 @@
         "progress": 0.0,
         "savedAs": null,
         "failure": "verificationFailed",
-        "retryable": false
+        "retryable": false,
+        "target": "device"
       }
     ],
     "draft": null,
+    "drive": null,
     "receive": {
       "customFolder": "工作资料"
     },
@@ -418,10 +434,12 @@
         "progress": 0.0,
         "savedAs": null,
         "failure": "writeFailed",
-        "retryable": false
+        "retryable": false,
+        "target": "device"
       }
     ],
     "draft": null,
+    "drive": null,
     "receive": {
       "customFolder": null
     },
@@ -473,7 +491,8 @@
         "progress": 0.0,
         "savedAs": null,
         "failure": "deviceOffline",
-        "retryable": true
+        "retryable": true,
+        "target": "device"
       },
       {
         "id": "out-3",
@@ -485,7 +504,8 @@
         "progress": 0.0,
         "savedAs": null,
         "failure": null,
-        "retryable": false
+        "retryable": false,
+        "target": "device"
       },
       {
         "id": "out-2",
@@ -497,7 +517,8 @@
         "progress": 1.0,
         "savedAs": null,
         "failure": null,
-        "retryable": false
+        "retryable": false,
+        "target": "device"
       },
       {
         "id": "out-1",
@@ -509,7 +530,8 @@
         "progress": 1.0,
         "savedAs": null,
         "failure": null,
-        "retryable": false
+        "retryable": false,
+        "target": "device"
       }
     ],
     "draft": {
@@ -524,6 +546,24 @@
           "size": 2048
         }
       ]
+    },
+    "drive": {
+      "items": [
+        {
+          "id": "f-2",
+          "name": "季度报表.xlsx",
+          "size": 524288,
+          "createdAt": "2026-11-24T02:20:00.000Z"
+        },
+        {
+          "id": "f-1",
+          "name": "合同.pdf",
+          "size": 1048576,
+          "createdAt": "2026-11-23T09:05:00.000Z"
+        }
+      ],
+      "usedBytes": 1572864,
+      "limitBytes": 2147483648
     },
     "receive": {
       "customFolder": null
@@ -581,7 +621,8 @@
         "progress": 0.0,
         "savedAs": null,
         "failure": "tooLarge",
-        "retryable": true
+        "retryable": true,
+        "target": "device"
       },
       {
         "id": "out-5",
@@ -593,7 +634,8 @@
         "progress": 0.0,
         "savedAs": null,
         "failure": "writeFailed",
-        "retryable": false
+        "retryable": false,
+        "target": "device"
       },
       {
         "id": "out-7",
@@ -605,7 +647,8 @@
         "progress": 0.0,
         "savedAs": null,
         "failure": null,
-        "retryable": false
+        "retryable": false,
+        "target": "device"
       },
       {
         "id": "out-8",
@@ -617,7 +660,8 @@
         "progress": 0.0,
         "savedAs": null,
         "failure": null,
-        "retryable": false
+        "retryable": false,
+        "target": "device"
       },
       {
         "id": "out-9",
@@ -629,7 +673,8 @@
         "progress": 0.3,
         "savedAs": null,
         "failure": null,
-        "retryable": false
+        "retryable": false,
+        "target": "device"
       },
       {
         "id": "out-10",
@@ -641,7 +686,8 @@
         "progress": 0.0,
         "savedAs": null,
         "failure": null,
-        "retryable": false
+        "retryable": false,
+        "target": "device"
       },
       {
         "id": "out-11",
@@ -653,9 +699,150 @@
         "progress": 0.0,
         "savedAs": null,
         "failure": "fileUnreadable",
-        "retryable": true
+        "retryable": true,
+        "target": "device"
       }
     ],
-    "draft": null
+    "draft": null,
+    "drive": null
+  },
+  {
+    "service": {
+      "target": "production",
+      "reachable": true,
+      "stream": "connected"
+    },
+    "session": {
+      "phase": "signedIn",
+      "account": {
+        "id": "3d1c0a5e-6cf4-4d3a-9a67-1f2f4c1f6f01",
+        "username": "example",
+        "displayName": "Example"
+      },
+      "device": {
+        "id": "9b2e7c4d1a5f4e3b8c6d0a1b2c3d4e5f",
+        "name": "MacBook-Pro",
+        "platform": "macos",
+        "online": true
+      }
+    },
+    "devices": [
+      {
+        "id": "9b2e7c4d1a5f4e3b8c6d0a1b2c3d4e5f",
+        "name": "MacBook-Pro",
+        "platform": "macos",
+        "online": true
+      },
+      {
+        "id": "c1d2e3f4a5b64c7d8e9f0a1b2c3d4e5f",
+        "name": "工作电脑",
+        "platform": "windows",
+        "online": true
+      }
+    ],
+    "transfers": [
+      {
+        "id": "out-14",
+        "direction": "out",
+        "target": "drive",
+        "peer": "云盘",
+        "name": "照片.jpg",
+        "size": 2048000,
+        "phase": "queued",
+        "progress": 0.0,
+        "savedAs": null,
+        "failure": null,
+        "retryable": false
+      },
+      {
+        "id": "out-13",
+        "direction": "out",
+        "target": "drive",
+        "peer": "云盘",
+        "name": "视频.mp4",
+        "size": 52428800,
+        "phase": "inProgress",
+        "progress": 0.6,
+        "savedAs": null,
+        "failure": null,
+        "retryable": false
+      },
+      {
+        "id": "out-12",
+        "direction": "out",
+        "target": "drive",
+        "peer": "云盘",
+        "name": "备份.zip",
+        "size": 99614720,
+        "phase": "failed",
+        "progress": 0.0,
+        "savedAs": null,
+        "failure": "quotaExceeded",
+        "retryable": true
+      },
+      {
+        "id": "out-11",
+        "direction": "out",
+        "target": "drive",
+        "peer": "云盘",
+        "name": "季度报表.xlsx",
+        "size": 524288,
+        "phase": "complete",
+        "progress": 1.0,
+        "savedAs": null,
+        "failure": null,
+        "retryable": false
+      },
+      {
+        "id": "drive-f-1",
+        "direction": "in",
+        "target": "drive",
+        "peer": "云盘",
+        "name": "合同.pdf",
+        "size": 1048576,
+        "phase": "complete",
+        "progress": 1.0,
+        "savedAs": null,
+        "failure": null,
+        "retryable": false
+      },
+      {
+        "id": "drive-f-9",
+        "direction": "in",
+        "target": "drive",
+        "peer": "云盘",
+        "name": "旧资料.pdf",
+        "size": 8192,
+        "phase": "failed",
+        "progress": 0.0,
+        "savedAs": null,
+        "failure": "vanished",
+        "retryable": false
+      }
+    ],
+    "draft": null,
+    "drive": {
+      "items": [
+        {
+          "id": "f-3",
+          "name": "季度报表.xlsx",
+          "size": 524288,
+          "createdAt": "2026-11-24T02:30:00.000Z"
+        },
+        {
+          "id": "f-1",
+          "name": "合同.pdf",
+          "size": 1048576,
+          "createdAt": "2026-11-23T09:05:00.000Z"
+        }
+      ],
+      "usedBytes": 1572864,
+      "limitBytes": 1073741824
+    },
+    "receive": {
+      "customFolder": null
+    },
+    "launchAtLogin": "enabled",
+    "notice": null
   }
 ]

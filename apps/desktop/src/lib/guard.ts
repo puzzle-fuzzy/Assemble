@@ -7,6 +7,7 @@ import type {
   AccountView,
   DeviceView,
   DraftView,
+  DriveView,
   LaunchState,
   Notice,
   Platform,
@@ -17,6 +18,7 @@ import type {
   TransferDirection,
   TransferFailure,
   TransferPhase,
+  TransferTarget,
   TransferView,
 } from "@/lib/types";
 
@@ -109,8 +111,14 @@ export function isTransferFailure(value: unknown): value is TransferFailure {
     value === "deviceOffline" ||
     value === "tooLarge" ||
     value === "fileUnreadable" ||
-    value === "rejected"
+    value === "rejected" ||
+    value === "quotaExceeded" ||
+    value === "vanished"
   );
+}
+
+export function isTransferTarget(value: unknown): value is TransferTarget {
+  return value === "device" || value === "drive";
 }
 
 export function isTransferView(value: unknown): value is TransferView {
@@ -125,7 +133,25 @@ export function isTransferView(value: unknown): value is TransferView {
     typeof value.progress === "number" &&
     (value.savedAs === null || typeof value.savedAs === "string") &&
     (value.failure === null || isTransferFailure(value.failure)) &&
-    typeof value.retryable === "boolean"
+    typeof value.retryable === "boolean" &&
+    isTransferTarget(value.target)
+  );
+}
+
+export function isDriveView(value: unknown): value is DriveView {
+  return (
+    isRecord(value) &&
+    typeof value.usedBytes === "number" &&
+    typeof value.limitBytes === "number" &&
+    Array.isArray(value.items) &&
+    value.items.every(
+      (item) =>
+        isRecord(item) &&
+        hasString(item, "id") &&
+        hasString(item, "name") &&
+        hasString(item, "createdAt") &&
+        typeof item.size === "number",
+    )
   );
 }
 
@@ -170,6 +196,7 @@ export function isSnapshot(value: unknown): value is Snapshot {
     Array.isArray(value.transfers) &&
     value.transfers.every(isTransferView) &&
     (value.draft === null || isDraftView(value.draft)) &&
+    (value.drive === null || isDriveView(value.drive)) &&
     isRecord(value.receive) &&
     (value.receive.customFolder === null ||
       typeof value.receive.customFolder === "string") &&

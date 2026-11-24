@@ -100,7 +100,15 @@ describe("状态契约样本", () => {
         "deviceOffline",
         "tooLarge",
         "fileUnreadable",
+        "quotaExceeded",
+        "vanished",
       ]),
+    );
+    expect(new Set(transfers.map((t) => t.target))).toEqual(
+      new Set(["device", "drive"]),
+    );
+    expect(new Set(snapshots.map((s) => s.drive === null))).toEqual(
+      new Set([true, false]),
     );
     expect(new Set(transfers.map((t) => t.retryable))).toEqual(
       new Set([true, false]),
@@ -123,6 +131,8 @@ describe("状态契约样本", () => {
       "tooLarge",
       "fileUnreadable",
       "rejected",
+      // 没存进云盘的，云盘里自然没有它。
+      "quotaExceeded",
     ];
     for (const transfer of transfers) {
       expect(transfer.failure !== null).toBe(transfer.phase === "failed");
@@ -134,6 +144,14 @@ describe("状态契约样本", () => {
       // 等对方接收、被拒收，只出现在发出去的传输上。
       if (transfer.phase === "waiting" || transfer.phase === "declined") {
         expect(transfer.direction).toBe("out");
+        expect(transfer.target).toBe("device");
+      }
+      // 另一头是云盘的，名字就叫"云盘"。
+      expect(transfer.peer === "云盘").toBe(transfer.target === "drive");
+      // "云盘里已经没有这个文件了"只会出现在取回的时候。
+      if (transfer.failure === "vanished") {
+        expect(transfer.direction).toBe("in");
+        expect(transfer.target).toBe("drive");
       }
       // 收好了、发出去了进度就是 1；传输中在 0 与 1 之间；其余都是 0。
       const done =
@@ -155,13 +173,24 @@ describe("状态契约样本", () => {
       expect(draft.files.length).toBeGreaterThan(0);
       expect(JSON.stringify(draft)).not.toContain("/");
     }
-    // 没登录就没有传输记录，也没有草稿。
+    // 云盘名单里只有名字、大小与时间：没有摘要，也没有位置。
+    for (const drive of snapshots.flatMap((s) => (s.drive ? [s.drive] : []))) {
+      expect(drive.limitBytes).toBeGreaterThan(0);
+      expect(drive.usedBytes).toBeLessThanOrEqual(drive.limitBytes);
+      expect(drive.items.length).toBeGreaterThan(0);
+      const text = JSON.stringify(drive.items);
+      expect(text).not.toContain("sha256");
+      expect(text).not.toContain("/");
+    }
+    // 没登录就没有传输记录，也没有草稿和云盘名单。
     expect(
       snapshots
         .filter((snapshot) => snapshot.session.phase !== "signedIn")
         .every(
           (snapshot) =>
-            snapshot.transfers.length === 0 && snapshot.draft === null,
+            snapshot.transfers.length === 0 &&
+            snapshot.draft === null &&
+            snapshot.drive === null,
         ),
     ).toBe(true);
   });

@@ -48,8 +48,18 @@ export interface Bridge {
   startSend(): Promise<Snapshot>;
   /** 把挑好的文件发给一台设备。返回每一条传输的标识，面板据此盯着进度。 */
   sendToDevice(deviceId: string): Promise<string[]>;
+  /** 把挑好的文件存进云盘。返回每一条传输的标识。 */
+  sendToDrive(): Promise<string[]>;
   /** 关掉发送面板。挑好却没发的文件不再留着。 */
   closeSendPanel(): Promise<void>;
+  /** 向服务端要一份最新的云盘名单。 */
+  driveRefresh(): Promise<Snapshot>;
+  /** 挑几个文件存进云盘。位置由系统选择器直接交给 Rust，不经过界面。 */
+  driveUpload(): Promise<Snapshot>;
+  /** 把云盘里的一个文件取回到接收位置。 */
+  driveDownload(fileId: string): Promise<Snapshot>;
+  /** 从云盘里删掉一个文件。 */
+  driveDelete(fileId: string): Promise<Snapshot>;
   /** 把主窗口叫到前面。发送面板里"请先登录"时用。 */
   openMain(): Promise<void>;
   /** 取消一条传输：还没传完的停下，已经到服务端的撤回。 */
@@ -83,6 +93,13 @@ export const bridge: Bridge = {
   startSend: () => checked(() => invoke<unknown>("start_send")),
   sendToDevice: (deviceId) =>
     ids(() => invoke<unknown>("send_to_device", { deviceId })),
+  sendToDrive: () => ids(() => invoke<unknown>("send_to_drive")),
+  driveRefresh: () => checked(() => invoke<unknown>("drive_refresh")),
+  driveUpload: () => checked(() => invoke<unknown>("drive_upload")),
+  driveDownload: (fileId) =>
+    checked(() => invoke<unknown>("drive_download", { fileId })),
+  driveDelete: (fileId) =>
+    checked(() => invoke<unknown>("drive_delete", { fileId })),
   closeSendPanel: () => invoke<void>("close_send_panel"),
   openMain: () => invoke<void>("open_main"),
   cancelTransfer: (transferId) =>

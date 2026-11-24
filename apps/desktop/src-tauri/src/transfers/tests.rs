@@ -25,7 +25,10 @@ use tauri::Manager;
 use tokio_util::sync::CancellationToken;
 
 use super::*;
-use crate::registry::{Cancellation, Next, TransferFailure, TransferPhase, TransferView};
+use crate::registry::{
+    Cancellation, Delivery, Destination, Next, TransferFailure, TransferPhase, TransferTarget,
+    TransferView,
+};
 use crate::state::{AccountView, AppState, DeviceView, Notifier, SessionView, Settings};
 
 /// 等一件事发生的上限。本机回环上的一切都是毫秒级的，超过它就是卡住了。
@@ -163,10 +166,25 @@ async fn register(pool: &SqlitePool, account_id: &str, name: &str) -> Device {
 
 /// 起一个真实的服务端，登记一个账户与两台设备，再把"桌面端"登录到这个账户。
 async fn fixture() -> Fixture {
+    fixture_with_quota(None).await
+}
+
+/// `quota` 为 `None` 时用默认的云盘容量。
+async fn fixture_with_quota(quota: Option<u64>) -> Fixture {
     let dir = tempfile::tempdir().unwrap();
-    let server = TestServer::start_default(&dir.path().join("server"))
-        .await
-        .unwrap();
+    let data = dir.path().join("server");
+    let server = match quota {
+        None => TestServer::start_default(&data).await.unwrap(),
+        Some(quota) => {
+            let pool = assemble_server::db::open(&data).await.unwrap();
+            let config = assemble_server::Config::development(&data);
+            let config = assemble_server::Config {
+                drive_quota_bytes: quota,
+                ..config
+            };
+            TestServer::start(config, pool).await.unwrap()
+        }
+    };
     let pool = server.state.pool.clone();
     let account = assemble_server::accounts::create(
         &pool,
@@ -545,12 +563,10 @@ async fn withdrawing_stops_the_receive_that_is_under_way() {
     {
         let state = f.state();
         state.offer(&offered("s1", "a.txt"));
-        assert_eq!(
-            state
-                .begin_receive("s1")
-                .as_ref()
-                .map(|send| send.id.as_str()),
-            Some("s1")
+        let taken = state.begin_receive("s1");
+        assert!(
+            matches!(taken, Some(Delivery::FromDevice(send)) if send.id == "s1"),
+            "the queued file is picked up"
         );
 
         let under_way = CancellationToken::new();
@@ -813,7 +829,7 @@ async fn failures_to_fetch_content_are_sorted_by_who_should_hear_about_them() {
         );
 
         let cancel = CancellationToken::new();
-        let outcome = pull(&state, &send, &cancel).await;
+        let outcome = pull(&state, &claim(&Delivery::FromDevice(send.clone())), &cancel).await;
         let saved = match &outcome {
             Outcome::Saved { received, .. } => Some(received.path.clone()),
             _ => None,
@@ -1014,7 +1030,7 @@ async fn a_file_picked_here_reaches_the_other_device_and_is_complete_once_it_is_
     assert!(!shown.contains("outgoing"), "{shown}");
 
     // 用户在面板里点了那台设备。
-    let ids = f.state().queue_draft(&target);
+    let ids = f.state().queue_draft(Destination::Device(target.clone()));
     assert_eq!(ids.len(), 1);
     assert!(f.state().snapshot().draft.is_none(), "the draft is used up");
 
@@ -1058,7 +1074,7 @@ async fn a_device_that_is_offline_by_the_time_the_upload_lands_means_the_file_wa
 
     let file = pick(&f.dir, "合同.pdf", &payload(50_000)).await;
     f.state().set_draft(vec![file.clone()]);
-    let ids = f.state().queue_draft(&target);
+    let ids = f.state().queue_draft(Destination::Device(target.clone()));
 
     until("the refusal to be recorded", || {
         view_of(&f, &ids[0]).phase == TransferPhase::Failed
@@ -1096,7 +1112,7 @@ async fn cancelling_a_sent_file_withdraws_it_before_the_other_device_looks() {
 
     let file = pick(&f.dir, "合同.pdf", &payload(10_000)).await;
     f.state().set_draft(vec![file.clone()]);
-    let ids = f.state().queue_draft(&target);
+    let ids = f.state().queue_draft(Destination::Device(target.clone()));
     let offered = next_send_on(&mut receiver).await;
     until("the file to be uploaded", || {
         view_of(&f, &ids[0]).phase == TransferPhase::Waiting
@@ -1133,7 +1149,7 @@ async fn an_upload_abandoned_halfway_is_withdrawn_once_it_turns_out_to_have_arri
 
     let file = pick(&f.dir, "合同.pdf", &payload(10_000)).await;
     f.state().set_draft(vec![file.clone()]);
-    let ids = f.state().queue_draft(&target);
+    let ids = f.state().queue_draft(Destination::Device(target.clone()));
     // 接收任务没在跑：模拟"正在上传"。
     assert!(f.state().begin_send(&ids[0]).is_some());
     assert_eq!(f.state().cancel_transfer(&ids[0]), Cancellation::Local);
@@ -1170,7 +1186,7 @@ async fn an_abandoned_upload_that_arrived_unnoticed_is_withdrawn_at_the_next_che
 
     let file = pick(&f.dir, "合同.pdf", &payload(10_000)).await;
     f.state().set_draft(vec![file.clone()]);
-    let ids = f.state().queue_draft(&target);
+    let ids = f.state().queue_draft(Destination::Device(target.clone()));
     assert!(f.state().begin_send(&ids[0]).is_some());
     assert_eq!(f.state().cancel_transfer(&ids[0]), Cancellation::Local);
 
@@ -1214,7 +1230,7 @@ async fn a_file_that_vanishes_before_it_is_sent_can_be_sent_again_once_it_is_bac
         .await
         .unwrap();
     f.state().set_draft(vec![file.clone()]);
-    let ids = f.state().queue_draft(&target);
+    let ids = f.state().queue_draft(Destination::Device(target.clone()));
     // 还没开始发，文件就被移走了。
     std::fs::remove_file(&path).unwrap();
     f.start_receiving();
@@ -1264,5 +1280,231 @@ async fn cancelling_a_receive_tells_the_sender_why_the_file_stopped() {
     assert_eq!(seen.state, SendState::Failed);
     assert_eq!(seen.failure, Some(FailReason::Cancelled));
     assert!(!f.inbox().exists());
+    f.finish().await;
+}
+
+// ---- 云盘 ----
+//
+// 存进云盘、从云盘取回，走的也是后台任务那一个队列。服务端是真实的。
+
+/// 从云盘里取回一个文件的全部内容（由另一台设备去取，用来核对）。
+async fn on_the_drive(f: &Fixture, id: &str) -> Vec<u8> {
+    use tokio::io::AsyncReadExt;
+
+    let download = f
+        .sender
+        .drive_content(id, TransferOptions::new(&f.hold), None)
+        .await
+        .unwrap();
+    let mut bytes = Vec::new();
+    download
+        .into_reader()
+        .read_to_end(&mut bytes)
+        .await
+        .unwrap();
+    bytes
+}
+
+#[tokio::test]
+async fn a_draft_sent_to_the_drive_is_stored_and_the_listing_shows_it() {
+    let f = fixture().await;
+    f.start_receiving();
+    let bytes = payload(120_000);
+    let file = pick(&f.dir, "季度报表.xlsx", &bytes).await;
+
+    // 用户在面板里点了"云盘"。
+    f.state().set_draft(vec![file.clone()]);
+    let ids = f.state().queue_draft(Destination::Drive);
+    assert_eq!(ids.len(), 1);
+    until("the file to be stored in the drive", || {
+        view_of(&f, &ids[0]).phase == TransferPhase::Complete
+    })
+    .await;
+
+    let view = view_of(&f, &ids[0]);
+    assert_eq!(view.direction, Direction::Out);
+    assert_eq!(view.target, TransferTarget::Drive);
+    assert_eq!(view.peer, "云盘");
+    assert!(!view.retryable);
+    assert_eq!(view.saved_as, None);
+
+    // 存好之后名单换新了：界面看得到它，也看得到空间。
+    let listing = f
+        .state()
+        .snapshot()
+        .drive
+        .expect("the listing was refreshed after the upload");
+    assert_eq!(
+        listing
+            .items
+            .iter()
+            .map(|item| item.name.clone())
+            .collect::<Vec<_>>(),
+        ["季度报表.xlsx"]
+    );
+    assert_eq!(listing.used_bytes, bytes.len() as u64);
+    assert_eq!(listing.limit_bytes, f.server.state.config.drive_quota_bytes);
+    let shown = serde_json::to_string(&listing).unwrap();
+    assert!(!shown.contains("sha256"), "{shown}");
+
+    // 服务端那边确实有了：另一台设备取得回，内容一字不差。
+    let remote_id = &listing.items[0].id;
+    assert_eq!(on_the_drive(&f, remote_id).await, bytes);
+    // 存进云盘没有"等对方接收"的尾巴：没有活可领，也不欠回执。
+    assert_eq!(f.state().next_job(), Next::Nothing);
+    f.finish().await;
+}
+
+#[tokio::test]
+async fn a_drive_file_fetched_here_lands_in_the_inbox_like_any_other_delivery() {
+    let f = fixture().await;
+    // 另一台设备先把文件存进了云盘。
+    let bytes = payload(50_000);
+    let file = pick(&f.dir, "合同.pdf", &bytes).await;
+    let stored = f
+        .sender
+        .drive_upload("合同.pdf", &file, TransferOptions::new(&f.hold), None)
+        .await
+        .unwrap();
+    refresh_drive(&f.state()).await;
+    assert_eq!(
+        f.state()
+            .snapshot()
+            .drive
+            .map(|listing| listing.items.len()),
+        Some(1)
+    );
+    let remote = f
+        .state()
+        .drive_file(&stored.id)
+        .expect("the file is on the listing");
+
+    // 用户点了"取回"。
+    f.start_receiving();
+    let id = f.state().fetch_from_drive(&remote);
+    until("the file to be fetched", || {
+        f.state().saved_file(&id).is_some()
+    })
+    .await;
+    let saved = f.state().saved_file(&id).unwrap();
+    assert_eq!(std::fs::read(&saved).unwrap(), bytes);
+    assert_eq!(
+        saved,
+        std::fs::canonicalize(f.inbox().join("合同.pdf")).unwrap()
+    );
+
+    let view = view_of(&f, &id);
+    assert_eq!(view.direction, Direction::In);
+    assert_eq!(view.target, TransferTarget::Drive);
+    assert_eq!(view.phase, TransferPhase::Complete);
+    assert_eq!(view.name, "合同.pdf");
+    // 通知登记过了，点它找得回文件；没有回执要补。
+    assert_eq!(f.state().saved_file_for_handle(1), Some(saved));
+    assert_eq!(f.state().next_job(), Next::Nothing);
+
+    // 再取一次：不覆盖先前那份，加序号；记录还是同一条。
+    assert_eq!(f.state().fetch_from_drive(&remote), id);
+    until("the second copy to be fetched", || {
+        view_of(&f, &id).phase == TransferPhase::Complete
+            && view_of(&f, &id).saved_as.as_deref() == Some("合同 (2).pdf")
+    })
+    .await;
+    assert_eq!(entries(&f.inbox()), ["合同 (2).pdf", "合同.pdf"]);
+    assert_eq!(
+        f.state()
+            .snapshot()
+            .transfers
+            .iter()
+            .filter(|t| t.id == id)
+            .count(),
+        1
+    );
+    f.finish().await;
+}
+
+#[tokio::test]
+async fn a_drive_file_removed_before_it_is_fetched_is_reported_as_gone() {
+    let f = fixture().await;
+    let file = pick(&f.dir, "旧资料.pdf", &payload(800)).await;
+    let stored = f
+        .sender
+        .drive_upload("旧资料.pdf", &file, TransferOptions::new(&f.hold), None)
+        .await
+        .unwrap();
+    refresh_drive(&f.state()).await;
+    let remote = f.state().drive_file(&stored.id).expect("on the listing");
+    let id = f.state().fetch_from_drive(&remote);
+
+    // 还没开始取，另一台设备把它从云盘里删了。
+    f.sender
+        .drive_delete(&stored.id, &RequestOptions::new(&f.hold))
+        .await
+        .unwrap();
+    f.start_receiving();
+    until("the disappearance to be recorded", || {
+        view_of(&f, &id).phase == TransferPhase::Failed
+    })
+    .await;
+    let view = view_of(&f, &id);
+    assert_eq!(view.failure, Some(TransferFailure::Vanished));
+    assert!(!view.retryable);
+    // 接收目录为了这次取回建了出来，里面什么都没有。
+    assert_eq!(entries(&f.inbox()), Vec::<String>::new());
+    assert_eq!(f.state().saved_file(&id), None);
+    // 这一条不会自己反复去取。
+    assert_eq!(f.state().next_job(), Next::Nothing);
+    f.finish().await;
+}
+
+#[tokio::test]
+async fn a_drive_upload_that_does_not_fit_is_reported_and_a_smaller_one_still_fits() {
+    let f = fixture_with_quota(Some(1_000)).await;
+    f.start_receiving();
+    let big = pick(&f.dir, "备份.zip", &payload(2_000)).await;
+    let small = pick(&f.dir, "说明.txt", &payload(500)).await;
+
+    f.state().queue_files(Destination::Drive, vec![big]);
+    until("the refusal to be recorded", || {
+        f.state()
+            .snapshot()
+            .transfers
+            .iter()
+            .any(|view| view.failure == Some(TransferFailure::QuotaExceeded))
+    })
+    .await;
+    let refused = f
+        .state()
+        .snapshot()
+        .transfers
+        .into_iter()
+        .find(|view| view.name == "备份.zip")
+        .unwrap();
+    assert_eq!(refused.phase, TransferPhase::Failed);
+    // 腾出空间之后可以重发。
+    assert!(refused.retryable);
+
+    f.state().queue_files(Destination::Drive, vec![small]);
+    until("the small file to be stored", || {
+        f.state()
+            .snapshot()
+            .transfers
+            .iter()
+            .any(|view| view.name == "说明.txt" && view.phase == TransferPhase::Complete)
+    })
+    .await;
+    let listing = f
+        .state()
+        .snapshot()
+        .drive
+        .expect("the listing was refreshed");
+    assert_eq!(
+        listing
+            .items
+            .iter()
+            .map(|item| item.name.clone())
+            .collect::<Vec<_>>(),
+        ["说明.txt"]
+    );
+    assert_eq!(listing.used_bytes, 500);
     f.finish().await;
 }

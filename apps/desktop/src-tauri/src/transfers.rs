@@ -44,7 +44,9 @@ use assemble_transfer::download::SaveOptions;
 use tauri::Manager;
 use tokio_util::sync::CancellationToken;
 
-use crate::registry::{Cancellation, Job, Next, TransferFailure};
+use crate::registry::{
+    Cancellation, DRIVE_NAME, Delivery, Destination, Job, Next, TransferFailure,
+};
 use crate::session;
 use crate::state::{AppState, Notice, Settings};
 
@@ -217,49 +219,92 @@ enum Outcome {
 async fn receive<R: tauri::Runtime>(state: &AppState<R>, id: &str) {
     // 先记下这一次登录：领取之后登录可能就换了，那时不该再收上一个账户的文件。
     let login = state.session_cancel();
-    let Some(send) = state.begin_receive(id) else {
+    let Some(delivery) = state.begin_receive(id) else {
         return;
     };
+    let claim = claim(&delivery);
     let cancel = login.child_token();
     let _tracked = state.track_transfer(id, cancel.clone());
 
-    match pull(state, &send, &cancel).await {
+    match pull(state, &claim, &cancel).await {
         Outcome::Saved {
             received,
             fell_back,
         } => {
-            // 文件已经在磁盘上了。先登记，再通知，最后才告诉服务端"已收下"。
+            // 文件已经在磁盘上了。先登记，再通知；别的设备发来的，最后才告诉服务端"已收下"。
             let handle = state.fresh_handle();
             state.receive_completed(id, &received.name, received.path.clone(), handle);
-            state.notify_received(handle, &send.peer_device_name, &received.name, fell_back);
+            state.notify_received(handle, &claim.from, &received.name, fell_back);
             if fell_back {
                 state.set_notice(Some(Notice::info(
                     "原来设置的接收文件夹不可用，这个文件已存到默认位置。",
                 )));
             }
-            settle(state, id).await;
+            // 从云盘取回的不欠服务端回执：存好了就是存好了。
+            if !claim.on_drive {
+                settle(state, id).await;
+            }
         }
         Outcome::Retry => state.retry_receive(id),
         Outcome::Failed(failure) => {
             tracing::debug!(
-                send = %id,
+                transfer = %id,
                 failure = failure.as_str(),
                 "a file could not be received"
             );
-            state.receive_failed(id, failure);
-            settle(state, id).await;
+            state.receive_failed(id, failure.into());
+            if !claim.on_drive {
+                settle(state, id).await;
+            }
         }
         Outcome::Interrupted => {}
         Outcome::Unauthorized => session::revoked(state),
+        // 云盘里的文件在取之前就被删了：说出来，而不是让这一条悄悄消失。
+        Outcome::Gone | Outcome::Changed if claim.on_drive => {
+            state.receive_failed(id, TransferFailure::Vanished);
+        }
+        // 一次发送已经不在了（对面的记录被清掉了）：本机也不必再留着它。
         Outcome::Gone => state.forget_transfer(id),
         Outcome::Changed => refresh(state, id).await,
+    }
+}
+
+/// 要取的东西在服务端上的位置，以及核对它要用的声明。
+struct Claim {
+    id: String,
+    name: String,
+    size: u64,
+    sha256: String,
+    /// 另一头在界面上的名字：发来文件的设备，或者云盘。
+    from: String,
+    on_drive: bool,
+}
+
+fn claim(delivery: &Delivery) -> Claim {
+    match delivery {
+        Delivery::FromDevice(send) => Claim {
+            id: send.id.clone(),
+            name: send.name.clone(),
+            size: send.size,
+            sha256: send.sha256.clone(),
+            from: send.peer_device_name.clone(),
+            on_drive: false,
+        },
+        Delivery::FromDrive(file) => Claim {
+            id: file.id.clone(),
+            name: file.name.clone(),
+            size: file.size,
+            sha256: file.sha256.clone(),
+            from: DRIVE_NAME.to_owned(),
+            on_drive: true,
+        },
     }
 }
 
 /// 取一次内容并落盘。名字在下载途中被抢走时，换一个名字从头再来一次。
 async fn pull<R: tauri::Runtime>(
     state: &AppState<R>,
-    send: &SendRecord,
+    claim: &Claim,
     cancel: &CancellationToken,
 ) -> Outcome {
     // 连默认目录都准备不出来：是这台电脑的问题。
@@ -274,24 +319,32 @@ async fn pull<R: tauri::Runtime>(
 
     for attempt in 0..2 {
         let mut report = |progress: TransferProgress| {
-            state.transfer_progress(&send.id, progress.fraction());
+            state.transfer_progress(&claim.id, progress.fraction());
         };
-        let download = match state
-            .client
-            .send_content(&send.id, TransferOptions::new(cancel), Some(&mut report))
-            .await
-        {
+        let options = TransferOptions::new(cancel);
+        let fetched = if claim.on_drive {
+            state
+                .client
+                .drive_content(&claim.id, options, Some(&mut report))
+                .await
+        } else {
+            state
+                .client
+                .send_content(&claim.id, options, Some(&mut report))
+                .await
+        };
+        let download = match fetched {
             Ok(download) => download,
             Err(error) => return when_unreachable(&error),
         };
         let mut reader = download.into_reader();
         let saved = accept(
             &inbox.directory,
-            &send.name,
+            &claim.name,
             &mut reader,
             SaveOptions {
-                expected_sha256: Some(&send.sha256),
-                content_length: Some(send.size),
+                expected_sha256: Some(&claim.sha256),
+                content_length: Some(claim.size),
                 max_bytes: Some(MAX_FILE_SIZE),
                 ..SaveOptions::new(cancel)
             },
@@ -420,7 +473,6 @@ fn reported(failure: ReceiveFailure) -> FailReason {
 
 // ---- 发出的 ----
 
-/// 把一个排着队的文件发出去。
 async fn send<R: tauri::Runtime>(state: &AppState<R>, id: &str) {
     // 先记下这一次登录：领取之后登录可能就换了，那时不该再发上一个账户的文件。
     let login = state.session_cancel();
@@ -431,17 +483,26 @@ async fn send<R: tauri::Runtime>(state: &AppState<R>, id: &str) {
     let _tracked = state.track_transfer(id, cancel.clone());
 
     let mut report = |progress: TransferProgress| state.transfer_progress(id, progress.fraction());
-    let uploaded = state
-        .client
-        .send_to_device(
-            &outgoing.target.id,
-            &outgoing.file,
-            TransferOptions::new(&cancel),
-            Some(&mut report),
-        )
-        .await;
+    let options = TransferOptions::new(&cancel);
+    let uploaded = match &outgoing.destination {
+        Destination::Device(device) => state
+            .client
+            .send_to_device(&device.id, &outgoing.file, options, Some(&mut report))
+            .await
+            .map(Delivered::ToDevice),
+        Destination::Drive => state
+            .client
+            .drive_upload(
+                &outgoing.file.name(),
+                &outgoing.file,
+                options,
+                Some(&mut report),
+            )
+            .await
+            .map(|_| Delivered::ToDrive),
+    };
     let uploaded = match uploaded {
-        Ok(send) => send,
+        Ok(uploaded) => uploaded,
         // 用户取消了：记录已经标好了。文件其实到没到服务端，由对账去确认。
         Err(ClientError::Cancelled) => return,
         Err(error) if error.is_unauthorized() => return session::revoked(state),
@@ -454,16 +515,36 @@ async fn send<R: tauri::Runtime>(state: &AppState<R>, id: &str) {
             return;
         }
     };
-    // 文件到了服务端。用户在上传途中按了取消的话，它其实还是到了：去撤回。
-    if state.send_uploaded(id, &uploaded) {
-        withdraw(state, &uploaded.id, &state.lifetime).await;
+    match uploaded {
+        // 存进云盘就完事了，没有"等对方接收"这一步。顺手把云盘的名单换新。
+        Delivered::ToDrive => {
+            state.drive_uploaded(id);
+            refresh_drive(state).await;
+        }
+        Delivered::ToDevice(send) => {
+            // 用户在上传途中按了取消的话，文件其实还是到了：去撤回。
+            if state.send_uploaded(id, &send) {
+                withdraw(state, &send.id, &state.lifetime).await;
+            }
+        }
     }
 }
 
-/// 没发出去，而且原因说得清楚：重试也不会变。
-/// 返回 `None` 表示说不准是谁的问题（网络、服务端暂时不可用），值得再试。
+/// 文件送到了哪里。
+enum Delivered {
+    ToDevice(SendRecord),
+    ToDrive,
+}
+
 fn refusal(error: &ClientError) -> Option<TransferFailure> {
     match error {
+        // 413 也用来回答"云盘空间不够"：靠错误码与"超过单文件上限"区分。
+        ClientError::Http {
+            remote_code,
+            status: 413,
+        } if remote_code.as_deref() == Some(codes::QUOTA_EXCEEDED) => {
+            Some(TransferFailure::QuotaExceeded)
+        }
         ClientError::TooLarge | ClientError::Http { status: 413, .. } => {
             Some(TransferFailure::TooLarge)
         }
@@ -484,6 +565,20 @@ fn refusal(error: &ClientError) -> Option<TransferFailure> {
         | ClientError::Network
         | ClientError::Timeout
         | ClientError::Http { .. } => None,
+    }
+}
+
+/// 向服务端要一份云盘的名单。
+pub async fn refresh_drive<R: tauri::Runtime>(state: &AppState<R>) {
+    match state
+        .client
+        .drive(&RequestOptions::new(&state.lifetime))
+        .await
+    {
+        Ok(listing) => state.set_drive(Some(listing)),
+        Err(error) if error.is_unauthorized() => session::revoked(state),
+        // 暂时拿不到：界面上留着力所能及的那份旧的。
+        Err(error) => tracing::debug!(%error, "the drive could not be listed yet"),
     }
 }
 

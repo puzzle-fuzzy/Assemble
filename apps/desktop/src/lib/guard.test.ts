@@ -14,6 +14,7 @@ const VALID: Snapshot = {
   devices: [],
   transfers: [],
   draft: null,
+  drive: null,
   receive: { customFolder: null },
   launchAtLogin: "disabled",
   notice: null,
@@ -31,6 +32,7 @@ const TRANSFER: TransferView = {
   savedAs: null,
   failure: null,
   retryable: false,
+  target: "device",
 };
 
 function transfer(overrides: Partial<TransferView>): TransferView {
@@ -44,6 +46,7 @@ const BROKEN_TRANSFERS: unknown[] = [
   { ...TRANSFER, phase: "paused" },
   { ...TRANSFER, progress: "45%" },
   { ...TRANSFER, savedAs: 7 },
+  { ...TRANSFER, target: "somewhere" },
   { ...TRANSFER, failure: "alien" },
 ];
 
@@ -113,6 +116,12 @@ describe("状态守卫", () => {
       { ...VALID, receive: undefined },
       { ...VALID, receive: {} },
       { ...VALID, receive: { customFolder: 42 } },
+      { ...VALID, drive: {} },
+      { ...VALID, drive: { items: [], usedBytes: 1 } },
+      {
+        ...VALID,
+        drive: { items: [{ id: "f1" }], usedBytes: 1, limitBytes: 2 },
+      },
       { ...VALID, launchAtLogin: "maybe" },
       { ...VALID, notice: { kind: "warning", message: "x" } },
       { ...VALID, notice: { kind: "error" } },

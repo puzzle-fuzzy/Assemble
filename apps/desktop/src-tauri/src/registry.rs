@@ -20,6 +20,7 @@ use std::time::{Duration, Instant};
 
 use assemble_client::OutgoingFile;
 use assemble_device::inbox::ReceiveFailure;
+use assemble_protocol::drive::DriveFile;
 use assemble_protocol::sends::{Direction, FailReason, Send as SendRecord, SendState};
 use serde::{Deserialize, Serialize};
 
@@ -70,6 +71,10 @@ pub enum TransferFailure {
     FileUnreadable,
     /// 服务端拒绝了这次发送，说不上是上面哪一种原因。
     Rejected,
+    /// 云盘空间不够。
+    QuotaExceeded,
+    /// 云盘里的文件在取回之前就被删掉了。
+    Vanished,
 }
 
 impl From<ReceiveFailure> for TransferFailure {
@@ -103,7 +108,12 @@ impl TransferFailure {
             Self::WriteFailed => Some(ReceiveFailure::WriteFailed),
             Self::VerificationFailed => Some(ReceiveFailure::VerificationFailed),
             Self::Cancelled => Some(ReceiveFailure::Cancelled),
-            Self::DeviceOffline | Self::TooLarge | Self::FileUnreadable | Self::Rejected => None,
+            Self::DeviceOffline
+            | Self::TooLarge
+            | Self::FileUnreadable
+            | Self::Rejected
+            | Self::QuotaExceeded
+            | Self::Vanished => None,
         }
     }
 }
@@ -128,6 +138,16 @@ pub struct TransferView {
     pub failure: Option<TransferFailure>,
     /// 能不能再发一次：只有"文件根本没到服务端"的失败才行。规则在 Rust 里，界面照着显示。
     pub retryable: bool,
+    /// 另一头是谁：一台设备，还是云盘。文案据此措辞。
+    pub target: TransferTarget,
+}
+
+/// 一条传输的另一头是谁。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum TransferTarget {
+    Device,
+    Drive,
 }
 
 /// 用户挑好、还没决定发给谁的文件。位置只留在本机，界面看得到名字与大小。
@@ -153,14 +173,41 @@ pub struct Draft {
     pub files: Vec<OutgoingFile>,
 }
 
+/// 发到哪里去：一台设备，或者云盘。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Destination {
+    Device(DeviceView),
+    Drive,
+}
+
+impl Destination {
+    /// 这条传输的另一头是哪一类。
+    fn target(&self) -> TransferTarget {
+        match self {
+            Self::Device(_) => TransferTarget::Device,
+            Self::Drive => TransferTarget::Drive,
+        }
+    }
+
+    /// 另一头在界面上的名字。
+    fn peer(&self) -> String {
+        match self {
+            Self::Device(device) => device.name.clone(),
+            Self::Drive => DRIVE_NAME.to_owned(),
+        }
+    }
+}
+
+/// 云盘在界面上的名字。它不是一个设备，所以由这里统一给出。
+pub const DRIVE_NAME: &str = "云盘";
+
 /// 这台设备要发出去的一个文件。
 #[derive(Debug, Clone, PartialEq)]
 pub struct Outgoing {
-    /// 收件的设备，名字是发起时的。
-    pub target: DeviceView,
+    pub destination: Destination,
     /// 发出去时用的名字、长度与摘要都从这里来。
     pub file: OutgoingFile,
-    /// 服务端收下之后给的那条记录；文件还没到服务端时为 `None`。
+    /// 服务端收下之后给的那条发送记录；发去云盘的、或者文件还没到服务端时为 `None`。
     pub send: Option<SendRecord>,
 }
 
@@ -169,8 +216,17 @@ pub struct Outgoing {
 pub enum Origin {
     /// 别的设备发来的。重新接收时要核对它的长度与摘要。
     Incoming(SendRecord),
+    /// 从云盘取回来的。
+    FromDrive(DriveFile),
     /// 这台设备发出去的。
     Outgoing(Outgoing),
+}
+
+/// 要收下来的东西：别的设备发来的，或者云盘里的。
+#[derive(Debug, Clone, PartialEq)]
+pub enum Delivery {
+    FromDevice(SendRecord),
+    FromDrive(DriveFile),
 }
 
 /// 一条传输记录：界面看到的 [`TransferView`]，加上只有本机用得上的那部分。
@@ -204,6 +260,7 @@ impl TransferRecord {
                 saved_as: None,
                 failure: None,
                 retryable: false,
+                target: TransferTarget::Device,
             },
             origin: Origin::Incoming(send.clone()),
             attempts: 0,
@@ -214,12 +271,12 @@ impl TransferRecord {
         }
     }
 
-    fn outgoing_record(id: String, target: &DeviceView, file: OutgoingFile) -> Self {
+    fn outgoing_record(id: String, destination: &Destination, file: OutgoingFile) -> Self {
         Self {
             view: TransferView {
                 id,
                 direction: Direction::Out,
-                peer: target.name.clone(),
+                peer: destination.peer(),
                 name: file.name(),
                 size: file.size,
                 phase: TransferPhase::Queued,
@@ -227,15 +284,42 @@ impl TransferRecord {
                 saved_as: None,
                 failure: None,
                 retryable: false,
+                target: destination.target(),
             },
             origin: Origin::Outgoing(Outgoing {
-                target: target.clone(),
+                destination: destination.clone(),
                 file,
                 send: None,
             }),
             attempts: 0,
             not_before: None,
             settled: false,
+            saved_path: None,
+            handle: None,
+        }
+    }
+
+    /// 排队去云盘里取一个文件回来。
+    fn from_drive(file: &DriveFile) -> Self {
+        Self {
+            view: TransferView {
+                id: format!("drive-{}", file.id),
+                direction: Direction::In,
+                peer: DRIVE_NAME.to_owned(),
+                name: file.name.clone(),
+                size: file.size,
+                phase: TransferPhase::Queued,
+                progress: 0.0,
+                saved_as: None,
+                failure: None,
+                retryable: false,
+                target: TransferTarget::Drive,
+            },
+            origin: Origin::FromDrive(file.clone()),
+            attempts: 0,
+            not_before: None,
+            // 取回来不欠服务端任何回执。
+            settled: true,
             saved_path: None,
             handle: None,
         }
@@ -248,15 +332,29 @@ impl TransferRecord {
     pub fn incoming_record(&self) -> Option<&SendRecord> {
         match &self.origin {
             Origin::Incoming(send) => Some(send),
-            Origin::Outgoing(_) => None,
+            Origin::FromDrive(_) | Origin::Outgoing(_) => None,
         }
     }
 
     pub fn outgoing(&self) -> Option<&Outgoing> {
         match &self.origin {
-            Origin::Incoming(_) => None,
+            Origin::Incoming(_) | Origin::FromDrive(_) => None,
             Origin::Outgoing(outgoing) => Some(outgoing),
         }
+    }
+
+    /// 别的设备发来的，还是云盘里的；只对要收下来的记录有意义。
+    fn delivery(&self) -> Option<Delivery> {
+        match &self.origin {
+            Origin::Incoming(send) => Some(Delivery::FromDevice(send.clone())),
+            Origin::FromDrive(file) => Some(Delivery::FromDrive(file.clone())),
+            Origin::Outgoing(_) => None,
+        }
+    }
+
+    /// 是不是要从别处收下来的记录。
+    fn is_delivery(&self) -> bool {
+        matches!(self.origin, Origin::Incoming(_) | Origin::FromDrive(_))
     }
 
     fn is_incoming(&self) -> bool {
@@ -275,6 +373,7 @@ impl TransferRecord {
     fn server_id(&self) -> Option<&str> {
         match &self.origin {
             Origin::Incoming(send) => Some(&send.id),
+            Origin::FromDrive(_) => None,
             Origin::Outgoing(outgoing) => outgoing.send.as_ref().map(|send| send.id.as_str()),
         }
     }
@@ -294,7 +393,9 @@ impl TransferRecord {
         let phase = match send.state {
             SendState::Offered => {
                 // 收到的文件还在等着收，本机不用改；发出去的文件已在服务端，等对方接收。
-                if !self.is_incoming() && self.view.phase != TransferPhase::Cancelled {
+                if matches!(self.origin, Origin::Outgoing(_))
+                    && self.view.phase != TransferPhase::Cancelled
+                {
                     self.view.phase = TransferPhase::Waiting;
                     self.view.progress = 1.0;
                 }
@@ -426,7 +527,7 @@ pub(crate) fn pick(records: &[TransferRecord], now: Instant) -> Next {
     let mut soonest = Duration::MAX;
     for incoming in [true, false] {
         for record in records.iter().rev() {
-            if record.view.phase != TransferPhase::Queued || record.is_incoming() != incoming {
+            if record.view.phase != TransferPhase::Queued || record.is_delivery() != incoming {
                 continue;
             }
             let wait = wait_of(record);
@@ -564,6 +665,8 @@ impl Registry {
             return Updated::Ignored;
         };
         match &mut record.origin {
+            // 云盘里取回的与服务端的发送记录无关。
+            Origin::FromDrive(_) => Updated::Ignored,
             Origin::Incoming(_) => {
                 record.apply_update(send);
                 Updated::Applied
@@ -592,7 +695,7 @@ impl Registry {
                     outgoing.send.is_none()
                         && outgoing.file.sha256 == send.sha256
                         && outgoing.file.name() == send.name
-                        && outgoing.target.id == send.peer_device_id
+                        && matches!(&outgoing.destination, Destination::Device(device) if device.id == send.peer_device_id)
                 })
         })
     }
@@ -606,17 +709,35 @@ impl Registry {
         pick(&self.transfers, now)
     }
 
-    /// 领取一个排着队的文件：从这一刻起它算"正在接收"。
+    /// 排队去云盘里取一个文件。同一个文件已经排着、或者正在取时，不重复排。
+    ///
+    /// 之前取回过（或者没取成）的，新的一次顶替旧记录：同一个标识始终只有一条，
+    /// 界面不会列出两个一样的。
+    pub fn fetch_from_drive(&mut self, file: &DriveFile) -> String {
+        let id = format!("drive-{}", file.id);
+        if self
+            .transfers
+            .iter()
+            .any(|record| record.id() == id && record.view.phase.is_active())
+        {
+            return id;
+        }
+        self.transfers.retain(|record| record.id() != id);
+        self.push(TransferRecord::from_drive(file));
+        id
+    }
+
+    /// 领取一个排着队的文件去收：别的设备发来的，或者云盘里的。
     /// 记录已经不在了、或者已经不该接收时返回 `None`。
-    pub fn begin_receive(&mut self, id: &str) -> Option<SendRecord> {
+    pub fn begin_receive(&mut self, id: &str) -> Option<Delivery> {
         let record = self.record(id)?;
-        if record.view.phase != TransferPhase::Queued || !record.is_incoming() {
+        if record.view.phase != TransferPhase::Queued || !record.is_delivery() {
             return None;
         }
         record.view.phase = TransferPhase::InProgress;
         record.view.progress = 0.0;
         record.not_before = None;
-        record.incoming_record().cloned()
+        record.delivery()
     }
 
     /// 进度。只在整个百分比变了的时候才算一次变化，不然每来一段数据都要惊动界面。
@@ -647,16 +768,17 @@ impl Registry {
         }
     }
 
-    /// 收不下来。回执还没发。
-    pub fn receive_failed(&mut self, id: &str, failure: ReceiveFailure) {
+    /// 收不下来。别的设备发来的，回执还没发。
+    pub fn receive_failed(&mut self, id: &str, failure: TransferFailure) {
         if let Some(record) = self.record(id)
             && record.view.phase == TransferPhase::InProgress
-            && record.is_incoming()
+            && record.is_delivery()
         {
             record.view.phase = TransferPhase::Failed;
-            record.view.failure = Some(failure.into());
+            record.view.failure = Some(failure);
             record.view.progress = 0.0;
-            record.settled = false;
+            // 从云盘取回的不欠回执。
+            record.settled = !record.is_delivery() || matches!(record.origin, Origin::FromDrive(_));
             record.attempts = 0;
             record.not_before = None;
         }
@@ -756,25 +878,55 @@ impl Registry {
         self.draft = None;
     }
 
-    /// 把草稿里的文件排进队列，发给 `target`。返回每一条记录的标识。
-    pub fn queue_draft(&mut self, target: &DeviceView) -> Vec<String> {
+    /// 把草稿里的文件排进队列，发往 `destination`。返回每一条记录的标识，先挑的在前。
+    pub fn queue_draft(&mut self, destination: Destination) -> Vec<String> {
         let Some(draft) = self.draft.take() else {
             return Vec::new();
         };
-        let target = DeviceView {
-            online: true,
-            ..target.clone()
+        self.queue(destination, draft.files)
+    }
+
+    /// 把挑好的文件排进队列，发往 `destination`。返回每一条记录的标识，先挑的在前。
+    pub fn queue(&mut self, destination: Destination, files: Vec<OutgoingFile>) -> Vec<String> {
+        // 名单上离线的设备本来选不了；它恰好在点下去那一刻上线了也不影响，照样发。
+        let destination = match destination {
+            Destination::Device(mut device) => {
+                device.online = true;
+                Destination::Device(device)
+            }
+            Destination::Drive => Destination::Drive,
         };
-        draft
-            .files
+        files
             .into_iter()
             .map(|file| {
                 let id = format!("out-{}", self.next_local);
                 self.next_local += 1;
-                self.push(TransferRecord::outgoing_record(id.clone(), &target, file));
+                self.push(TransferRecord::outgoing_record(
+                    id.clone(),
+                    &destination,
+                    file,
+                ));
                 id
             })
             .collect()
+    }
+
+    /// 文件存进云盘了。存进云盘的文件没有"等对方接收"这一步，存好就算完。
+    pub fn drive_uploaded(&mut self, id: &str) -> bool {
+        let Some(record) = self.record(id) else {
+            return false;
+        };
+        if !matches!(record.origin, Origin::Outgoing(_))
+            || record.view.phase != TransferPhase::InProgress
+        {
+            return false;
+        }
+        record.view.phase = TransferPhase::Complete;
+        record.view.progress = 1.0;
+        record.settled = true;
+        record.not_before = None;
+        record.attempts = 0;
+        true
     }
 
     /// 领取一个排着队的文件去发。文件还在草稿里、记录已经不在了，或者不该再发时返回 `None`。
@@ -862,6 +1014,14 @@ impl Registry {
             return Cancellation::Nothing;
         };
         match (&record.origin, record.view.phase) {
+            // 从云盘取回的：停下就行，不欠谁一个交代。
+            (Origin::FromDrive(_), TransferPhase::Queued | TransferPhase::InProgress) => {
+                record.view.phase = TransferPhase::Cancelled;
+                record.view.progress = 0.0;
+                record.settled = true;
+                record.not_before = None;
+                Cancellation::Local
+            }
             // 还没开始收、或收到一半：停下，并把"用户取消了"报告给发送方。
             (Origin::Incoming(_), TransferPhase::Queued | TransferPhase::InProgress) => {
                 record.view.phase = TransferPhase::Failed;
