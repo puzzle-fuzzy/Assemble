@@ -37,6 +37,14 @@ const RENAME_RETRY_DELAYS: [Duration; 6] = [
 /// Windows 上值得重试的替换失败：拒绝访问、共享冲突、锁定冲突。
 const WINDOWS_RETRYABLE_ERRORS: [i32; 3] = [5, 32, 33];
 
+/// 同一个进程里写状态文件的排成一队。
+///
+/// 临时文件的名字各不相同，彼此碰不到；大家替换的是同一个目标。类 Unix 上替换是原子的，
+/// Windows 上不是：两个线程同时往同一个目标上改名，可能一个失败，目标还可能在那一下消失
+/// （2026-11-25 持续集成的 Windows 那一栏上，"并发写入"那条测试就这样失败过一次）。
+/// 写状态文件本来就不频繁，排队的代价可以忽略。
+static WRITERS: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 /// 读取一份状态文件；不存在时返回 `None`，内容损坏时返回错误。
 pub fn read_json<T: DeserializeOwned>(path: &Path) -> Result<Option<T>, StoreError> {
     let bytes = match fs::read(path) {
@@ -55,8 +63,12 @@ pub fn read_json<T: DeserializeOwned>(path: &Path) -> Result<Option<T>, StoreErr
 /// 原子地写入一份状态文件，权限为仅本人可读写。
 ///
 /// 先在同目录写入唯一的临时文件并落盘，再替换目标；任何时刻读到的
-/// 要么是完整的新内容，要么是完整的旧内容。
+/// 要么是完整的新内容，要么是完整的旧内容。同一时刻只有一个写入者（见 [`WRITERS`]）。
 pub fn write_private_json<T: Serialize + ?Sized>(path: &Path, value: &T) -> Result<(), StoreError> {
+    // 持有到替换完成为止。锁被毒掉只说明上一个写入者在半路上慌了退出了，文件本身没事。
+    let _turn = WRITERS
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     let parent = match path.parent() {
         Some(parent) if !parent.as_os_str().is_empty() => parent,
         _ => Path::new("."),

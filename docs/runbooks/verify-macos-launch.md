@@ -114,6 +114,35 @@ cd ../..
 
 读窗口内容可以用系统自带的无障碍接口（Xcode 的"辅助功能检查器"，或任何读屏工具）：页面里的文字和按钮都应当读得到，主线程卡死时则什么都读不到。
 
+**只想看某张卡片长什么样**（不必登录，也不启动应用）：界面测试的替身可以直接当数据源。在 `apps/desktop` 下临时放一个入口，用 Vite 起开发服务器，在浏览器里截图。
+
+```html
+<!-- apps/desktop/__preview.html：与 index.html 一样，只是脚本指向下面那个文件 -->
+<script type="module" src="/src/__preview.tsx"></script>
+```
+
+```tsx
+// apps/desktop/src/__preview.tsx
+import { createRoot } from "react-dom/client";
+import { PlannerCard } from "@/PlannerCard"; // 换成要看的卡片
+import "@/styles/app.css";
+import { FakeBridge, snapshot } from "@/test-support/fakes";
+const which = snapshot({ phase: "signedIn" });
+createRoot(document.getElementById("root")!).render(
+  <div style={{ width: 720 }}>
+    <main className="mx-auto flex min-h-screen w-full max-w-xl flex-col gap-4 bg-background px-6 py-6 text-foreground">
+      <PlannerCard
+        source={new FakeBridge(which)}
+        snapshot={which}
+        onError={console.error}
+      />
+    </main>
+  </div>,
+);
+```
+
+`bunx vite --port 1421 --strictPort`，打开 `http://localhost:1421/__preview.html`（它只监听 IPv6 的回环地址，`127.0.0.1` 连不上）。宽度取主窗口的最小值 720：最窄的时候排得下，更宽就没问题。看完把两个临时文件删掉。这是 Chromium 内核的渲染；应用里的 WebView 选择日期的控件长什么样，还是要到应用里看。
+
 ### 收文件
 
 - 弹出一条系统通知，"收到文件"。点它，访达打开并选中那个文件（只选中，不打开）。
@@ -219,6 +248,7 @@ Windows 上没法在这台 Mac 上自动验证。下面每一条都对应一段�
 - 桌面端（发布构建，连本地服务端）：进程稳定，主线程停在正常的事件循环里，已经连上服务端。当时屏幕是锁着的，所以只做到进程层面：窗口里有什么，没有读。
 - `bun run acceptance` 加了"到点提醒"一段，替身设备多了 `remind`、`planner` 和两种等待。脚本本身还没有由真人从头跑过。
 - 撞上并处理：本机 `data/local/server` 是迁移 1 的第一版建的，之后脚本被改过，库就再也打不开了（见第 0 节）。那个库里没有账户，挪走后重建。
+- 界面在浏览器里按主窗口最窄的宽度看过（做法见第 3 节"窗口与登录"）：日程卡片的名单、新建、修改三种样子排得整齐，预填正确。看出并修掉一处：重复的截止日在另一年时没带年份。
 
 ## 2026-11-24 做过的
 
