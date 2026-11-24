@@ -520,7 +520,7 @@ async function start(options: Options): Promise<number> {
     `    3. 回到 Assemble 窗口：账户下面写着“这台设备：…”，“设备”里“${fakeName}”是在线的。`,
   );
   console.log(
-    "    （如果系统问要不要允许访问钥匙串，点“始终允许”。没签名的应用重新构建之后会再问一次，签名之后就没有了。）",
+    "    （如果系统问要不要允许访问钥匙串，点“始终允许”，并记下来告诉我。我推断没签名的应用每次重新构建之后都可能再问一次，但还没有亲眼见到过。）",
   );
   const peer = await waitUntil(onlinePeer, options.timeout, "等桌面应用上线");
   if (peer === null) {

@@ -92,8 +92,8 @@
 
 ## 留到以后的
 
-- 日程规划：规则库已经就绪，等服务端的提醒调度，另出方案。
-- 部署方式（Docker Compose 或 systemd）与域名，需要你来定。
+- 日程规划：规则库已经就绪；[方案](../plans/2026-11-24-schedule-planning.md)已出，等你定。
+- 部署方式（Docker Compose 或 systemd）与域名，需要你来定。材料在 `deploy/`，步骤见[部署手册](../runbooks/deploy.md)。
 - Windows 11 右键菜单第一层、访达右键菜单、网页端、管理端、iOS、小程序。
 
 ## 从真实启动中学到的
