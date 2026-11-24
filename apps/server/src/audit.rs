@@ -43,6 +43,9 @@ pub mod actions {
     pub const SEND_CANCELLED: &str = "send.cancelled";
     pub const SEND_FAILED: &str = "send.failed";
     pub const SEND_EXPIRED: &str = "send.expired";
+    pub const DRIVE_CREATED: &str = "drive.created";
+    pub const DRIVE_RENAMED: &str = "drive.renamed";
+    pub const DRIVE_DELETED: &str = "drive.deleted";
 }
 
 #[cfg(test)]

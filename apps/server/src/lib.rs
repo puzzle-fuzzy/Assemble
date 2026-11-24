@@ -14,6 +14,7 @@ pub mod config;
 pub mod db;
 pub mod desktop_login;
 pub mod devices;
+pub mod drive;
 pub mod error;
 pub mod events;
 pub mod http;

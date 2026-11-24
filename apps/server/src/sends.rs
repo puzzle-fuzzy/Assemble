@@ -28,25 +28,23 @@ use assemble_protocol::sends::{
     Direction, FailInput, FailReason, Send as SendRecord, SendListing, SendQuery, SendState,
 };
 use axum::Json;
-use axum::body::{Body, Bytes};
+use axum::body::Bytes;
 use axum::extract::rejection::QueryRejection;
 use axum::extract::{Path, Query, Request, State};
-use axum::http::{Method, StatusCode, header};
+use axum::http::{StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use futures_util::TryStreamExt;
 use serde::Deserialize;
 use sqlx::SqlitePool;
 use tokio_util::io::StreamReader;
 use tokio_util::sync::CancellationToken;
-use tower::ServiceExt;
-use tower_http::services::ServeFile;
 
 use crate::audit::{self, actions};
 use crate::auth::Identity;
 use crate::blobs::{self, StoreError};
 use crate::error::ApiError;
 use crate::events::Message;
-use crate::http::Shared;
+use crate::http::{self, Shared};
 
 /// 一次发送在库里的样子。设备名是发送当时的快照：设备之后被删掉、改名，记录仍然读得懂。
 #[derive(Debug, Clone, sqlx::FromRow)]
@@ -417,29 +415,6 @@ async fn load(pool: &SqlitePool, account_id: &str, id: &str) -> Result<SendRow, 
         .ok_or_else(ApiError::not_found)
 }
 
-/// 取内容时只把与"取一段文件"有关的请求头转交给文件服务。
-const FILE_REQUEST_HEADERS: [header::HeaderName; 4] = [
-    header::RANGE,
-    header::IF_RANGE,
-    header::IF_NONE_MATCH,
-    header::IF_MODIFIED_SINCE,
-];
-
-/// `Content-Disposition` 里的文件名：ASCII 里安全的字符原样放，其余按字节百分号编码。
-fn disposition(name: &str) -> String {
-    const SAFE: &[u8] = b"!#$&+-.^_`|~";
-    let mut encoded = String::with_capacity(name.len());
-    for byte in name.bytes() {
-        if byte.is_ascii_alphanumeric() || SAFE.contains(&byte) {
-            encoded.push(char::from(byte));
-        } else {
-            use std::fmt::Write as _;
-            let _ = write!(encoded, "%{byte:02X}");
-        }
-    }
-    format!("attachment; filename*=UTF-8''{encoded}")
-}
-
 /// `GET /v1/sends/{id}/content`：只有接收方能取，而且只在 `offered` 期间。
 pub async fn content(
     State(state): State<Shared>,
@@ -461,41 +436,13 @@ pub async fn content(
             "the content of this send is no longer available",
         ));
     }
-    let path = state.blobs.path_for(&row.sha256);
-    let mut forwarded = Request::builder().method(Method::GET).uri("/");
-    for name in FILE_REQUEST_HEADERS {
-        if let Some(value) = request.headers().get(&name) {
-            forwarded = forwarded.header(name, value);
-        }
-    }
-    let mut response = ServeFile::new(&path)
-        .oneshot(
-            forwarded
-                .body(Body::empty())
-                .expect("a fixed request always builds"),
-        )
-        .await
-        .map_err(|error| {
-            tracing::error!(%error, "stored content could not be served");
-            ApiError::internal("the stored content could not be read")
-        })?;
-    // 只有正文真的跟着回去时（全部或一段），才改它声明的类型。
-    let status = response.status();
-    let with_body = status == StatusCode::OK || status == StatusCode::PARTIAL_CONTENT;
-    let headers = response.headers_mut();
-    if let Ok(value) = header::HeaderValue::from_str(&disposition(&row.name)) {
-        headers.insert(header::CONTENT_DISPOSITION, value);
-    }
-    headers.insert(
-        header::X_CONTENT_TYPE_OPTIONS,
-        header::HeaderValue::from_static("nosniff"),
-    );
-    if let Some(mime) = row.mime_type.as_deref().filter(|_| with_body)
-        && let Ok(value) = header::HeaderValue::from_str(mime)
-    {
-        headers.insert(header::CONTENT_TYPE, value);
-    }
-    Ok(response.into_response())
+    Ok(http::file_response(
+        &state.blobs.path_for(&row.sha256),
+        &row.name,
+        row.mime_type.as_deref(),
+        request.headers(),
+    )
+    .await)
 }
 
 /// 谁在对这次发送做决定。
@@ -779,13 +726,13 @@ mod tests {
     #[test]
     fn content_disposition_encodes_everything_but_safe_ascii() {
         assert_eq!(
-            disposition("合同 v2.pdf"),
+            http::disposition("合同 v2.pdf"),
             "attachment; filename*=UTF-8''%E5%90%88%E5%90%8C%20v2.pdf"
         );
         assert_eq!(
-            disposition("a-b_c.d~e"),
+            http::disposition("a-b_c.d~e"),
             "attachment; filename*=UTF-8''a-b_c.d~e"
         );
-        assert_eq!(disposition(""), "attachment; filename*=UTF-8''");
+        assert_eq!(http::disposition(""), "attachment; filename*=UTF-8''");
     }
 }

@@ -8,17 +8,23 @@ use assemble_protocol::events::EVENT_STREAM_PATH;
 use assemble_protocol::health::{HEALTH_PATH, HealthResponse, READY_PATH, ReadinessResponse};
 use assemble_protocol::login::EXCHANGE_PATH;
 use axum::Router;
+use axum::body::Body;
 use axum::extract::{DefaultBodyLimit, State};
-use axum::http::StatusCode;
+use axum::http::header;
+use axum::http::header::HeaderValue;
+use axum::http::{Method, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, patch, post};
 use serde::de::DeserializeOwned;
 use sqlx::SqlitePool;
 use tokio::net::TcpListener;
 use tokio_util::sync::CancellationToken;
+use tower::ServiceExt;
+use tower_http::services::ServeFile;
 
 use crate::blobs::BlobStore;
 use crate::config::Config;
+use crate::error::ApiError;
 use crate::events::{Hub, stream};
 use crate::presence::Presence;
 use crate::web::LoginThrottle;
@@ -92,6 +98,16 @@ pub fn router(state: Shared) -> Router {
         .route("/v1/sends/{id}/decline", post(crate::sends::decline))
         .route("/v1/sends/{id}/cancel", post(crate::sends::cancel))
         .route("/v1/sends/{id}/failed", post(crate::sends::failed))
+        // 云盘：存文件时正文是文件的字节
+        .route(
+            "/v1/drive/files",
+            post(crate::drive::upload).get(crate::drive::list),
+        )
+        .route("/v1/drive/files/{id}/content", get(crate::drive::content))
+        .route(
+            "/v1/drive/files/{id}",
+            patch(crate::drive::rename).delete(crate::drive::remove),
+        )
         .layer(DefaultBodyLimit::max(upload_limit()))
         .with_state(state)
 }
@@ -184,6 +200,58 @@ pub async fn serve_until(
             Ok(())
         }
     }
+}
+
+/// 把磁盘上的一个文件当作下载交出去：可以只取一段，文件名与类型按记录里说的。
+///
+/// 发送与云盘的内容都从这里出去，所以两边的下载行为完全一样：
+/// 分段、条件请求、不嗅探类型、以附件的形式保存。
+pub(crate) async fn file_response(
+    path: &std::path::Path,
+    name: &str,
+    mime: Option<&str>,
+    headers: &axum::http::HeaderMap,
+) -> Response {
+    let mut forwarded = axum::http::Request::builder().method(Method::GET).uri("/");
+    for header_name in FILE_REQUEST_HEADERS {
+        if let Some(value) = headers.get(&header_name) {
+            forwarded = forwarded.header(header_name, value);
+        }
+    }
+    let served = ServeFile::new(path)
+        .oneshot(
+            forwarded
+                .body(Body::empty())
+                .expect("a fixed request always builds"),
+        )
+        .await;
+    let mut response = match served {
+        Ok(response) => response,
+        Err(error) => {
+            tracing::error!(%error, "stored content could not be served");
+            return ApiError::internal("the stored content could not be read").into_response();
+        }
+    };
+    // 只有正文真的跟着回去时（全部或一段），才改它声明的类型。
+    let with_body = matches!(
+        response.status(),
+        StatusCode::OK | StatusCode::PARTIAL_CONTENT
+    );
+    let out = response.headers_mut();
+    if let Ok(value) = HeaderValue::from_str(&disposition(name)) {
+        out.insert(header::CONTENT_DISPOSITION, value);
+    }
+    out.insert(
+        header::X_CONTENT_TYPE_OPTIONS,
+        HeaderValue::from_static("nosniff"),
+    );
+    if with_body
+        && let Some(mime) = mime
+        && let Ok(value) = HeaderValue::from_str(mime)
+    {
+        out.insert(header::CONTENT_TYPE, value);
+    }
+    response.into_response()
 }
 
 /// 在读完正文之前就要拒绝一个上传：等对方把正文送完、边收边丢，再把拒绝回答出去。
@@ -294,6 +362,29 @@ impl Drop for TestServer {
         // 忘了调用 `stop` 也不能把后台任务留到测试结束之后。
         self.stop.cancel();
     }
+}
+
+/// 取内容时只把与"取一段文件"有关的请求头转交给文件服务。
+const FILE_REQUEST_HEADERS: [header::HeaderName; 4] = [
+    header::RANGE,
+    header::IF_RANGE,
+    header::IF_NONE_MATCH,
+    header::IF_MODIFIED_SINCE,
+];
+
+/// `Content-Disposition` 里的文件名：ASCII 里安全的字符原样放，其余按字节百分号编码。
+pub(crate) fn disposition(name: &str) -> String {
+    const SAFE: &[u8] = b"!#$&+-.^_`|~";
+    let mut encoded = String::with_capacity(name.len());
+    for byte in name.bytes() {
+        if byte.is_ascii_alphanumeric() || SAFE.contains(&byte) {
+            encoded.push(char::from(byte));
+        } else {
+            use std::fmt::Write as _;
+            let _ = write!(encoded, "%{byte:02X}");
+        }
+    }
+    format!("attachment; filename*=UTF-8''{encoded}")
 }
 
 #[cfg(test)]
