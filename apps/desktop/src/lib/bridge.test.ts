@@ -14,6 +14,7 @@ const STATE: Snapshot = {
   transfers: [],
   draft: null,
   drive: null,
+  sendMenu: "unsupported",
   receive: { customFolder: null },
   launchAtLogin: "disabled",
   notice: null,
@@ -85,6 +86,7 @@ describe("桥接", () => {
     await bridge.openMain();
     await bridge.cancelTransfer("transfer-1");
     await bridge.retryTransfer("transfer-1");
+    await bridge.setSendMenu(true);
     await bridge.dismissNotice();
 
     expect(calls).toEqual([
@@ -113,6 +115,7 @@ describe("桥接", () => {
       { command: "open_main", args: {} },
       { command: "cancel_transfer", args: { transferId: "transfer-1" } },
       { command: "retry_transfer", args: { transferId: "transfer-1" } },
+      { command: "set_send_menu", args: { enabled: true } },
       { command: "dismiss_notice", args: {} },
     ]);
   });

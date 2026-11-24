@@ -11,6 +11,7 @@ import type {
   LaunchState,
   Notice,
   Platform,
+  SendMenuState,
   ServiceTarget,
   SessionView,
   Snapshot,
@@ -155,6 +156,10 @@ export function isDriveView(value: unknown): value is DriveView {
   );
 }
 
+export function isSendMenuState(value: unknown): value is SendMenuState {
+  return value === "enabled" || value === "disabled" || value === "unsupported";
+}
+
 export function isDraftView(value: unknown): value is DraftView {
   return (
     isRecord(value) &&
@@ -197,6 +202,7 @@ export function isSnapshot(value: unknown): value is Snapshot {
     value.transfers.every(isTransferView) &&
     (value.draft === null || isDraftView(value.draft)) &&
     (value.drive === null || isDriveView(value.drive)) &&
+    isSendMenuState(value.sendMenu) &&
     isRecord(value.receive) &&
     (value.receive.customFolder === null ||
       typeof value.receive.customFolder === "string") &&

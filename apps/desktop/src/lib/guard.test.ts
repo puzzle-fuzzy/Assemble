@@ -15,6 +15,7 @@ const VALID: Snapshot = {
   transfers: [],
   draft: null,
   drive: null,
+  sendMenu: "unsupported",
   receive: { customFolder: null },
   launchAtLogin: "disabled",
   notice: null,
@@ -123,6 +124,8 @@ describe("状态守卫", () => {
         drive: { items: [{ id: "f1" }], usedBytes: 1, limitBytes: 2 },
       },
       { ...VALID, launchAtLogin: "maybe" },
+      { ...VALID, sendMenu: "maybe" },
+      { ...VALID, sendMenu: null },
       { ...VALID, notice: { kind: "warning", message: "x" } },
       { ...VALID, notice: { kind: "error" } },
     ];

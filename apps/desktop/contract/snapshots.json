@@ -12,6 +12,7 @@
     "transfers": [],
     "draft": null,
     "drive": null,
+    "sendMenu": "unsupported",
     "receive": {
       "customFolder": null
     },
@@ -31,6 +32,7 @@
     "transfers": [],
     "draft": null,
     "drive": null,
+    "sendMenu": "unsupported",
     "receive": {
       "customFolder": null
     },
@@ -74,6 +76,7 @@
     "transfers": [],
     "draft": null,
     "drive": null,
+    "sendMenu": "enabled",
     "receive": {
       "customFolder": null
     },
@@ -93,6 +96,7 @@
     "transfers": [],
     "draft": null,
     "drive": null,
+    "sendMenu": "unsupported",
     "receive": {
       "customFolder": null
     },
@@ -115,6 +119,7 @@
     "transfers": [],
     "draft": null,
     "drive": null,
+    "sendMenu": "unsupported",
     "receive": {
       "customFolder": null
     },
@@ -161,6 +166,7 @@
     "transfers": [],
     "draft": null,
     "drive": null,
+    "sendMenu": "unsupported",
     "receive": {
       "customFolder": null
     },
@@ -204,6 +210,7 @@
     "transfers": [],
     "draft": null,
     "drive": null,
+    "sendMenu": "unsupported",
     "receive": {
       "customFolder": null
     },
@@ -326,6 +333,7 @@
     ],
     "draft": null,
     "drive": null,
+    "sendMenu": "disabled",
     "receive": {
       "customFolder": null
     },
@@ -383,6 +391,7 @@
     ],
     "draft": null,
     "drive": null,
+    "sendMenu": "unsupported",
     "receive": {
       "customFolder": "工作资料"
     },
@@ -440,6 +449,7 @@
     ],
     "draft": null,
     "drive": null,
+    "sendMenu": "unsupported",
     "receive": {
       "customFolder": null
     },
@@ -565,6 +575,7 @@
       "usedBytes": 1572864,
       "limitBytes": 2147483648
     },
+    "sendMenu": "unsupported",
     "receive": {
       "customFolder": null
     },
@@ -704,7 +715,8 @@
       }
     ],
     "draft": null,
-    "drive": null
+    "drive": null,
+    "sendMenu": "unsupported"
   },
   {
     "service": {
@@ -839,6 +851,7 @@
       "usedBytes": 1572864,
       "limitBytes": 1073741824
     },
+    "sendMenu": "unsupported",
     "receive": {
       "customFolder": null
     },

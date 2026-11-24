@@ -110,6 +110,9 @@ describe("状态契约样本", () => {
     expect(new Set(snapshots.map((s) => s.drive === null))).toEqual(
       new Set([true, false]),
     );
+    expect(new Set(snapshots.map((s) => s.sendMenu))).toEqual(
+      new Set(["enabled", "disabled", "unsupported"]),
+    );
     expect(new Set(transfers.map((t) => t.retryable))).toEqual(
       new Set([true, false]),
     );

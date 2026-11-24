@@ -11,6 +11,10 @@ assemble-transfer.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
 
+# 右键菜单写在注册表里；只有 Windows 上才有注册表。
+[target.'cfg(windows)'.dependencies]
+winreg = "0.56"
+
 [dev-dependencies]
 assemble-protocol.workspace = true
 serde_json.workspace = true

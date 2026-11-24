@@ -155,7 +155,16 @@ export interface Snapshot {
   draft: DraftView | null;
   /** 云盘里的文件与空间。没登录时为 null。 */
   drive: DriveView | null;
+  /** Windows 右键菜单"用 Assemble 发送"的状态。以系统里的实际状态为准，不以点击为准。 */
+  sendMenu: SendMenuState;
   receive: ReceiveView;
   launchAtLogin: LaunchState;
   notice: Notice | null;
 }
+
+/** Windows 右键菜单"用 Assemble 发送"在这台电脑上的状态。 */
+export type SendMenuState =
+  | "enabled"
+  | "disabled"
+  /** 不是 Windows，或者未打包的开发运行。 */
+  | "unsupported";

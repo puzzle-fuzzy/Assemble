@@ -235,6 +235,8 @@ pub struct Snapshot {
     pub draft: Option<DraftView>,
     /// 云盘里的文件与空间。没登录时为 `None`。
     pub drive: Option<DriveView>,
+    /// Windows 右键菜单"用 Assemble 发送"的状态。
+    pub send_menu: SendMenuState,
     pub receive: ReceiveView,
     pub launch_at_login: LaunchState,
     pub notice: Option<Notice>,
@@ -292,6 +294,18 @@ pub trait Notifier: Send + Sync {
 pub struct Settings {
     /// 用户选的接收文件夹（规范路径）；`None` 表示默认位置。
     pub receive_directory: Option<PathBuf>,
+    /// Windows 右键菜单"用 Assemble 发送"要不要有；`None` 表示默认（有）。
+    pub send_menu: Option<bool>,
+}
+
+/// Windows 右键菜单"用 Assemble 发送"在这台电脑上的状态。以注册表为准，不以点击为准。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum SendMenuState {
+    Enabled,
+    Disabled,
+    /// 当前运行方式不支持：不是 Windows，或者未打包的开发运行。
+    Unsupported,
 }
 
 /// 读写已保存会话时的失败。
@@ -332,6 +346,8 @@ pub struct View {
     registry: Registry,
     /// 云盘最近一次的名单；拿不到时留着上一份。
     drive: Option<DriveListing>,
+    /// 右键菜单的状态：由设置与本机的注册表决定。启动时定下，改动时更新。
+    send_menu: SendMenuState,
     receive: ReceiveView,
     notice: Option<Notice>,
 }
@@ -339,6 +355,11 @@ pub struct View {
 impl View {
     fn with_receive_folder(mut self, folder: Option<&std::path::Path>) -> Self {
         self.receive = ReceiveView::for_folder(folder);
+        self
+    }
+
+    fn with_send_menu(mut self, send_menu: SendMenuState) -> Self {
+        self.send_menu = send_menu;
         self
     }
 
@@ -351,6 +372,7 @@ impl View {
             transfers: self.registry.views(),
             draft: self.registry.draft_view(),
             drive: self.drive.as_ref().map(DriveView::from),
+            send_menu: self.send_menu,
             receive: self.receive.clone(),
             launch_at_login,
             notice: self.notice.clone(),
@@ -368,6 +390,7 @@ impl View {
             devices: Vec::new(),
             registry: Registry::default(),
             drive: None,
+            send_menu: SendMenuState::Unsupported,
             receive: ReceiveView {
                 custom_folder: None,
             },
@@ -416,7 +439,8 @@ impl<R: tauri::Runtime> AppState<R> {
         let (session_epoch, _) = tokio::sync::watch::channel(0);
         let view = Mutex::new(
             View::initial(client.origin())
-                .with_receive_folder(settings.receive_directory.as_deref()),
+                .with_receive_folder(settings.receive_directory.as_deref())
+                .with_send_menu(crate::send_menu::state(&settings)),
         );
         Self {
             app,
@@ -612,6 +636,20 @@ impl<R: tauri::Runtime> AppState<R> {
             .unwrap_or_else(PoisonError::into_inner)
             .receive_directory = folder.map(ToOwned::to_owned);
         self.update(|view| view.receive = ReceiveView::for_folder(folder));
+    }
+
+    /// 右键菜单的状态变了（用户在设置里开关了它）。
+    pub fn set_send_menu(&self, enabled: bool) {
+        self.settings
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .send_menu = Some(enabled);
+        let state = if enabled {
+            SendMenuState::Enabled
+        } else {
+            SendMenuState::Disabled
+        };
+        self.update(|view| view.send_menu = state);
     }
 
     /// 改动传输记录表；有变化才推送给界面。返回改动函数的结果。

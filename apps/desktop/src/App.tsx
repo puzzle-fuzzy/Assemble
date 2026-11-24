@@ -819,12 +819,15 @@ function LaunchCard({ source, snapshot, onError }: CardProps) {
   const state: LaunchState = snapshot?.launchAtLogin ?? "unknown";
   const hint = LAUNCH_HINTS[state];
   const customFolder = snapshot?.receive.customFolder ?? null;
+  // 只有 Windows 上的打包运行才有右键菜单这一项。
+  const sendMenu = snapshot?.sendMenu ?? "unsupported";
 
-  async function toggle(enabled: boolean) {
+  // 开关类设置都是一回事：把要改成什么交给 Rust，再由它把系统的实际状态推回来。
+  async function flip(action: () => Promise<unknown>) {
     setPending(true);
     onError(null);
     try {
-      await source.setLaunchAtLogin(enabled);
+      await action();
     } catch (error: unknown) {
       onError(messageFor(toBridgeError(error)));
     } finally {
@@ -855,7 +858,9 @@ function LaunchCard({ source, snapshot, onError }: CardProps) {
             aria-label="开机启动"
             checked={state === "enabled"}
             disabled={pending || state === "unsupported"}
-            onCheckedChange={(checked) => void toggle(checked)}
+            onCheckedChange={(checked) =>
+              void flip(() => source.setLaunchAtLogin(checked))
+            }
           />
         </CardAction>
       </CardHeader>
@@ -891,6 +896,26 @@ function LaunchCard({ source, snapshot, onError }: CardProps) {
             ) : null}
           </div>
         </div>
+        {sendMenu === "unsupported" ? null : (
+          <div className="flex items-center justify-between gap-3 border-t border-border pt-3">
+            <div className="min-w-0">
+              <p className="text-sm font-medium">右键菜单</p>
+              <p className="text-sm text-muted-foreground">
+                {sendMenu === "enabled"
+                  ? "在文件上点右键 →「显示更多选项」，就有「用 Assemble 发送」。"
+                  : "文件上点右键 →「显示更多选项」里没有「用 Assemble 发送」。"}
+              </p>
+            </div>
+            <Switch
+              aria-label="右键菜单里的“用 Assemble 发送”"
+              checked={sendMenu === "enabled"}
+              disabled={pending}
+              onCheckedChange={(checked) =>
+                void flip(() => source.setSendMenu(checked))
+              }
+            />
+          </div>
+        )}
       </CardContent>
     </Card>
   );

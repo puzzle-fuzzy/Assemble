@@ -84,6 +84,8 @@ export function snapshot(overrides: Overrides = {}): Snapshot {
     transfers: [],
     draft: null,
     drive: phase === "signedIn" ? DRIVE : null,
+    // 测试跑在 macOS 的开发构建上：右键菜单在这里不存在。
+    sendMenu: "unsupported",
     receive: { customFolder: null },
     launchAtLogin: "disabled",
     notice: null,
@@ -167,6 +169,12 @@ export class FakeBridge implements Bridge {
 
   dismissNotice() {
     return this.answer("dismissNotice", this.current);
+  }
+
+  setSendMenu(enabled: boolean) {
+    this.calls.push(`setSendMenu:${enabled}`);
+    if (this.failWith) throw this.failWith;
+    return Promise.resolve(this.current);
   }
 
   chooseReceiveFolder() {

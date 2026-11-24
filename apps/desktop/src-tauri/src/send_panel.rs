@@ -1,9 +1,14 @@
-//! 发送面板：用户挑好文件，再选一台设备发过去。
+//! 发送面板：用户挑好文件，再选一台设备（或者云盘）发过去。
 //!
-//! 挑文件用的是系统的文件选择框，位置由选择框直接交给 Rust。面板里的界面只看得到
-//! 文件的名字与大小，以及账户里的设备；它能调用的命令只认标识，不认路径。
+//! 文件从三个地方来，位置都直接交给 Rust，不经过界面：
 //!
-//! 面板是一个单独的窗口，能力清单里只有"接收状态"这一项。
+//! - 菜单栏或"传输"卡片里的"发送文件…"：系统的文件选择框；
+//! - Windows 的右键菜单"用 Assemble 发送"：文件路径作为启动参数交给应用
+//!   （见 `assemble_device::send_menu`）；
+//! - 把文件拖进主窗口。
+//!
+//! 面板里的界面只看得到文件的名字与大小，以及账户里的设备；它能调用的命令只认标识，
+//! 不认路径。面板是一个单独的窗口，能力清单里只有"接收状态"这一项。
 
 use std::path::PathBuf;
 
@@ -21,6 +26,8 @@ pub const SEND_WINDOW: &str = "send";
 pub enum StartError {
     TooLarge(String),
     Unreadable(String),
+    /// 拖进来或选中的只有文件夹。
+    OnlyFolders,
     Window(tauri::Error),
 }
 
@@ -32,6 +39,7 @@ impl StartError {
             Self::Unreadable(name) => {
                 Notice::error(format!("「{name}」读不出来，可能已被移走或没有权限。"))
             }
+            Self::OnlyFolders => Notice::error("只能发送文件，不能发送文件夹。"),
             Self::Window(_) => Notice::error("发送面板没能打开，请重试。"),
         }
     }
@@ -74,21 +82,36 @@ pub async fn pick<R: Runtime>(
         show_main(app);
         return Ok(Vec::new());
     }
-    let paths = pick_files(app).await;
     // 什么都没挑：什么都不做。
+    let paths = pick_files(app).await;
     if paths.is_empty() {
         return Ok(Vec::new());
     }
-    // 现在就把每个文件核对好：之后面板与上传用的都是这份结果。
-    let cancel = state.lifetime.child_token();
+    open_files(app, paths).await
+}
+
+/// 把交给应用的路径逐个核对好：大小合规、算出摘要。之后面板与上传用的都是这份结果。
+///
+/// 文件夹不算：拖进来一整摞东西时，其中的文件照发。只有文件夹时如实说发不了。
+async fn open_files<R: Runtime>(
+    app: &AppHandle<R>,
+    paths: Vec<PathBuf>,
+) -> Result<Vec<OutgoingFile>, StartError> {
+    let cancel = app.state::<AppState>().lifetime.child_token();
     let mut files = Vec::with_capacity(paths.len());
     for path in paths {
+        if path.is_dir() {
+            continue;
+        }
         let name = file_name(&path);
         match OutgoingFile::open(&path, &cancel).await {
             Ok(file) => files.push(file),
             Err(ClientError::TooLarge) => return Err(StartError::TooLarge(name)),
             Err(_) => return Err(StartError::Unreadable(name)),
         }
+    }
+    if files.is_empty() {
+        return Err(StartError::OnlyFolders);
     }
     Ok(files)
 }
@@ -99,6 +122,26 @@ pub async fn start<R: Runtime>(app: &AppHandle<R>) -> Result<(), StartError> {
     if files.is_empty() {
         return Ok(());
     }
+    app.state::<AppState>().set_draft(files);
+    open(app).map_err(StartError::Window)
+}
+
+/// 文件已经交到应用手里（右键菜单、拖放）：不挑了，直接打开发送面板。
+pub async fn start_with<R: Runtime>(
+    app: &AppHandle<R>,
+    paths: Vec<PathBuf>,
+) -> Result<(), StartError> {
+    if paths.is_empty() {
+        return Ok(());
+    }
+    // 没登录时发不了：把主窗口叫到前面，请用户先登录。
+    let state = app.state::<AppState>();
+    if state.device_id().is_none() {
+        state.set_notice(Some(Notice::info("请先登录，再发送文件。")));
+        show_main(app);
+        return Ok(());
+    }
+    let files = open_files(app, paths).await?;
     app.state::<AppState>().set_draft(files);
     open(app).map_err(StartError::Window)
 }

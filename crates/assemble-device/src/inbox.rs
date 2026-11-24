@@ -643,6 +643,8 @@ mod tests {
         let (_dir, root) = directory();
         // 链接指向的文件放在另一个临时目录里，不混进被清理的目录。
         let (other, outside_dir) = directory();
+        // 只有类 Unix 上才去看链接指向的文件；别的平台上这个名字不常用到。
+        let _ = &outside_dir;
         let staging = |name: &str| format!("{name}.0123456789abcdef0123456789abcdef.part");
         fs::write(root.join(staging("a.txt")), b"half").unwrap();
         fs::write(root.join(staging("b.bin")), b"half").unwrap();

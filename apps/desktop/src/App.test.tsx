@@ -682,6 +682,55 @@ describe("云盘", () => {
   });
 });
 
+describe("右键菜单", () => {
+  test("不是 Windows 的打包运行时没有这一项", async () => {
+    const source = new FakeBridge(snapshot({ sendMenu: "unsupported" }));
+    const view = await render(<App bridge={source} />);
+    await settle();
+    expect(text(view.host)).not.toContain("右键菜单");
+    expect(text(view.host)).toContain("接收位置");
+  });
+
+  test("开着时说明它在哪儿，点开关只把要改成什么交给 Rust", async () => {
+    const source = new FakeBridge(snapshot({ sendMenu: "enabled" }));
+    const view = await render(<App bridge={source} />);
+    await settle();
+    expect(text(view.host)).toContain("右键菜单");
+    expect(text(view.host)).toContain("显示更多选项");
+    const toggle = view.host.querySelector<HTMLButtonElement>(
+      '[aria-label="右键菜单里的“用 Assemble 发送”"]',
+    );
+    if (!toggle) throw new Error("没有找到右键菜单开关");
+    expect(toggle.getAttribute("aria-checked")).toBe("true");
+
+    await click(toggle);
+    expect(source.calls).toEqual(["setSendMenu:false"]);
+    // 结果由 Rust 经状态推送回来，界面不自行翻转。
+    expect(toggle.getAttribute("aria-checked")).toBe("true");
+  });
+
+  test("关掉时如实说菜单里没有它", async () => {
+    const source = new FakeBridge(snapshot({ sendMenu: "disabled" }));
+    const view = await render(<App bridge={source} />);
+    await settle();
+    expect(text(view.host)).toContain("里没有「用 Assemble 发送」");
+  });
+
+  test("系统不让改时显示固定文案", async () => {
+    const source = new FakeBridge(snapshot({ sendMenu: "disabled" }));
+    source.failWith = new BridgeError("SYSTEM_REJECTED", "os error 5");
+    const view = await render(<App bridge={source} />);
+    await settle();
+    const toggle = view.host.querySelector<HTMLButtonElement>(
+      '[aria-label="右键菜单里的“用 Assemble 发送”"]',
+    );
+    if (!toggle) throw new Error("没有找到右键菜单开关");
+    await click(toggle);
+    expect(text(view.host)).toContain("系统没有接受这个设置，请稍后重试。");
+    expect(text(view.host)).not.toContain("os error");
+  });
+});
+
 describe("接收位置", () => {
   test("默认是下载/Assemble，点「更改」由系统选择器来挑", async () => {
     const source = new FakeBridge(snapshot());

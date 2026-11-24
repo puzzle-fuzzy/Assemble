@@ -14,6 +14,22 @@ const root = fileURLToPath(new URL("../..", import.meta.url));
 interface Step {
   name: string;
   command: string[];
+  /** 只在条件满足时才跑；不满足时如实说明并跳过，不算失败。 */
+  onlyWhen?: () => Promise<boolean>;
+  skipped?: string;
+}
+
+/** 装了 Windows 的 Rust 目标时，顺便给不依赖窗口的 crate 做一次类型检查。 */
+async function windowsTargetInstalled(): Promise<boolean> {
+  const listed = Bun.spawn(["rustup", "target", "list", "--installed"], {
+    cwd: root,
+    stdout: "pipe",
+    stderr: "ignore",
+    stdin: "ignore",
+  });
+  const output = await new Response(listed.stdout).text();
+  await listed.exited;
+  return output.split("\n").includes("x86_64-pc-windows-msvc");
 }
 
 const STEPS: Step[] = [
@@ -26,6 +42,13 @@ const STEPS: Step[] = [
   },
   { name: "Rust 格式", command: ["bun", "run", "rust:fmt"] },
   { name: "Rust 静态检查", command: ["bun", "run", "rust:clippy"] },
+  {
+    name: "Rust 静态检查：Windows 目标（不依赖窗口的 crate）",
+    command: ["bun", "run", "rust:clippy:windows"],
+    onlyWhen: windowsTargetInstalled,
+    skipped:
+      "没有安装 Windows 的 Rust 目标，跳过。装上它就能在 macOS 上给 Windows 专用的代码做类型检查：rustup target add x86_64-pc-windows-msvc",
+  },
   { name: "Rust 测试", command: ["bun", "run", "rust:test"] },
 ];
 
@@ -43,6 +66,12 @@ async function run(step: Step): Promise<number> {
 
 const started = Date.now();
 for (const step of STEPS) {
+  if (step.onlyWhen && !(await step.onlyWhen())) {
+    console.log(`\n▶ ${step.name}`);
+    console.log(`  — ${step.skipped}`);
+    console.log(`— ${step.name}（跳过）`);
+    continue;
+  }
   const code = await run(step);
   if (code !== 0) {
     console.error(

@@ -12,9 +12,11 @@
 )]
 
 mod commands;
+mod launch;
 mod notify;
 mod registry;
 mod runtime;
+mod send_menu;
 mod send_panel;
 mod session;
 mod state;
@@ -48,12 +50,15 @@ pub fn run() -> Result<(), StartupError> {
     let client = Client::new(deployment()?)?;
     // 由登录项启动时附带 `--background`：不弹窗口，只在托盘里运行。
     let background = std::env::args().skip(1).any(|arg| arg == BACKGROUND_ARG);
+    // 由右键菜单"用 Assemble 发送"启动时带着文件：等会话核对完再打开发送面板。
+    let handed_over = launch::files_at_startup(std::env::args_os());
 
     tauri::Builder::default()
-        // 单实例守卫必须最先注册：第二个实例启动后把窗口叫到前面，然后自己退出。
+        // 单实例守卫必须最先注册：应用已经在运行时，第二个实例把参数转交给它，然后自己退出。
+        // 带着文件来的（右键菜单）就打开发送面板；否则把窗口叫到前面。
         .plugin(tauri_plugin_single_instance::init(
-            |app, _arguments, _current_dir| {
-                state::show_main(app);
+            |app, arguments, current_dir| {
+                launch::forwarded(app, &arguments, &current_dir);
             },
         ))
         .plugin(tauri_plugin_autostart::init(
@@ -71,6 +76,7 @@ pub fn run() -> Result<(), StartupError> {
             commands::sign_out,
             commands::launch_at_login,
             commands::set_launch_at_login,
+            commands::set_send_menu,
             commands::rename_device,
             commands::remove_device,
             commands::choose_receive_folder,
@@ -89,38 +95,14 @@ pub fn run() -> Result<(), StartupError> {
             commands::open_main,
             commands::dismiss_notice,
         ])
-        .setup(move |app| {
-            let handle = app.handle().clone();
-            std::fs::create_dir_all(handle.path().app_data_dir()?)?;
-
-            let secrets: Option<Arc<dyn SecretStore>> =
-                assemble_store::secret::system_secret_store()
-                    .map(|store| Arc::new(store) as Arc<dyn SecretStore>);
-            let settings = transfers::load_settings(&handle);
-            let notifier = Arc::new(notify::SystemNotifier::new(handle.clone()));
-            handle.manage(AppState::new(
-                handle.clone(),
-                client,
-                secrets,
-                settings,
-                transfers::system_downloads_dir(&handle),
-                notifier,
-            ));
-
-            tray::build(&handle)?;
-            // 点通知的处理要早于第一条通知登记好，否则点了也报不上来。
-            notify::install(&handle);
-            open_main_window(&handle, !background)?;
-            runtime::start(&handle);
-
-            // 核对保存过的会话需要联网，放到后台做，不拖慢启动。
-            let restore = handle.clone();
-            tauri::async_runtime::spawn(async move {
-                session::restore(&restore.state::<AppState>()).await;
-            });
-            Ok(())
-        })
+        .setup(move |app| start(app, client, background, handed_over))
         .on_window_event(|window, event| {
+            // 把文件拖进主窗口：交给发送面板。位置由系统直接交给 Rust，不经过界面。
+            if window.label() == MAIN_WINDOW
+                && let WindowEvent::DragDrop(tauri::DragDropEvent::Drop { paths, .. }) = event
+            {
+                launch::dropped(window.app_handle(), paths.clone());
+            }
             if let WindowEvent::CloseRequested { api, .. } = event {
                 match window.label() {
                     // 关窗口只是收起；真正退出走托盘菜单。
@@ -143,6 +125,52 @@ pub fn run() -> Result<(), StartupError> {
                 app.state::<AppState>().lifetime.cancel();
             }
         });
+    Ok(())
+}
+
+/// 应用启动：把状态装好、托盘与窗口立起来、后台任务跑起来。
+fn start(
+    app: &mut tauri::App,
+    client: Client,
+    background: bool,
+    handed_over: Option<Vec<std::path::PathBuf>>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let handle = app.handle().clone();
+    std::fs::create_dir_all(handle.path().app_data_dir()?)?;
+
+    let secrets: Option<Arc<dyn SecretStore>> = assemble_store::secret::system_secret_store()
+        .map(|store| Arc::new(store) as Arc<dyn SecretStore>);
+    let settings = transfers::load_settings(&handle);
+    let notifier = Arc::new(notify::SystemNotifier::new(handle.clone()));
+    handle.manage(AppState::new(
+        handle.clone(),
+        client,
+        secrets,
+        settings,
+        transfers::system_downloads_dir(&handle),
+        notifier,
+    ));
+
+    tray::build(&handle)?;
+    // 点通知的处理要早于第一条通知登记好，否则点了也报不上来。
+    notify::install(&handle);
+    open_main_window(&handle, !background)?;
+    runtime::start(&handle);
+    // 让 Windows 的右键菜单指向这个可执行文件（别的运行方式下什么都不做）。
+    send_menu::sync(&handle.state::<AppState>().settings());
+
+    // 核对保存过的会话需要联网，放到后台做，不拖慢启动。
+    let restore = handle.clone();
+    tauri::async_runtime::spawn(async move {
+        session::restore(&restore.state::<AppState>()).await;
+        // 由右键菜单带着文件启动的：现在才知道登录了没有，可以打开发送面板了。
+        if let Some(files) = handed_over
+            && let Err(error) = send_panel::start_with(&restore, files).await
+        {
+            send_panel::report(&restore, &error);
+            state::show_main(&restore);
+        }
+    });
     Ok(())
 }
 

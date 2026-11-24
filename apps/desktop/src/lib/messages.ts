@@ -24,6 +24,7 @@ const MESSAGES: Record<string, string> = {
   DEVICE_OFFLINE: "那台设备刚刚下线了，没法发送。",
   NO_DRAFT: "没有待发送的文件，请重新选择。",
   NOT_RETRYABLE: "这一次没法重发，请重新选择文件。",
+  ONLY_FOLDERS: "只能发送文件，不能发送文件夹。",
   QUOTA_EXCEEDED: "云盘空间不够，删掉一些文件再试。",
   FILE_GONE: "云盘里已经没有这个文件了。",
 };

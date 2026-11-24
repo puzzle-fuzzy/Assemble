@@ -17,8 +17,10 @@
 
 pub mod inbox;
 pub mod receive;
+pub mod send_menu;
 
 pub use inbox::{Inbox, ReceiveFailure, Received, accept, resolve, sweep_staging};
 pub use receive::{
     BoundaryError, choose_file_name, default_directory, safe_file_name, validate_directory,
 };
+pub use send_menu::{MENU_LABEL, SEND_FLAG, files_to_send, menu_command};

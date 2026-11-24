@@ -214,9 +214,8 @@ pub async fn choose_receive_folder(app: AppHandle) -> Result<crate::state::Snaps
     let validated = assemble_device::validate_directory(&folder)
         .await
         .map_err(|error| CommandError::local("INVALID_RECEIVE_FOLDER", error.to_string()))?;
-    let settings = crate::state::Settings {
-        receive_directory: Some(validated),
-    };
+    let mut settings = state.settings();
+    settings.receive_directory = Some(validated);
     if let Err(error) = crate::transfers::save_settings(&app, &settings) {
         tracing::warn!(%error, "the receive folder could not be saved");
         return Err(CommandError::local("SYSTEM_REJECTED", error.to_string()));
@@ -229,9 +228,8 @@ pub async fn choose_receive_folder(app: AppHandle) -> Result<crate::state::Snaps
 #[tauri::command]
 pub async fn reset_receive_folder(app: AppHandle) -> Result<crate::state::Snapshot, CommandError> {
     let state = app.state::<AppState>();
-    let settings = crate::state::Settings {
-        receive_directory: None,
-    };
+    let mut settings = state.settings();
+    settings.receive_directory = None;
     if let Err(error) = crate::transfers::save_settings(&app, &settings) {
         tracing::warn!(%error, "the receive folder could not be saved");
         return Err(CommandError::local("SYSTEM_REJECTED", error.to_string()));
@@ -272,6 +270,9 @@ fn start_failed(error: &crate::send_panel::StartError) -> CommandError {
         }
         StartError::Unreadable(_) => {
             CommandError::local("FILE_UNREADABLE", "a chosen file could not be read")
+        }
+        StartError::OnlyFolders => {
+            CommandError::local("ONLY_FOLDERS", "only folders were handed over")
         }
         StartError::Window(cause) => {
             tracing::warn!(%cause, "the send panel could not be opened");
@@ -437,6 +438,36 @@ pub fn retry_transfer(app: AppHandle, transfer_id: String) -> Result<(), Command
             "only a send that never reached the server can be retried",
         ))
     }
+}
+
+/// 在文件的右键菜单里加入（或去掉）"用 Assemble 发送"。
+/// 只有 Windows 上的打包运行支持；别的地方调用会得到 `UNSUPPORTED`。
+#[tauri::command]
+pub fn set_send_menu(
+    app: AppHandle,
+    enabled: bool,
+) -> Result<crate::state::Snapshot, CommandError> {
+    let state = app.state::<AppState>();
+    if !crate::send_menu::supported() {
+        return Err(CommandError::local(
+            "UNSUPPORTED",
+            "the send menu is only available in packaged builds on Windows",
+        ));
+    }
+    let mut settings = state.settings();
+    if let Err(error) = crate::send_menu::set(&mut settings, enabled) {
+        tracing::warn!(%error, "the send menu could not be changed");
+        return Err(CommandError::local(
+            "SYSTEM_REJECTED",
+            "the send menu could not be changed",
+        ));
+    }
+    if let Err(error) = crate::transfers::save_settings(&app, &settings) {
+        // 注册表已经改了，只是这个选择没能记下来：下次启动会按默认值再登记一遍。
+        tracing::warn!(%error, "the send menu choice could not be saved");
+    }
+    state.set_send_menu(enabled);
+    Ok(state.snapshot())
 }
 
 /// 提示看过了，收起来。
