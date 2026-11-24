@@ -1,0 +1,44 @@
+# Assemble 服务端。完整步骤见 docs/runbooks/deploy.md。
+#
+#   cd deploy
+#   cp .env.example .env             # 至少填上对外地址
+#   docker compose up -d --build     # 起来并跟着系统重启
+#   docker compose logs -f           # 看日志
+#
+# 建第一个账户（密码在终端里输，不回显；账户只能从这里建，不开放注册）：
+#
+#   docker compose exec assemble-server create-account <用户名>
+#
+# 别改下面 environment 里的两项：容器里的监听地址与数据目录和镜像里的健康检查是配套的。
+# 可调的都在 .env 里。
+
+name: assemble
+
+services:
+  assemble-server:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    image: assemble-server:local
+    container_name: assemble-server
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      ASSEMBLE_ADDR: 0.0.0.0:8787
+      ASSEMBLE_DATA_DIR: /var/lib/assemble
+    # 只交给本机的反向代理。正式服务一律走 HTTPS，TLS 在反向代理那里结束。
+    ports:
+      - "127.0.0.1:8787:8787"
+    volumes:
+      - assemble-data:/var/lib/assemble
+    # 服务端收到 SIGTERM 后最多等十秒让在途连接收尾。
+    stop_grace_period: 15s
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+
+volumes:
+  assemble-data:

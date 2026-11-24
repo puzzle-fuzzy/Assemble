@@ -1,0 +1,9 @@
+# 构建服务端镜像只需要 Rust 工作区，其余一律不进构建上下文：
+# 桌面端、依赖、构建产物和本机数据都不该被送进守护进程。
+*
+!Cargo.toml
+!Cargo.lock
+!crates/
+!crates/**
+!apps/server/
+!apps/server/**

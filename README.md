@@ -19,7 +19,8 @@ Assemble 是一个全新的、自带服务端的项目，用来完全替换 jarv
 | 发起发送的入口：菜单栏"发送文件…"、拖进窗口、带着文件启动、Windows 右键菜单   | 都已实现；Windows 右键菜单只在打包后的 Windows 运行里登记             | 带着文件启动在 macOS 上真实启动过没登录时的那一步；其余没有真跑      |
 | 开机启动开关、右键菜单开关                                                    | 已实现，只在打包后的运行里提供                                        | 界面测试                                                             |
 | 日程规划                                                                      | 规则库（`assemble-schedule`）已写好并有测试，还没有接进服务端与桌面端 | —                                                                    |
-| 部署到服务器                                                                  | 没有做。部署方式与域名还没有定                                        | —                                                                    |
+| 持续集成                                                                      | 配置已写好（macOS 与 Windows 上各跑一遍验证；打标签出安装包）         | 远程仓库还没有建，一次都没跑过                                       |
+| 部署到服务器                                                                  | 材料已备好（`deploy/`）；镜像没有构建过，也没有部署。方式与域名待定   | compose 能解析、容器里的环境变量与健康检查命令在本机核对过           |
 
 哪些还没有在真实运行里验证过，逐条列在[运行手册](docs/runbooks/verify-macos-launch.md)的"还没有做过的"一节。
 
@@ -57,6 +58,10 @@ bun run dev          # 桌面端的开发运行：Vite 热更新 + 调试构建�
 - **验证**（`verify.yml`）：每次推送到 `main` 和每个合并请求，在 macOS（arm64）与 Windows（x64）上各跑一遍 `bun run verify`。这是服务端、客户端与桌面端唯一会在 Windows 上编译和测试的地方。
 - **安装包**（`release.yml`）：推送 `v` 开头的标签时，产出 macOS 与 Windows 的桌面端安装包，挂在发布页上；也可以手动触发，临时打一个测试包。桌面端连哪个服务在构建时定下，所以要先给仓库设变量 `ASSEMBLE_SERVER_ORIGIN`（手动触发时可以填别的）。产出没有签名、没有公证，是给人验收用的。
 
+### 部署
+
+材料在 `deploy/`：服务端的镜像（`Dockerfile`）、`compose.yaml`、配置模板（`.env.example`）与反向代理的片段（`nginx.conf.example`）。**镜像还没有构建过，也没有在任何服务器上运行过**；用哪台服务器、哪个域名，都还没有定，定了之前不动服务器。步骤与注意事项见[部署手册](docs/runbooks/deploy.md)。
+
 ## 目录
 
 ```text
@@ -78,6 +83,8 @@ scripts/
   verify/run.ts         一键验证
   acceptance/           macOS 上的真实验收：起环境、等登录、自动核对
   release/              生成图标
+deploy/                 服务端的镜像、compose、配置模板与反向代理片段
+.github/workflows/      持续集成：验证、安装包
 docs/                   架构、决策、路线图、运行手册
 ```
 
@@ -99,5 +106,6 @@ docs/                   架构、决策、路线图、运行手册
 - [架构说明](docs/architecture.md)：结构、各部分职责、安全边界、已知的限制
 - [决策 0002](docs/decisions/0002-own-server-replaces-jarvis.md)：自带服务端、取代 jarvis；[决策 0001](docs/decisions/0001-rust-tauri-desktop.md)是转向之前的记录
 - [路线图](docs/plans/2026-11-23-roadmap.md)：接下来做什么、每一步的完成标准、需要你决定的事
-- [运行手册](docs/runbooks/verify-macos-launch.md)：在 macOS 上真实启动并检查；Windows 真机验收清单
+- [运行手册](docs/runbooks/verify-macos-launch.md)：在 macOS 上真实启动并检查；Windows 真机验收清单；安装包从哪来
+- [部署手册](docs/runbooks/deploy.md)：材料已备好，步骤还没有执行过
 - [协作约定](AGENTS.md)
