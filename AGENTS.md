@@ -22,7 +22,7 @@ Assemble 是一个全新的、自带服务端的项目，用来完全替换 jarv
 
 ## 怎么写
 
-- 规则放在 `crates/` 里，脱离窗口与网络就能测试；`apps/desktop/src-tauri` 只做编排。
+- 规则放在 `crates/` 里，脱离窗口与网络就能测试；`apps/desktop/src-tauri` 只做编排。应用壳里唯一的例外是传输记录表（`registry.rs`）：它只记状态、挑下一件事，同样不碰网络、文件与窗口，也有自己的单元测试。
 - 服务端的逻辑都在 `apps/server/src` 的库部分，处理器只做薄薄一层适配；`main.rs` 只解析命令、初始化日志。
 - 每个基础库的入口固定写 `#![cfg_attr(test, allow(clippy::pedantic))]`：库代码从严，测试代码以可读为先。
 - Rust 工作区禁止 `unsafe`；clippy 的 `all` 与 `pedantic`（除 `must_use_candidate`）按警告即错误执行。

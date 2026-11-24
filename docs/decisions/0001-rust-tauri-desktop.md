@@ -8,7 +8,7 @@
 
 Jarvis 的桌面端以 Electron 为主：主进程与设备运行时都是 TypeScript，窗口里加载的是远程网页。目标是把桌面端换成 Rust + Tauri 2，并优先做好文件传输与日程规划；宠物、壁纸不是重点。
 
-动手之前只读调研了 `jarvis`（`main`，`0d6eb5f`），结论见 [架构说明](../architecture.md#调研中决定设计的几条事实)。
+动手之前只读调研了 `jarvis`（`main`，`0d6eb5f`），结论当时写在架构说明里。转向之后[架构说明](../architecture.md)已经按新的结构重写，那一节不再保留；它对 jarvis 的结论本身没有变，只是对 Assemble 已经不适用。
 
 ## 决定
 
