@@ -157,8 +157,7 @@ fn directory_unusable(error: BoundaryError) -> std::io::Error {
 async fn publish(staged: StagedDownload, destination: PathBuf) -> Result<Received, TransferError> {
     let name = destination
         .file_name()
-        .map(|name| name.to_string_lossy().into_owned())
-        .unwrap_or_default();
+        .map_or_default(|name| name.to_string_lossy().into_owned());
     let size = staged.size();
     let saved = staged.publish().await?;
     Ok(Received {

@@ -57,7 +57,7 @@ const SETTINGS_FILE: &str = "settings.json";
 const SHORT_TIMEOUT: Duration = Duration::from_secs(6);
 
 /// 隔多久与服务器对一次账。比事件流的心跳长得多，平时只是一次很小的请求。
-pub(crate) const RESYNC_INTERVAL: Duration = Duration::from_secs(5 * 60);
+pub(crate) const RESYNC_INTERVAL: Duration = Duration::from_mins(5);
 
 // ---- 设置 ----
 
@@ -65,8 +65,7 @@ fn settings_path<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> PathBuf {
     // 应用数据目录在启动时已经建好；万一拿不到，后面的读写会如实失败。
     app.path()
         .app_data_dir()
-        .map(|dir| dir.join(SETTINGS_FILE))
-        .unwrap_or_default()
+        .map_or_default(|dir| dir.join(SETTINGS_FILE))
 }
 
 /// 读出保存过的设置。读不懂就当没设置过：这只是"文件存到哪里"的偏好，

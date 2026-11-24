@@ -30,8 +30,7 @@ fn staging_path(destination: &Path) -> Result<PathBuf, TransferError> {
     let suffix = assemble_protocol::primitives::to_hex(&random);
     let mut name = destination
         .file_name()
-        .map(std::ffi::OsStr::to_os_string)
-        .unwrap_or_default();
+        .map_or_default(std::ffi::OsStr::to_os_string);
     name.push(format!(".{suffix}.part"));
     Ok(destination.with_file_name(name))
 }

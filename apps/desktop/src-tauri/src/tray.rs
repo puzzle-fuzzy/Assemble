@@ -34,7 +34,9 @@ pub fn build(app: &AppHandle) -> tauri::Result<()> {
         None => Menu::with_items(app, &[&open, &send, &quit])?,
     };
 
-    let mut builder = TrayIconBuilder::with_id("main")
+    // 不给 builder 标 mut：只有 macOS 上会再赋一次值，别的平台上那个标记用不到，
+    // 静态检查会报"不需要可变"。按平台多出来的一步用遮蔽接上去。
+    let builder = TrayIconBuilder::with_id("main")
         .icon(tauri::image::Image::from_bytes(include_bytes!(
             "../icons/tray-icon.png"
         ))?)
@@ -72,9 +74,7 @@ pub fn build(app: &AppHandle) -> tauri::Result<()> {
         });
     // macOS 菜单栏图标使用模板图：系统按深浅外观自动着色。
     #[cfg(target_os = "macos")]
-    {
-        builder = builder.icon_as_template(true);
-    }
+    let builder = builder.icon_as_template(true);
     builder.build(app)?;
 
     app.manage(TrayMenu { launch });

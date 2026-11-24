@@ -5,15 +5,17 @@ members = ["crates/*", "apps/server", "apps/desktop/src-tauri"]
 [workspace.package]
 version = "0.1.0"
 edition = "2024"
-rust-version = "1.90"
+# 与 rust-toolchain.toml 钉住的版本一致：只在这个版本上验证过，不对更老的编译器作承诺。
+rust-version = "1.100.0"
 publish = false
 
 [workspace.dependencies]
+# assemble-schedule（日程推算）还没有任何调用方：它自己的那一行等日程规划接入时再加回来，
+# 提前写在这里 cargo 会报"工作区依赖没有人用"。
 assemble-client = { path = "crates/assemble-client" }
 assemble-device = { path = "crates/assemble-device" }
 assemble-protocol = { path = "crates/assemble-protocol" }
 assemble-server = { path = "apps/server" }
-assemble-schedule = { path = "crates/assemble-schedule" }
 assemble-store = { path = "crates/assemble-store" }
 assemble-transfer = { path = "crates/assemble-transfer" }
 

@@ -62,23 +62,27 @@ fn apply(settings: &Settings) -> Option<std::io::Result<()>> {
     if !supported() {
         return None;
     }
-    write_registry(settings)
+    // 只有 Windows 上的打包运行会走到这里。两种平台各自直接给出返回值，
+    // 不再共用一个"总包着一层 Option"的函数：那个包装在 Windows 上永远不缺，静态检查会嫌它多余。
+    #[cfg(windows)]
+    return Some(write_registry(settings));
+    #[cfg(not(windows))]
+    {
+        let _ = settings;
+        None
+    }
 }
 
+/// 往注册表里登记或者去掉菜单。
 #[cfg(windows)]
-fn write_registry(settings: &Settings) -> Option<std::io::Result<()>> {
+fn write_registry(settings: &Settings) -> std::io::Result<()> {
     use assemble_device::send_menu;
 
     if !wanted(settings) {
-        return Some(send_menu::registry::remove());
+        return send_menu::registry::remove();
     }
     // 这个可执行文件在哪；拿不到就什么都不登记。
-    Some(std::env::current_exe().and_then(|application| send_menu::registry::install(&application)))
-}
-
-#[cfg(not(windows))]
-fn write_registry(_settings: &Settings) -> Option<std::io::Result<()>> {
-    None
+    std::env::current_exe().and_then(|application| send_menu::registry::install(&application))
 }
 
 #[cfg(test)]

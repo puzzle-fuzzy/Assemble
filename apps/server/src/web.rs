@@ -74,14 +74,13 @@ impl LoginThrottle {
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .get(username)
-            .map(|entries| {
+            .map_or_default(|entries| {
                 entries
                     .iter()
                     .copied()
                     .filter(|at| now.duration_since(*at) < WINDOW)
                     .collect()
             })
-            .unwrap_or_default()
     }
 }
 

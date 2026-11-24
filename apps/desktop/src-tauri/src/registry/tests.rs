@@ -217,7 +217,7 @@ fn waiting_between_retries_gets_longer_up_to_five_minutes() {
     assert_eq!(backoff(1), Duration::from_secs(2));
     assert_eq!(backoff(3), Duration::from_secs(15));
     assert_eq!(backoff(4), Duration::from_secs(60));
-    assert_eq!(backoff(40), Duration::from_secs(5 * 60));
+    assert_eq!(backoff(40), Duration::from_mins(5));
 }
 
 #[test]

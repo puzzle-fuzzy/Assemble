@@ -2,8 +2,8 @@
 name = "assemble-server"
 version.workspace = true
 edition.workspace = true
-# sqlx 0.9 要求 Rust 1.94；工作区其余部分声明的仍是 1.90，只有服务端需要更高的下限。
-rust-version = "1.94"
+# 服务端依赖的 sqlx 0.9 要求 Rust 1.94 以上；工作区的下限现在比它还高。
+rust-version.workspace = true
 publish.workspace = true
 description = "Assemble 服务端：账户、设备、云盘与文件中转"
 default-run = "assemble-server"
