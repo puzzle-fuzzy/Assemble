@@ -470,6 +470,271 @@ pub fn set_send_menu(
     Ok(state.snapshot())
 }
 
+// ---- 日程规划 ----
+
+/// 界面每一次提交新建时带的新幂等键：同一毫秒里的两次提交靠序号分开。
+static SUBMISSIONS: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+
+/// 日程与提醒的内容不合格。诊断沿用原来的那一句，界面不显示它。
+fn rejected(error: &assemble_client::ClientError) -> CommandError {
+    CommandError::local("PLANNER_INPUT", error.to_string())
+}
+
+fn submission_key() -> String {
+    use std::sync::atomic::Ordering;
+
+    let now = assemble_protocol::primitives::Timestamp::now().as_millis();
+    let sequence = SUBMISSIONS.fetch_add(1, Ordering::Relaxed);
+    format!("ui-{now}-{sequence}")
+}
+
+/// 改动之后以服务端的名单为准。事件流会推一份过来，但万一它正断着，这里再拉一次。
+async fn settle_planner(state: &AppState) {
+    if let Err(error) = crate::planner::refresh(state, &state.lifetime).await {
+        tracing::debug!(%error, "the planner could not be listed after a change");
+    }
+}
+
+/// 日程与提醒的内容不合格时给界面的错误码。
+///
+/// 内容先在客户端按服务端同一套规则校验，不合格的还没发出去就拦下了；服务端万一再拒一次，
+/// 用的也是 `INVALID_REQUEST`。两种情形说的是同一件事，界面给同一句话——
+/// 不是设备改名那套说辞。
+fn planner_error(error: &assemble_client::ClientError) -> CommandError {
+    use assemble_client::ClientError;
+
+    match error {
+        ClientError::InvalidRequest => rejected(error),
+        ClientError::Http { remote_code, .. }
+            if remote_code.as_deref() == Some(assemble_protocol::error::codes::INVALID_REQUEST) =>
+        {
+            rejected(error)
+        }
+        other => CommandError::from(other),
+    }
+}
+
+async fn planner_change<T>(
+    state: &AppState,
+    action: impl std::future::Future<Output = Result<T, assemble_client::ClientError>>,
+) -> Result<crate::state::Snapshot, CommandError> {
+    action.await.map_err(|error| planner_error(&error))?;
+    settle_planner(state).await;
+    Ok(state.snapshot())
+}
+
+/// 拉一次日程名单。
+#[tauri::command]
+pub async fn planner_refresh(app: AppHandle) -> Result<crate::state::Snapshot, CommandError> {
+    let state = app.state::<AppState>();
+    match crate::planner::refresh(&state, &state.lifetime).await {
+        Ok(()) => Ok(state.snapshot()),
+        Err(error) => Err(CommandError::from(&error)),
+    }
+}
+
+/// 新建一条日程。带一个新的幂等键：请求超时之后重试，不会建出两条。
+#[tauri::command]
+pub async fn schedule_create(
+    app: AppHandle,
+    content: assemble_protocol::schedule::ScheduleContent,
+) -> Result<crate::state::Snapshot, CommandError> {
+    let state = app.state::<AppState>();
+    let options = RequestOptions::new(&state.lifetime);
+    let key = submission_key();
+    let change = state.client.create_schedule(&content, Some(&key), &options);
+    planner_change(&state, change).await
+}
+
+/// 整份替换一条日程的内容。带上看到的版本号；别处改过时得到 `VERSION_CONFLICT`。
+#[tauri::command]
+pub async fn schedule_update(
+    app: AppHandle,
+    id: String,
+    version: i64,
+    content: assemble_protocol::schedule::ScheduleContent,
+) -> Result<crate::state::Snapshot, CommandError> {
+    let state = app.state::<AppState>();
+    let options = RequestOptions::new(&state.lifetime);
+    let update = assemble_protocol::schedule::ScheduleUpdate { version, content };
+    let change = state.client.update_schedule(&id, &update, &options);
+    planner_change(&state, change).await
+}
+
+macro_rules! schedule_action {
+    ($name:ident, $action:expr, $doc:literal) => {
+        #[doc = $doc]
+        #[tauri::command]
+        pub async fn $name(
+            app: AppHandle,
+            id: String,
+            version: i64,
+        ) -> Result<crate::state::Snapshot, CommandError> {
+            let state = app.state::<AppState>();
+            let options = RequestOptions::new(&state.lifetime);
+            let change = state
+                .client
+                .set_schedule_status(&id, $action, version, &options);
+            planner_change(&state, change).await
+        }
+    };
+}
+
+schedule_action!(
+    schedule_complete,
+    assemble_client::ScheduleAction::Complete,
+    "整条日程标成已完成。"
+);
+schedule_action!(
+    schedule_cancel,
+    assemble_client::ScheduleAction::Cancel,
+    "取消一条日程：还没读的提醒随之作废。"
+);
+schedule_action!(
+    schedule_reopen,
+    assemble_client::ScheduleAction::Reopen,
+    "完成或取消之后改回进行中。"
+);
+
+/// 删掉一条日程，连它的通知一起。
+#[tauri::command]
+pub async fn schedule_delete(
+    app: AppHandle,
+    id: String,
+    version: i64,
+) -> Result<crate::state::Snapshot, CommandError> {
+    let state = app.state::<AppState>();
+    let options = RequestOptions::new(&state.lifetime);
+    let change = state.client.delete_schedule(&id, version, &options);
+    planner_change(&state, change).await
+}
+
+/// 新建一条提醒。幂等键的用处同日程。
+#[tauri::command]
+pub async fn reminder_create(
+    app: AppHandle,
+    content: assemble_protocol::schedule::ReminderContent,
+) -> Result<crate::state::Snapshot, CommandError> {
+    let state = app.state::<AppState>();
+    let options = RequestOptions::new(&state.lifetime);
+    let key = submission_key();
+    let change = state.client.create_reminder(&content, Some(&key), &options);
+    planner_change(&state, change).await
+}
+
+/// 整份替换一条提醒的内容。已经到点的不能改，得到 `INVALID_STATE`。
+#[tauri::command]
+pub async fn reminder_update(
+    app: AppHandle,
+    id: String,
+    version: i64,
+    content: assemble_protocol::schedule::ReminderContent,
+) -> Result<crate::state::Snapshot, CommandError> {
+    let state = app.state::<AppState>();
+    let options = RequestOptions::new(&state.lifetime);
+    let update = assemble_protocol::schedule::ReminderUpdate { version, content };
+    let change = state.client.update_reminder(&id, &update, &options);
+    planner_change(&state, change).await
+}
+
+macro_rules! reminder_action {
+    ($name:ident, $action:expr, $doc:literal) => {
+        #[doc = $doc]
+        #[tauri::command]
+        pub async fn $name(
+            app: AppHandle,
+            id: String,
+            version: i64,
+        ) -> Result<crate::state::Snapshot, CommandError> {
+            let state = app.state::<AppState>();
+            let options = RequestOptions::new(&state.lifetime);
+            let change = state
+                .client
+                .set_reminder_status(&id, $action, version, &options);
+            planner_change(&state, change).await
+        }
+    };
+}
+
+reminder_action!(
+    reminder_dismiss,
+    assemble_client::ReminderAction::Dismiss,
+    "一条提醒办完了，或者到点之后看过了。"
+);
+reminder_action!(
+    reminder_cancel,
+    assemble_client::ReminderAction::Cancel,
+    "不提醒了。"
+);
+
+/// 删掉一条提醒，连它的通知一起。
+#[tauri::command]
+pub async fn reminder_delete(
+    app: AppHandle,
+    id: String,
+    version: i64,
+) -> Result<crate::state::Snapshot, CommandError> {
+    let state = app.state::<AppState>();
+    let options = RequestOptions::new(&state.lifetime);
+    let change = state.client.delete_reminder(&id, version, &options);
+    planner_change(&state, change).await
+}
+
+/// 把几条通知标成已读。
+#[tauri::command]
+pub async fn notifications_read(
+    app: AppHandle,
+    ids: Vec<String>,
+) -> Result<crate::state::Snapshot, CommandError> {
+    let state = app.state::<AppState>();
+    let options = RequestOptions::new(&state.lifetime);
+    let borrowed: Vec<&str> = ids.iter().map(String::as_str).collect();
+    let change = state.client.mark_notifications_read(&borrowed, &options);
+    planner_change(&state, change).await
+}
+
+/// 这个账户的通知全部标成已读。
+#[tauri::command]
+pub async fn notifications_read_all(
+    app: AppHandle,
+) -> Result<crate::state::Snapshot, CommandError> {
+    let state = app.state::<AppState>();
+    let options = RequestOptions::new(&state.lifetime);
+    let change = state.client.mark_all_notifications_read(&options);
+    planner_change(&state, change).await
+}
+
+/// 点开了一条通知（或者看完收起）：主窗口定位到它。传 `None` 取消定位。
+#[tauri::command]
+pub fn planner_focus(app: AppHandle, notification_id: Option<String>) -> crate::state::Snapshot {
+    let state = app.state::<AppState>();
+    state.set_planner_focus(notification_id);
+    state.snapshot()
+}
+
+/// 摆出一张新建表单（托盘的"新建提醒…"用），或者把它收起。
+#[tauri::command]
+pub fn planner_compose(
+    app: AppHandle,
+    compose: Option<crate::planner::Compose>,
+) -> crate::state::Snapshot {
+    let state = app.state::<AppState>();
+    state.set_planner_compose(compose);
+    state.snapshot()
+}
+
+/// 这台电脑到点时要不要弹提醒。
+#[tauri::command]
+pub fn set_planner_muted(app: AppHandle, muted: bool) -> crate::state::Snapshot {
+    let state = app.state::<AppState>();
+    state.set_planner_muted(muted);
+    if let Err(error) = crate::transfers::save_settings(&app, &state.settings()) {
+        // 这次已经按新设置走了，只是没记下来：下次启动回到原来的选择。
+        tracing::warn!(%error, "the reminder choice could not be saved");
+    }
+    state.snapshot()
+}
+
 /// 提示看过了，收起来。
 #[tauri::command]
 pub fn dismiss_notice(app: AppHandle) -> crate::state::Snapshot {
@@ -547,6 +812,29 @@ mod tests {
             CommandError::from(&assemble_client::ClientError::TooLarge).code,
             "LOCAL_SOURCE"
         );
+    }
+
+    #[test]
+    fn planner_content_that_is_not_acceptable_gets_its_own_code() {
+        use assemble_client::ClientError;
+
+        // 客户端自己拦下的，与服务端用 `INVALID_REQUEST` 再拒一次的，是同一句话。
+        assert_eq!(
+            planner_error(&ClientError::InvalidRequest).code,
+            "PLANNER_INPUT"
+        );
+        let refused = ClientError::Http {
+            status: 400,
+            remote_code: Some("INVALID_REQUEST".to_owned()),
+        };
+        assert_eq!(planner_error(&refused).code, "PLANNER_INPUT");
+        // 别的错误照旧：版本冲突要原样交给界面。
+        let conflict = ClientError::Http {
+            status: 409,
+            remote_code: Some("VERSION_CONFLICT".to_owned()),
+        };
+        assert_eq!(planner_error(&conflict).code, "VERSION_CONFLICT");
+        assert_eq!(planner_error(&ClientError::Network).code, "UNREACHABLE");
     }
 
     #[test]

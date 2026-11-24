@@ -19,13 +19,16 @@ use assemble_protocol::device::Device;
 use assemble_protocol::drive::{DriveFile, DriveListing};
 use assemble_protocol::origin::ServerOrigin;
 use assemble_protocol::primitives::Timestamp;
+use assemble_protocol::schedule::Planner;
 use assemble_protocol::sends::{Direction, Send as SendRecord};
+use assemble_schedule::ledger::DeliveryLedger;
 use assemble_store::secret::{SecretKey, SecretStore, SecretString};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_autostart::ManagerExt;
 use tokio_util::sync::CancellationToken;
 
+use crate::planner::{Compose, PlannerView};
 use crate::registry::{
     Cancellation, Delivery, Destination, DraftView, Next, Outgoing, Registry, TransferFailure,
     TransferView, Updated,
@@ -240,6 +243,10 @@ pub struct Snapshot {
     pub receive: ReceiveView,
     pub launch_at_login: LaunchState,
     pub notice: Option<Notice>,
+    /// 日程、提醒与还没读的通知。没登录、或名单还没拿回来时为 `None`。
+    pub planner: Option<PlannerView>,
+    /// 这台电脑到点时不弹提醒。
+    pub planner_muted: bool,
 }
 
 /// 云盘里的一个文件在界面上的样子。摘要不给界面：用不上。
@@ -286,6 +293,8 @@ impl From<&DriveListing> for DriveView {
 pub trait Notifier: Send + Sync {
     /// `handle` 是这条通知的标识：用户点它时，按它找回要显示的文件。
     fn received(&self, handle: i32, peer: &str, file_name: &str, fell_back: bool);
+    /// 一条日程或提醒到点了。`handle` 同样是点通知时找回它的标识。
+    fn reminder(&self, handle: i32, title: &str, body: &str);
 }
 
 /// 本机的设置，保存在应用数据目录里。不随账户变化：换个人登录，文件还是存到同一个地方。
@@ -296,6 +305,11 @@ pub struct Settings {
     pub receive_directory: Option<PathBuf>,
     /// Windows 右键菜单"用 Assemble 发送"要不要有；`None` 表示默认（有）。
     pub send_menu: Option<bool>,
+    /// 这台电脑上已经弹过系统通知的日程与提醒。名单每次都带着全部未读的通知，
+    /// 靠它知道哪几条已经弹过，断线重连之后不重复弹。
+    pub delivered: DeliveryLedger,
+    /// 这台电脑到点时不弹提醒：只想看列表、不想它响的那些电脑用。默认要弹。
+    pub planner_muted: bool,
 }
 
 /// Windows 右键菜单"用 Assemble 发送"在这台电脑上的状态。以注册表为准，不以点击为准。
@@ -350,6 +364,18 @@ pub struct View {
     send_menu: SendMenuState,
     receive: ReceiveView,
     notice: Option<Notice>,
+    /// 服务端最近一次给的名单；拿不到时留着上一份。没登录时为 `None`。
+    planner: Option<Planner>,
+    /// 这份名单是在本机的哪一天拿到的。过了零点，"今天"要换：哪怕名单没变，也得重算一遍。
+    planner_day: i32,
+    /// 点开某条通知之后要定位到的那一条。它已读或换了一份账户之后清掉。
+    planner_focus: Option<String>,
+    /// 最近弹过的系统通知：`handle` 对应哪一条通知。点通知时按 `handle` 找回它。
+    planner_handles: Vec<(i32, String)>,
+    /// 这台电脑到点时不弹提醒。
+    planner_muted: bool,
+    /// 现在要摆出哪张新建表单（托盘的"新建提醒…"用过的记号）。表单交上去或收起时清掉。
+    planner_compose: Option<Compose>,
 }
 
 impl View {
@@ -360,6 +386,11 @@ impl View {
 
     fn with_send_menu(mut self, send_menu: SendMenuState) -> Self {
         self.send_menu = send_menu;
+        self
+    }
+
+    fn with_planner_muted(mut self, muted: bool) -> Self {
+        self.planner_muted = muted;
         self
     }
 
@@ -376,6 +407,10 @@ impl View {
             receive: self.receive.clone(),
             launch_at_login,
             notice: self.notice.clone(),
+            planner: self.planner.as_ref().map(|planner| {
+                crate::planner::view(planner, self.planner_focus.as_deref(), self.planner_compose)
+            }),
+            planner_muted: self.planner_muted,
         }
     }
 
@@ -395,6 +430,12 @@ impl View {
                 custom_folder: None,
             },
             notice: None,
+            planner: None,
+            planner_day: 0,
+            planner_focus: None,
+            planner_handles: Vec::new(),
+            planner_muted: false,
+            planner_compose: None,
         }
     }
 }
@@ -440,7 +481,8 @@ impl<R: tauri::Runtime> AppState<R> {
         let view = Mutex::new(
             View::initial(client.origin())
                 .with_receive_folder(settings.receive_directory.as_deref())
-                .with_send_menu(crate::send_menu::state(&settings)),
+                .with_send_menu(crate::send_menu::state(&settings))
+                .with_planner_muted(settings.planner_muted),
         );
         Self {
             app,
@@ -613,6 +655,9 @@ impl<R: tauri::Runtime> AppState<R> {
         self.set_devices(Vec::new());
         self.registry(Registry::clear);
         self.set_drive(None);
+        self.set_planner(None);
+        // 托盘里点过的"新建提醒…"也不留给下一个登录的人：不该一登录就冒出一张表单。
+        self.set_planner_compose(None);
         self.set_stream(StreamState::Off);
     }
 
@@ -811,6 +856,75 @@ impl<R: tauri::Runtime> AppState<R> {
     /// 换上服务端给的云盘名单。
     pub fn set_drive(&self, listing: Option<DriveListing>) {
         self.update(|view| view.drive = listing);
+    }
+
+    /// 换上一份日程名单；传 `None` 清掉（没登录的时候）。
+    pub fn set_planner(&self, planner: Option<Planner>) {
+        let day = crate::planner::local_day();
+        self.update(|view| {
+            view.planner_day = day;
+            view.planner = planner;
+            // 要定位的那一条已经不在未读名单里了：不再定位。
+            if view.planner_focus.as_ref().is_some_and(|focus| {
+                !view
+                    .planner
+                    .as_ref()
+                    .is_some_and(|planner| planner.notifications.iter().any(|n| &n.id == focus))
+            }) {
+                view.planner_focus = None;
+            }
+        });
+    }
+
+    /// 改一份本机设置，返回改动函数给出的东西。
+    pub fn edit_settings<T>(&self, change: impl FnOnce(&mut Settings) -> T) -> T {
+        let mut settings = self.settings.lock().unwrap_or_else(PoisonError::into_inner);
+        change(&mut settings)
+    }
+
+    /// 这台电脑到点时要不要弹提醒，连同设置一起改。
+    pub fn set_planner_muted(&self, muted: bool) {
+        self.edit_settings(|settings| settings.planner_muted = muted);
+        self.update(|view| view.planner_muted = muted);
+    }
+
+    /// 给一条日程通知登记 `handle`：点开它时找得回是哪一条。
+    pub fn track_notification(&self, handle: i32, notification_id: &str) {
+        self.update(|view| {
+            view.planner_handles
+                .push((handle, notification_id.to_owned()));
+            // 留最近的就够了：通知中心里的旧通知早就没了。
+            if view.planner_handles.len() > 200 {
+                let excess = view.planner_handles.len() - 200;
+                view.planner_handles.drain(..excess);
+            }
+        });
+    }
+
+    /// 某条系统通知对应哪一条日程通知；不是日程的通知（比如"收到文件"）为 `None`。
+    pub fn notification_for_handle(&self, handle: i32) -> Option<String> {
+        self.view
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .planner_handles
+            .iter()
+            .find(|(tracked, _)| *tracked == handle)
+            .map(|(_, id)| id.clone())
+    }
+
+    /// 现在要摆出哪张新建表单；传 `None` 收起。
+    pub fn set_planner_compose(&self, compose: Option<Compose>) {
+        self.update(|view| view.planner_compose = compose);
+    }
+
+    /// 点开了一条通知：主窗口要定位到它。传 `None` 取消定位。
+    pub fn set_planner_focus(&self, notification_id: Option<String>) {
+        self.update(|view| view.planner_focus = notification_id);
+    }
+
+    /// 一条日程或提醒到点了，告诉用户。
+    pub fn notify_reminder(&self, handle: i32, title: &str, body: &str) {
+        self.notifier.reminder(handle, title, body);
     }
 
     /// 云盘名单上的一个文件；名单上没有时为 `None`。

@@ -11,6 +11,7 @@ use std::time::Duration;
 use serde::{Deserialize, Serialize};
 
 use crate::device::Device;
+use crate::schedule::Planner;
 use crate::sends::Send;
 
 /// 事件流的路径。
@@ -34,6 +35,8 @@ pub enum Event {
     SendOffered { send: Send },
     /// 一次发送的状态变了：送达、拒绝、撤回、失败、过期。
     SendUpdated { send: Send },
+    /// 日程、提醒或通知变了：新建、修改、到点、已读。带上整份名单。
+    PlannerChanged { planner: Planner },
 }
 
 impl Event {
@@ -44,6 +47,7 @@ impl Event {
             Self::DevicesChanged { .. } => "devices_changed",
             Self::SendOffered { .. } => "send_offered",
             Self::SendUpdated { .. } => "send_updated",
+            Self::PlannerChanged { .. } => "planner_changed",
         }
     }
 }
@@ -54,6 +58,7 @@ mod tests {
 
     use super::*;
     use crate::primitives::{Platform, Timestamp};
+    use crate::schedule::Planner;
     use crate::sends::{Direction, SendState};
 
     fn device(id: &str, online: bool) -> Device {
@@ -116,6 +121,13 @@ mod tests {
             },
             Event::SendOffered { send: send() },
             Event::SendUpdated { send: send() },
+            Event::PlannerChanged {
+                planner: Planner {
+                    schedules: Vec::new(),
+                    reminders: Vec::new(),
+                    notifications: Vec::new(),
+                },
+            },
         ];
         for event in events {
             let encoded = serde_json::to_string(&event).unwrap();

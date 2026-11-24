@@ -23,4 +23,5 @@ pub mod health;
 pub mod login;
 pub mod origin;
 pub mod primitives;
+pub mod schedule;
 pub mod sends;

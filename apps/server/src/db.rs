@@ -97,6 +97,10 @@ mod tests {
                 "desktop_auth_codes",
                 "devices",
                 "drive_files",
+                "notifications",
+                "planner_mutations",
+                "reminders",
+                "schedules",
                 "sends",
                 "web_sessions"
             ]
@@ -110,7 +114,58 @@ mod tests {
             .fetch_one(&again)
             .await
             .unwrap();
-        assert_eq!(applied, 1);
+        assert_eq!(applied, 2);
+    }
+
+    #[tokio::test]
+    async fn an_existing_database_is_upgraded_in_place_without_touching_its_rows() {
+        // 正式服务器上的库不是空着开始迁移的：先按第一版结构建库、放进数据，再升级。
+        let dir = tempfile::tempdir().unwrap();
+        let options = SqliteConnectOptions::new()
+            .filename(dir.path().join(DATABASE_FILE))
+            .create_if_missing(true);
+        let old = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect_with(options)
+            .await
+            .unwrap();
+        // 只跑第一个迁移：这才是"升级之前"的那个库，迁移账本里记着第一版已经应用。
+        let first_version = sqlx::migrate::Migrator {
+            migrations: std::borrow::Cow::Owned(
+                sqlx::migrate!("./migrations")
+                    .migrations
+                    .iter()
+                    .take(1)
+                    .cloned()
+                    .collect(),
+            ),
+            ..sqlx::migrate::Migrator::DEFAULT
+        };
+        first_version.run(&old).await.unwrap();
+        let now = 1_795_000_000_000_i64;
+        sqlx::query(
+            "INSERT INTO accounts (id, username, display_name, password_hash, created_at)              VALUES ('a1', 'alex', 'Alex', 'hash', ?)",
+        )
+        .bind(now)
+        .execute(&old)
+        .await
+        .unwrap();
+        old.close().await;
+
+        let upgraded = open(dir.path()).await.unwrap();
+        let account: Option<String> =
+            sqlx::query_scalar("SELECT username FROM accounts WHERE id = 'a1'")
+                .fetch_optional(&upgraded)
+                .await
+                .unwrap();
+        assert_eq!(account.as_deref(), Some("alex"));
+        let tables: i64 = sqlx::query_scalar(
+            "SELECT count(*) FROM sqlite_master WHERE type = 'table'              AND name IN ('schedules', 'reminders', 'notifications', 'planner_mutations')",
+        )
+        .fetch_one(&upgraded)
+        .await
+        .unwrap();
+        assert_eq!(tables, 4);
     }
 
     #[tokio::test]

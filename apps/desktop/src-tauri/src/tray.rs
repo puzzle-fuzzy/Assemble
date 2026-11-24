@@ -12,6 +12,7 @@ use crate::state::{self, AppState, LaunchState};
 
 pub const OPEN_ID: &str = "open";
 pub const SEND_ID: &str = "send-files";
+pub const REMINDER_ID: &str = "new-reminder";
 pub const LAUNCH_ID: &str = "launch-at-login";
 pub const QUIT_ID: &str = "quit";
 
@@ -23,6 +24,7 @@ pub struct TrayMenu {
 pub fn build(app: &AppHandle) -> tauri::Result<()> {
     let open = MenuItem::with_id(app, OPEN_ID, "打开 Assemble", true, None::<&str>)?;
     let send = MenuItem::with_id(app, SEND_ID, "发送文件…", true, None::<&str>)?;
+    let reminder = MenuItem::with_id(app, REMINDER_ID, "新建提醒…", true, None::<&str>)?;
     let quit = MenuItem::with_id(app, QUIT_ID, "退出 Assemble", true, None::<&str>)?;
 
     // 开机启动只在打包后的运行里提供；开发运行不写系统登录项。
@@ -30,8 +32,8 @@ pub fn build(app: &AppHandle) -> tauri::Result<()> {
         .then(|| CheckMenuItem::with_id(app, LAUNCH_ID, "开机启动", true, false, None::<&str>))
         .transpose()?;
     let menu = match &launch {
-        Some(launch) => Menu::with_items(app, &[&open, &send, launch, &quit])?,
-        None => Menu::with_items(app, &[&open, &send, &quit])?,
+        Some(launch) => Menu::with_items(app, &[&open, &send, &reminder, launch, &quit])?,
+        None => Menu::with_items(app, &[&open, &send, &reminder, &quit])?,
     };
 
     // 不给 builder 标 mut：只有 macOS 上会再赋一次值，别的平台上那个标记用不到，
@@ -55,6 +57,7 @@ pub fn build(app: &AppHandle) -> tauri::Result<()> {
                     }
                 });
             }
+            REMINDER_ID => crate::planner::compose(app, crate::planner::Compose::Reminder),
             // 托盘里的开关只能由用户点击改变，这里直接切换。
             LAUNCH_ID => toggle_launch(app),
             QUIT_ID => app.exit(0),

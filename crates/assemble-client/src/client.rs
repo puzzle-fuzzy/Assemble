@@ -33,6 +33,10 @@ use assemble_protocol::error::ApiErrorBody;
 use assemble_protocol::health::{HEALTH_PATH, HealthResponse};
 use assemble_protocol::login::{EXCHANGE_PATH, ExchangeInput, ExchangeResponse, MeResponse};
 use assemble_protocol::primitives::{MAX_FILE_SIZE, is_valid_id};
+use assemble_protocol::schedule::{
+    Planner, ReadInput, Reminder, ReminderContent, ReminderUpdate, Schedule, ScheduleContent,
+    ScheduleUpdate, Versioned,
+};
 // 协议里的"一次发送"叫 `Send`，与 `std::marker::Send` 重名；这里换个名字引进来。
 use assemble_protocol::sends::{FailInput, Send as SendRecord, SendListing, SendQuery};
 use assemble_store::secret::SecretString;
@@ -452,6 +456,149 @@ impl Client {
         self.call_empty(Call::get(&path).delete(), options).await
     }
 
+    // ---- 日程规划 ----
+
+    /// `GET /v1/planner`：日程、提醒与还没读的通知。
+    pub async fn planner(&self, options: &RequestOptions<'_>) -> Result<Planner, ClientError> {
+        self.call_json(Call::get("/v1/planner"), options).await
+    }
+
+    /// 新建一条日程。`idempotency_key` 用过的话拿回的是原来那一条。
+    pub async fn create_schedule(
+        &self,
+        content: &ScheduleContent,
+        idempotency_key: Option<&str>,
+        options: &RequestOptions<'_>,
+    ) -> Result<Schedule, ClientError> {
+        if content.cleaned().is_none() {
+            return Err(ClientError::InvalidRequest);
+        }
+        // 幂等键放在请求头里；内容不合格的请求在上面就已经拦下了。
+        let call = idempotent(Call::get("/v1/schedules"), idempotency_key)
+            .post(Payload::Json(json(content)?));
+        self.call_json(call, options).await
+    }
+
+    /// 整份替换一条日程的内容。版本号对不上时得到 `VERSION_CONFLICT`。
+    pub async fn update_schedule(
+        &self,
+        id: &str,
+        update: &ScheduleUpdate,
+        options: &RequestOptions<'_>,
+    ) -> Result<Schedule, ClientError> {
+        if update.content.cleaned().is_none() {
+            return Err(ClientError::InvalidRequest);
+        }
+        let path = format!("/v1/schedules/{}", id_segment(id)?);
+        let call = Call::get(&path).put(Payload::Json(json(update)?));
+        self.call_json(call, options).await
+    }
+
+    /// 改一条日程的状态：完成、取消，或者改回进行中。
+    pub async fn set_schedule_status(
+        &self,
+        id: &str,
+        action: ScheduleAction,
+        version: i64,
+        options: &RequestOptions<'_>,
+    ) -> Result<Schedule, ClientError> {
+        let path = format!("/v1/schedules/{}/{}", id_segment(id)?, action.path());
+        let call = Call::get(&path).post(Payload::Json(json(&Versioned { version })?));
+        self.call_json(call, options).await
+    }
+
+    pub async fn delete_schedule(
+        &self,
+        id: &str,
+        version: i64,
+        options: &RequestOptions<'_>,
+    ) -> Result<(), ClientError> {
+        let path = format!("/v1/schedules/{}", id_segment(id)?);
+        let call = Call::get(&path).delete_with(Payload::Json(json(&Versioned { version })?));
+        self.call_empty(call, options).await
+    }
+
+    /// 新建一条提醒。`idempotency_key` 用过的话拿回的是原来那一条。
+    pub async fn create_reminder(
+        &self,
+        content: &ReminderContent,
+        idempotency_key: Option<&str>,
+        options: &RequestOptions<'_>,
+    ) -> Result<Reminder, ClientError> {
+        if content.cleaned().is_none() {
+            return Err(ClientError::InvalidRequest);
+        }
+        // 幂等键放在请求头里；内容不合格的请求在上面就已经拦下了。
+        let call = idempotent(Call::get("/v1/reminders"), idempotency_key)
+            .post(Payload::Json(json(content)?));
+        self.call_json(call, options).await
+    }
+
+    /// 整份替换一条提醒的内容。已经到点的提醒不能改，得到 `INVALID_STATE`。
+    pub async fn update_reminder(
+        &self,
+        id: &str,
+        update: &ReminderUpdate,
+        options: &RequestOptions<'_>,
+    ) -> Result<Reminder, ClientError> {
+        if update.content.cleaned().is_none() {
+            return Err(ClientError::InvalidRequest);
+        }
+        let path = format!("/v1/reminders/{}", id_segment(id)?);
+        let call = Call::get(&path).put(Payload::Json(json(update)?));
+        self.call_json(call, options).await
+    }
+
+    /// 把一条提醒标成办完了，或者取消它。
+    pub async fn set_reminder_status(
+        &self,
+        id: &str,
+        action: ReminderAction,
+        version: i64,
+        options: &RequestOptions<'_>,
+    ) -> Result<Reminder, ClientError> {
+        let path = format!("/v1/reminders/{}/{}", id_segment(id)?, action.path());
+        let call = Call::get(&path).post(Payload::Json(json(&Versioned { version })?));
+        self.call_json(call, options).await
+    }
+
+    pub async fn delete_reminder(
+        &self,
+        id: &str,
+        version: i64,
+        options: &RequestOptions<'_>,
+    ) -> Result<(), ClientError> {
+        let path = format!("/v1/reminders/{}", id_segment(id)?);
+        let call = Call::get(&path).delete_with(Payload::Json(json(&Versioned { version })?));
+        self.call_empty(call, options).await
+    }
+
+    /// 把几条通知标成已读。
+    pub async fn mark_notifications_read(
+        &self,
+        ids: &[&str],
+        options: &RequestOptions<'_>,
+    ) -> Result<(), ClientError> {
+        if ids.iter().any(|id| !is_valid_id(id)) {
+            return Err(ClientError::InvalidRequest);
+        }
+        let call = Call::get("/v1/notifications/read").post(Payload::Json(json(&ReadInput {
+            ids: ids.iter().map(|id| (*id).to_owned()).collect(),
+        })?));
+        self.call_empty(call, options).await
+    }
+
+    pub async fn mark_all_notifications_read(
+        &self,
+        options: &RequestOptions<'_>,
+    ) -> Result<(), ClientError> {
+        self.call_empty(
+            Call::get("/v1/notifications/read-all").post(Payload::None),
+            options,
+        )
+        .await
+    }
+
     // ---- 发送到设备 ----
 
     /// 把一个本机文件发给同一个账户的另一台在线设备。正文就是文件的字节。
@@ -689,6 +836,9 @@ impl Client {
             .bare_request(call.method, call.path)?
             .query(&call.query)
             .header(ACCEPT, "application/json");
+        for (name, value) in &call.headers {
+            request = request.header(*name, value);
+        }
         if call.authenticated {
             let Some(authorization) = self.authorization() else {
                 // 还没登录就发需要登录的请求：在本地拦下，不发给服务端。
@@ -712,6 +862,51 @@ impl Client {
     }
 }
 
+/// 一条日程能改成的状态。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ScheduleAction {
+    /// 整条日程标成已完成。
+    Complete,
+    Cancel,
+    /// 完成或取消之后改回进行中。
+    Reopen,
+}
+
+impl ScheduleAction {
+    fn path(self) -> &'static str {
+        match self {
+            Self::Complete => "complete",
+            Self::Cancel => "cancel",
+            Self::Reopen => "reopen",
+        }
+    }
+}
+
+/// 一条提醒能改成的状态。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReminderAction {
+    /// 办完了，或者到点之后看过了。
+    Dismiss,
+    Cancel,
+}
+
+impl ReminderAction {
+    fn path(self) -> &'static str {
+        match self {
+            Self::Dismiss => "dismiss",
+            Self::Cancel => "cancel",
+        }
+    }
+}
+
+/// 新建的共用部分：带了幂等键，就把它放进 `Idempotency-Key` 请求头。
+fn idempotent<'a>(call: Call<'a>, key: Option<&str>) -> Call<'a> {
+    match key {
+        Some(key) => call.header("idempotency-key", key.to_owned()),
+        None => call,
+    }
+}
+
 /// 一次调用的全部要素，交给发送管线之前先在这里组装好。
 struct Call<'a> {
     method: Method,
@@ -719,6 +914,7 @@ struct Call<'a> {
     query: Vec<(&'static str, String)>,
     payload: Payload,
     authenticated: bool,
+    headers: Vec<(&'static str, String)>,
 }
 
 impl<'a> Call<'a> {
@@ -729,6 +925,7 @@ impl<'a> Call<'a> {
             query: Vec::new(),
             payload: Payload::None,
             authenticated: true,
+            headers: Vec::new(),
         }
     }
 
@@ -744,6 +941,22 @@ impl<'a> Call<'a> {
 
     fn delete(mut self) -> Self {
         self.method = Method::DELETE;
+        self
+    }
+
+    /// 整份替换。
+    fn put(self, payload: Payload) -> Self {
+        self.with_payload(Method::PUT, payload)
+    }
+
+    /// 带着正文的删除：要删的东西也得带上看到的版本号。
+    fn delete_with(self, payload: Payload) -> Self {
+        self.with_payload(Method::DELETE, payload)
+    }
+
+    /// 多带一个请求头。
+    fn header(mut self, name: &'static str, value: String) -> Self {
+        self.headers.push((name, value));
         self
     }
 

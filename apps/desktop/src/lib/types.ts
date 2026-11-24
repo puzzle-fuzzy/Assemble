@@ -134,6 +134,97 @@ export interface Notice {
   message: string;
 }
 
+/** 一条日程的重复规则。每月按北京时间日历算，短月落在月末。 */
+export type Repeat = "none" | "daily" | "weekly" | "monthly";
+
+/** 一处地点：给人看的地名，和拿去导航的地址。 */
+export interface Location {
+  label: string;
+  address: string;
+}
+
+/**
+ * 新建一条日程、或者整份替换它的内容时给出的东西。时间都是 UTC 的 RFC 3339。
+ * 可选的字段省略就是"没有"。
+ */
+export interface ScheduleContent {
+  title: string;
+  location?: Location | null;
+  startAt: string;
+  endAt?: string | null;
+  repeat?: Repeat;
+  repeatUntil?: string | null;
+  /** 提前多少分钟提醒；不给就是到点才提醒。 */
+  remindBefore?: number | null;
+  notes?: string | null;
+}
+
+/** 新建一条提醒、或者整份替换它的内容时给出的东西。 */
+export interface ReminderContent {
+  title: string;
+  dueAt: string;
+  notes?: string | null;
+}
+
+/** 一条提醒的状态。`fired` 是到点了、还没说"看过了"。 */
+export type ReminderStatus = "scheduled" | "fired" | "dismissed" | "cancelled";
+
+/** 还在进行中的一条日程。 */
+export interface ScheduleView {
+  id: string;
+  /** 每改一次加一。改动时要带上看到的那个版本。 */
+  version: number;
+  /** 建立它的那台设备当时叫什么：助手写的和手建的，分得开。 */
+  createdBy: string;
+  title: string;
+  location: Location | null;
+  startAt: string;
+  endAt: string | null;
+  repeat: Repeat;
+  repeatUntil: string | null;
+  /** 提前多少分钟提醒；到点才提醒时为 null。 */
+  remindBefore: number | null;
+  notes: string | null;
+  /** 从今天起七天之内会出现的几场，含今天已经过去的，按时间排。 */
+  occurrences: string[];
+}
+
+/** 一条还没办完的提醒。 */
+export interface ReminderView {
+  id: string;
+  version: number;
+  status: ReminderStatus;
+  createdBy: string;
+  title: string;
+  dueAt: string;
+  notes: string | null;
+}
+
+/** 一条还没读的通知。 */
+export interface NotificationView {
+  id: string;
+  title: string;
+  body: string | null;
+  /** 它是哪一条日程或提醒；对不上列表里的任何一条时为 null。 */
+  scheduleId: string | null;
+  reminderId: string | null;
+  raisedAt: string;
+}
+
+/** 日程面板：还没读的通知、还在进行中的日程与提醒。 */
+export interface PlannerView {
+  /** 新的在前。 */
+  notifications: NotificationView[];
+  /** 最近的一场在前的排前面。 */
+  schedules: ScheduleView[];
+  /** 按到点时间排。 */
+  reminders: ReminderView[];
+  /** 点开某条通知之后要定位到那一条；没有要定位的时为 null。 */
+  focus: string | null;
+  /** 现在要摆出哪张新建表单（从托盘的"新建提醒…"进来时）；没有时为 null。 */
+  compose: "reminder" | "schedule" | null;
+}
+
 /** 连接的是哪一套服务。由构建类型决定，不从界面输入。 */
 export type ServiceTarget = "production" | "development";
 
@@ -160,6 +251,10 @@ export interface Snapshot {
   receive: ReceiveView;
   launchAtLogin: LaunchState;
   notice: Notice | null;
+  /** 日程、提醒与还没读的通知。没登录、或名单还没拿回来时为 null。 */
+  planner: PlannerView | null;
+  /** 这台电脑到点时不弹提醒。 */
+  plannerMuted: boolean;
 }
 
 /** Windows 右键菜单"用 Assemble 发送"在这台电脑上的状态。 */

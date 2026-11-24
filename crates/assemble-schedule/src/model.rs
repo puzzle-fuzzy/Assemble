@@ -1,37 +1,14 @@
 //! 日程在接口里的数据形状。
 //!
-//! 推算只关心其中的时间与重复规则；标题、地点、备注是为了让这份形状
-//! 能原样在线上传输。字段名沿用 camelCase 的时间字符串，读的时候按各自的
-//! 时区偏移换算成时间戳。
+//! [`Repeat`]、[`ScheduleStatus`] 与 [`Location`] 只在 `assemble-protocol` 里定义一份，
+//! 这里原样转出：服务端推算与接口说话用的是同一套拼法。
+//!
+//! [`ScheduleData`] 沿用 jarvis 的那一份（时间是带偏移的字符串），留着对照那两万条旧用例；
+//! Assemble 自己的接口用的是 `assemble_protocol::schedule` 里带版本号的那几种类型。
 
 use serde::{Deserialize, Serialize};
 
-/// 一处显式地点：`label` 是可点击地名，`address` 是导航目的地。
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct Location {
-    pub label: String,
-    pub address: String,
-}
-
-/// 一条日程的重复规则。
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum Repeat {
-    None,
-    Daily,
-    Weekly,
-    Monthly,
-}
-
-/// 一条日程的状态。
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum ScheduleStatus {
-    Upcoming,
-    Done,
-    Cancelled,
-}
+pub use assemble_protocol::schedule::{Location, Repeat, ScheduleStatus};
 
 /// 跨时段的日程，可按天、周、月重复到 `repeatUntil`。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

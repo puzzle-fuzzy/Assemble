@@ -9,8 +9,14 @@ import type {
   DraftView,
   DriveView,
   LaunchState,
+  Location,
   Notice,
+  NotificationView,
+  PlannerView,
   Platform,
+  ReminderView,
+  Repeat,
+  ScheduleView,
   SendMenuState,
   ServiceTarget,
   SessionView,
@@ -156,6 +162,81 @@ export function isDriveView(value: unknown): value is DriveView {
   );
 }
 
+function isRepeat(value: unknown): value is Repeat {
+  return (
+    value === "none" ||
+    value === "daily" ||
+    value === "weekly" ||
+    value === "monthly"
+  );
+}
+
+function isLocation(value: unknown): value is Location {
+  return (
+    isRecord(value) && hasString(value, "label") && hasString(value, "address")
+  );
+}
+
+function isScheduleView(value: unknown): value is ScheduleView {
+  return (
+    isRecord(value) &&
+    hasString(value, "id") &&
+    typeof value.version === "number" &&
+    hasString(value, "createdBy") &&
+    hasString(value, "title") &&
+    (value.location === null || isLocation(value.location)) &&
+    hasString(value, "startAt") &&
+    (value.endAt === null || typeof value.endAt === "string") &&
+    isRepeat(value.repeat) &&
+    (value.repeatUntil === null || typeof value.repeatUntil === "string") &&
+    (value.remindBefore === null || typeof value.remindBefore === "number") &&
+    (value.notes === null || typeof value.notes === "string") &&
+    Array.isArray(value.occurrences) &&
+    value.occurrences.every((at) => typeof at === "string")
+  );
+}
+
+function isReminderView(value: unknown): value is ReminderView {
+  return (
+    isRecord(value) &&
+    hasString(value, "id") &&
+    typeof value.version === "number" &&
+    (value.status === "scheduled" || value.status === "fired") &&
+    hasString(value, "createdBy") &&
+    hasString(value, "title") &&
+    hasString(value, "dueAt") &&
+    (value.notes === null || typeof value.notes === "string")
+  );
+}
+
+function isNotificationView(value: unknown): value is NotificationView {
+  return (
+    isRecord(value) &&
+    hasString(value, "id") &&
+    hasString(value, "title") &&
+    (value.body === null || typeof value.body === "string") &&
+    (value.scheduleId === null || typeof value.scheduleId === "string") &&
+    (value.reminderId === null || typeof value.reminderId === "string") &&
+    hasString(value, "raisedAt")
+  );
+}
+
+function isPlannerView(value: unknown): value is PlannerView {
+  return (
+    isRecord(value) &&
+    Array.isArray(value.notifications) &&
+    value.notifications.every(isNotificationView) &&
+    Array.isArray(value.schedules) &&
+    value.schedules.every(isScheduleView) &&
+    Array.isArray(value.reminders) &&
+    value.reminders.every(isReminderView) &&
+    (value.focus === null || typeof value.focus === "string") &&
+    (value.compose === null ||
+      value.compose === "reminder" ||
+      value.compose === "schedule")
+  );
+}
+
 export function isSendMenuState(value: unknown): value is SendMenuState {
   return value === "enabled" || value === "disabled" || value === "unsupported";
 }
@@ -207,6 +288,8 @@ export function isSnapshot(value: unknown): value is Snapshot {
     (value.receive.customFolder === null ||
       typeof value.receive.customFolder === "string") &&
     isLaunchState(value.launchAtLogin) &&
-    (value.notice === null || isNotice(value.notice))
+    (value.notice === null || isNotice(value.notice)) &&
+    (value.planner === null || isPlannerView(value.planner)) &&
+    typeof value.plannerMuted === "boolean"
   );
 }

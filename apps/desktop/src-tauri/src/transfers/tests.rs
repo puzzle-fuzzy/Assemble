@@ -48,6 +48,8 @@ impl Notifier for RecordingNotifier {
             .unwrap()
             .push((handle, file_name.to_owned(), fell_back));
     }
+
+    fn reminder(&self, _handle: i32, _title: &str, _body: &str) {}
 }
 
 /// 一台设备在服务端的身份。
@@ -287,6 +289,29 @@ async fn until(what: &str, mut condition: impl FnMut() -> bool) {
     }
 }
 
+/// 云盘名单里已经有这个名字的文件。
+///
+/// 名单是传完之后才去拿的，比传输记录晚一步。传完就去看名单，机器一忙就来不及：
+/// 2026-11-25 在负载下跑整套测试时，两条云盘的测试各这样失败过一次。
+fn listed(fixture: &Fixture, name: &str) -> bool {
+    fixture
+        .state()
+        .snapshot()
+        .drive
+        .is_some_and(|listing| listing.items.iter().any(|item| item.name == name))
+}
+
+/// 等到接收目录里正好是这几个文件。
+///
+/// 发布是"先链接、再删暂存名"：文件一落地的那一瞬间，暂存名可能还在。
+/// 同一天负载下，收文件的那条测试就这样失败过一次。
+async fn until_inbox_holds(fixture: &Fixture, names: &[&str]) {
+    until("the inbox to hold exactly the published files", || {
+        entries(&fixture.inbox()) == names
+    })
+    .await;
+}
+
 fn entries(directory: &Path) -> Vec<String> {
     let mut names: Vec<String> = std::fs::read_dir(directory)
         .unwrap()
@@ -333,8 +358,9 @@ async fn a_file_from_another_device_is_saved_verified_and_accepted() {
     let saved = f.inbox().join("合同.pdf");
     until("the file to be saved", || saved.exists()).await;
     assert_eq!(std::fs::read(&saved).unwrap(), payload);
-    // 目录里只有它自己：暂存文件没有留下来。
-    assert_eq!(entries(&f.inbox()), ["合同.pdf"]);
+    // 目录里最后只有它自己：暂存文件没有留下来。发布是"先链接、再删暂存名"，
+    // 文件一出现的那一瞬间暂存名还在，所以这里要等，不能看见了就数。
+    until_inbox_holds(&f, &["合同.pdf"]).await;
 
     // 回执送到了：发送方那边看到"对方已收下"，本机也不再把它当作待补的回执。
     until("the receipt to be acknowledged", || {
@@ -1329,6 +1355,11 @@ async fn a_draft_sent_to_the_drive_is_stored_and_the_listing_shows_it() {
     assert_eq!(view.saved_as, None);
 
     // 存好之后名单换新了：界面看得到它，也看得到空间。
+    // 名单是传完之后才去拿的，比传输记录晚一步：等它回来再数。
+    until("the listing to show the stored file", || {
+        listed(&f, "季度报表.xlsx")
+    })
+    .await;
     let listing = f
         .state()
         .snapshot()
@@ -1490,6 +1521,11 @@ async fn a_drive_upload_that_does_not_fit_is_reported_and_a_smaller_one_still_fi
             .transfers
             .iter()
             .any(|view| view.name == "说明.txt" && view.phase == TransferPhase::Complete)
+    })
+    .await;
+    // 名单比传输记录晚一步换新：等它回来。
+    until("the listing to show the small file", || {
+        listed(&f, "说明.txt")
     })
     .await;
     let listing = f

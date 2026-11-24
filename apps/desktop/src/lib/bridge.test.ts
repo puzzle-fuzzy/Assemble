@@ -18,6 +18,8 @@ const STATE: Snapshot = {
   receive: { customFolder: null },
   launchAtLogin: "disabled",
   notice: null,
+  planner: null,
+  plannerMuted: false,
 };
 
 const calls: InvokeCall[] = [];
@@ -88,6 +90,35 @@ describe("桥接", () => {
     await bridge.retryTransfer("transfer-1");
     await bridge.setSendMenu(true);
     await bridge.dismissNotice();
+    await bridge.plannerRefresh();
+    await bridge.scheduleCreate({
+      title: "火车",
+      startAt: "2026-11-25T01:00:00.000Z",
+    });
+    await bridge.scheduleUpdate("schedule-1", 2, {
+      title: "火车",
+      startAt: "2026-11-25T02:00:00.000Z",
+    });
+    await bridge.scheduleComplete("schedule-1", 3);
+    await bridge.scheduleCancel("schedule-1", 3);
+    await bridge.scheduleReopen("schedule-1", 4);
+    await bridge.scheduleDelete("schedule-1", 5);
+    await bridge.reminderCreate({
+      title: "取快递",
+      dueAt: "2026-11-25T01:00:00.000Z",
+    });
+    await bridge.reminderUpdate("reminder-1", 1, {
+      title: "取快递",
+      dueAt: "2026-11-25T03:00:00.000Z",
+    });
+    await bridge.reminderDismiss("reminder-1", 2);
+    await bridge.reminderCancel("reminder-1", 2);
+    await bridge.reminderDelete("reminder-1", 3);
+    await bridge.notificationsRead(["note-1", "note-2"]);
+    await bridge.notificationsReadAll();
+    await bridge.plannerFocus("note-1");
+    await bridge.plannerCompose("reminder");
+    await bridge.setPlannerMuted(true);
 
     expect(calls).toEqual([
       { command: "snapshot", args: {} },
@@ -117,6 +148,47 @@ describe("桥接", () => {
       { command: "retry_transfer", args: { transferId: "transfer-1" } },
       { command: "set_send_menu", args: { enabled: true } },
       { command: "dismiss_notice", args: {} },
+      { command: "planner_refresh", args: {} },
+      {
+        command: "schedule_create",
+        args: {
+          content: { title: "火车", startAt: "2026-11-25T01:00:00.000Z" },
+        },
+      },
+      {
+        command: "schedule_update",
+        args: {
+          id: "schedule-1",
+          version: 2,
+          content: { title: "火车", startAt: "2026-11-25T02:00:00.000Z" },
+        },
+      },
+      { command: "schedule_complete", args: { id: "schedule-1", version: 3 } },
+      { command: "schedule_cancel", args: { id: "schedule-1", version: 3 } },
+      { command: "schedule_reopen", args: { id: "schedule-1", version: 4 } },
+      { command: "schedule_delete", args: { id: "schedule-1", version: 5 } },
+      {
+        command: "reminder_create",
+        args: {
+          content: { title: "取快递", dueAt: "2026-11-25T01:00:00.000Z" },
+        },
+      },
+      {
+        command: "reminder_update",
+        args: {
+          id: "reminder-1",
+          version: 1,
+          content: { title: "取快递", dueAt: "2026-11-25T03:00:00.000Z" },
+        },
+      },
+      { command: "reminder_dismiss", args: { id: "reminder-1", version: 2 } },
+      { command: "reminder_cancel", args: { id: "reminder-1", version: 2 } },
+      { command: "reminder_delete", args: { id: "reminder-1", version: 3 } },
+      { command: "notifications_read", args: { ids: ["note-1", "note-2"] } },
+      { command: "notifications_read_all", args: {} },
+      { command: "planner_focus", args: { notificationId: "note-1" } },
+      { command: "planner_compose", args: { compose: "reminder" } },
+      { command: "set_planner_muted", args: { muted: true } },
     ]);
   });
 

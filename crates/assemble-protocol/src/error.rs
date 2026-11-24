@@ -30,6 +30,10 @@ pub mod codes {
     pub const TOO_MANY_ATTEMPTS: &str = "TOO_MANY_ATTEMPTS";
     /// 授权码不存在、已用过或已过期，需要重新开始登录。
     pub const INVALID_AUTH_CODE: &str = "INVALID_AUTH_CODE";
+    /// 修改时带的版本号与服务端的不一致：这条记录在别处被改过。刷新之后重来。
+    pub const VERSION_CONFLICT: &str = "VERSION_CONFLICT";
+    /// 这条记录现在的状态不允许这个操作（比如已经到点的提醒不能再改时间）。
+    pub const INVALID_STATE: &str = "INVALID_STATE";
     /// 网页表单的防伪校验没通过。
     pub const CSRF_REJECTED: &str = "CSRF_REJECTED";
     pub const UNAVAILABLE: &str = "UNAVAILABLE";

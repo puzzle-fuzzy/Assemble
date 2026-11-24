@@ -6,6 +6,9 @@ import type {
   DeviceView,
   DriveView,
   LaunchState,
+  PlannerView,
+  ReminderContent,
+  ScheduleContent,
   ServiceView,
   Snapshot,
   TransferView,
@@ -67,6 +70,101 @@ export const DRIVE: DriveView = {
   limitBytes: 2147483648,
 };
 
+/**
+ * 日程名单的一份样本：一条天天有的、一条一次性的（有地点、备注，提前半小时提醒）、
+ * 一条每周的，一条已经过了点的提醒和一条没到的，两条没读的通知。
+ */
+export const PLANNER: PlannerView = {
+  notifications: [
+    {
+      id: "reminder-1",
+      title: "取快递",
+      body: "驿站楼下",
+      scheduleId: null,
+      reminderId: "reminder-1",
+      raisedAt: "2026-11-25T01:00:00.000Z",
+    },
+    {
+      id: "schedule-1-1795544400000",
+      title: "周会",
+      body: "11月25日 09:00 开始\n三楼小会议室",
+      scheduleId: "schedule-1",
+      reminderId: null,
+      raisedAt: "2026-11-25T01:00:00.000Z",
+    },
+  ],
+  schedules: [
+    {
+      id: "schedule-1",
+      version: 1,
+      createdBy: "ZCode 的助手",
+      title: "周会",
+      location: null,
+      startAt: "2026-11-25T01:00:00.000Z",
+      endAt: "2026-11-25T02:00:00.000Z",
+      repeat: "daily",
+      repeatUntil: null,
+      remindBefore: null,
+      notes: "三楼小会议室",
+      occurrences: [
+        "2026-11-25T01:00:00.000Z",
+        "2026-11-26T01:00:00.000Z",
+        "2026-11-27T01:00:00.000Z",
+      ],
+    },
+    {
+      id: "schedule-2",
+      version: 3,
+      createdBy: "MacBook-Pro",
+      title: "火车",
+      location: { label: "上海虹桥站", address: "申虹路 1500 号" },
+      startAt: "2026-11-26T01:00:00.000Z",
+      endAt: null,
+      repeat: "none",
+      repeatUntil: null,
+      remindBefore: 30,
+      notes: "带身份证",
+      occurrences: ["2026-11-26T01:00:00.000Z"],
+    },
+    {
+      id: "schedule-3",
+      version: 1,
+      createdBy: "Codex 的助手",
+      title: "周报",
+      location: null,
+      startAt: "2026-11-20T08:00:00.000Z",
+      endAt: "2026-11-20T09:00:00.000Z",
+      repeat: "weekly",
+      repeatUntil: "2026-12-31T16:00:00.000Z",
+      remindBefore: null,
+      notes: null,
+      occurrences: ["2026-11-27T08:00:00.000Z"],
+    },
+  ],
+  reminders: [
+    {
+      id: "reminder-1",
+      version: 2,
+      status: "fired",
+      createdBy: "ZCode 的助手",
+      title: "取快递",
+      dueAt: "2026-11-25T01:00:00.000Z",
+      notes: "驿站楼下",
+    },
+    {
+      id: "reminder-2",
+      version: 1,
+      status: "scheduled",
+      createdBy: "MacBook-Pro",
+      title: "给妈妈打电话",
+      dueAt: "2026-11-26T12:00:00.000Z",
+      notes: null,
+    },
+  ],
+  focus: null,
+  compose: null,
+};
+
 export function snapshot(overrides: Overrides = {}): Snapshot {
   const { phase, ...rest } = overrides;
   const session: Snapshot["session"] =
@@ -89,6 +187,9 @@ export function snapshot(overrides: Overrides = {}): Snapshot {
     receive: { customFolder: null },
     launchAtLogin: "disabled",
     notice: null,
+    // 登录之后连上服务时，Rust 会把日程名单拿回来。
+    planner: phase === "signedIn" ? PLANNER : null,
+    plannerMuted: false,
     ...rest,
   };
 }
@@ -119,6 +220,8 @@ export class FakeBridge implements Bridge {
   pending = false;
   /** `sendToDevice` 交回的传输标识：面板拿它盯进度。 */
   sentAs: string[] = [];
+  /** 最近一次新建或整份替换日程、提醒时交出去的内容。 */
+  lastSubmitted: ScheduleContent | ReminderContent | null = null;
   private listeners = new Set<(snapshot: Snapshot) => void>();
   /** 调用过 `hold()` 之后，命令一直不返回，直到 `release()`。 */
   private held = false;
@@ -260,6 +363,84 @@ export class FakeBridge implements Bridge {
 
   retryTransfer(transferId: string) {
     return this.answer(`retryTransfer:${transferId}`, undefined);
+  }
+
+  plannerRefresh() {
+    return this.answer("plannerRefresh", this.current);
+  }
+
+  scheduleCreate(content: ScheduleContent) {
+    this.lastSubmitted = content;
+    return this.answer(`scheduleCreate:${content.title}`, this.current);
+  }
+
+  scheduleUpdate(id: string, version: number, content: ScheduleContent) {
+    this.lastSubmitted = content;
+    return this.answer(
+      `scheduleUpdate:${id}:${version}:${content.title}`,
+      this.current,
+    );
+  }
+
+  scheduleComplete(id: string, version: number) {
+    return this.answer(`scheduleComplete:${id}:${version}`, this.current);
+  }
+
+  scheduleCancel(id: string, version: number) {
+    return this.answer(`scheduleCancel:${id}:${version}`, this.current);
+  }
+
+  scheduleReopen(id: string, version: number) {
+    return this.answer(`scheduleReopen:${id}:${version}`, this.current);
+  }
+
+  scheduleDelete(id: string, version: number) {
+    return this.answer(`scheduleDelete:${id}:${version}`, this.current);
+  }
+
+  reminderCreate(content: ReminderContent) {
+    this.lastSubmitted = content;
+    return this.answer(`reminderCreate:${content.title}`, this.current);
+  }
+
+  reminderUpdate(id: string, version: number, content: ReminderContent) {
+    this.lastSubmitted = content;
+    return this.answer(
+      `reminderUpdate:${id}:${version}:${content.title}`,
+      this.current,
+    );
+  }
+
+  reminderDismiss(id: string, version: number) {
+    return this.answer(`reminderDismiss:${id}:${version}`, this.current);
+  }
+
+  reminderCancel(id: string, version: number) {
+    return this.answer(`reminderCancel:${id}:${version}`, this.current);
+  }
+
+  reminderDelete(id: string, version: number) {
+    return this.answer(`reminderDelete:${id}:${version}`, this.current);
+  }
+
+  notificationsRead(ids: string[]) {
+    return this.answer(`notificationsRead:${ids.join(",")}`, this.current);
+  }
+
+  notificationsReadAll() {
+    return this.answer("notificationsReadAll", this.current);
+  }
+
+  plannerFocus(notificationId: string | null) {
+    return this.answer(`plannerFocus:${notificationId}`, this.current);
+  }
+
+  plannerCompose(kind: "reminder" | "schedule" | null) {
+    return this.answer(`plannerCompose:${kind}`, this.current);
+  }
+
+  setPlannerMuted(muted: boolean) {
+    return this.answer(`setPlannerMuted:${muted}`, this.current);
   }
 
   launchAtLogin() {

@@ -15,6 +15,8 @@ tauri-build.workspace = true
 
 [dependencies]
 assemble-client.workspace = true
+assemble-schedule.workspace = true
+chrono.workspace = true
 assemble-device.workspace = true
 assemble-protocol.workspace = true
 assemble-store.workspace = true

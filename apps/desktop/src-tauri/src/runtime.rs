@@ -15,11 +15,13 @@ use std::time::Duration;
 use assemble_client::{ClientError, RequestOptions};
 use assemble_protocol::device::Device;
 use assemble_protocol::events::Event;
+use assemble_protocol::schedule::Planner;
 use assemble_protocol::sends::Send as SendRecord;
 use futures_util::StreamExt;
 use tauri::{AppHandle, Manager};
 use tokio_util::sync::CancellationToken;
 
+use crate::planner;
 use crate::session;
 use crate::state::{AppState, DeviceView, StreamState};
 use crate::transfers;
@@ -75,6 +77,8 @@ enum Next {
     Offered(SendRecord),
     /// 一次发送的状态变了。
     Updated(SendRecord),
+    /// 服务端给了一份新的日程名单。
+    Planner(Planner),
     /// 断了，客户端正在重连。
     Reconnecting,
     /// 服务端不再认这台设备的登录。
@@ -94,6 +98,7 @@ fn handle(item: Option<Result<Event, ClientError>>, own_device: Option<&str>) ->
             }
             Event::SendOffered { send } => Next::Offered(send),
             Event::SendUpdated { send } => Next::Updated(send),
+            Event::PlannerChanged { planner } => Next::Planner(planner),
             // 服务端认定的自己是另一台设备时，这条流不是我们的：当没连上处理。
             Event::Hello { .. } => Next::Nothing,
         },
@@ -156,8 +161,13 @@ async fn follow_events(app: AppHandle) {
                             break;
                         }
                         transfers::refresh_drive(&state).await;
+                        // 断线期间到点的日程与提醒也在名单里：拉到就补弹。
+                        if let Err(error) = planner::refresh(&state, &cancel).await {
+                            tracing::debug!(%error, "the planner could not be listed yet");
+                        }
                     }
                     Next::Devices(devices) => state.set_devices(devices),
+                    Next::Planner(planner) => planner::arrived(&state, planner),
                     Next::Offered(send) => state.offer(&send),
                     Next::Updated(send) => {
                         // 本机已经放弃了这次发送，文件却到了服务端：去撤回，别让对面收到。

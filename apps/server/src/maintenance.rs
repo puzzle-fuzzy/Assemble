@@ -18,6 +18,10 @@ use crate::sends::SendRow;
 /// 多久跑一轮。
 pub const INTERVAL: Duration = Duration::from_secs(60);
 
+/// 通知保留多久：三十天。过了这么久的场次早已不在宽限之内，
+/// 删掉它的记录不会让它再被提醒一遍。
+pub const NOTIFICATION_HISTORY_MILLIS: i64 = 30 * 24 * 60 * 60 * 1000;
+
 /// 一轮清理的结果，只进日志。
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct Report {
@@ -27,6 +31,8 @@ pub struct Report {
     pub pruned_sends: u64,
     pub expired_codes: u64,
     pub expired_sessions: u64,
+    /// 超过保留期、被删掉的通知。
+    pub pruned_notifications: u64,
     pub blobs: Sweep,
 }
 
@@ -93,7 +99,14 @@ pub async fn run_once(state: &Shared) -> Result<Report, sqlx::Error> {
         .await?
         .rows_affected();
 
-    // 4. 没人引用的内容与中断的暂存文件。
+    // 4. 太久的通知，读没读过都一样。
+    report.pruned_notifications = sqlx::query("DELETE FROM notifications WHERE raised_at < ?")
+        .bind(now - NOTIFICATION_HISTORY_MILLIS)
+        .execute(pool)
+        .await?
+        .rows_affected();
+
+    // 5. 没人引用的内容与中断的暂存文件。
     report.blobs = state.blobs.sweep().await?;
     Ok(report)
 }

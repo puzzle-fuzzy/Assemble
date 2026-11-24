@@ -198,6 +198,51 @@ describe("状态契约样本", () => {
     ).toBe(true);
   });
 
+  test("覆盖了日程的每种重复规则、提醒的两种状态、有没有名单与定位", () => {
+    const snapshots = checked();
+    expect(new Set(snapshots.map((s) => s.planner === null))).toEqual(
+      new Set([true, false]),
+    );
+    expect(new Set(snapshots.map((s) => s.plannerMuted))).toEqual(
+      new Set([true, false]),
+    );
+    const planners = snapshots.flatMap((s) => (s.planner ? [s.planner] : []));
+    expect(
+      new Set(planners.flatMap((p) => p.schedules.map((s) => s.repeat))),
+    ).toEqual(new Set(["none", "daily", "weekly", "monthly"]));
+    expect(
+      new Set(planners.flatMap((p) => p.reminders.map((r) => r.status))),
+    ).toEqual(new Set(["scheduled", "fired"]));
+    expect(new Set(planners.map((p) => p.schedules.length === 0))).toEqual(
+      new Set([true, false]),
+    );
+    expect(new Set(planners.map((p) => p.focus))).toEqual(
+      new Set([null, expect.any(String)]),
+    );
+    expect(new Set(planners.map((p) => p.compose))).toEqual(
+      new Set([null, "reminder"]),
+    );
+    for (const planner of planners) {
+      // 每场都按时间排，一场都没有的日程不占名单。
+      for (const schedule of planner.schedules) {
+        expect(schedule.occurrences.length).toBeGreaterThan(0);
+        expect([...schedule.occurrences].sort()).toEqual(schedule.occurrences);
+      }
+      // 点开的那一条必须是名单里还没读的通知。
+      if (planner.focus !== null) {
+        expect(planner.notifications.some((n) => n.id === planner.focus)).toBe(
+          true,
+        );
+      }
+    }
+    // 没登录就没有名单。
+    expect(
+      snapshots
+        .filter((snapshot) => snapshot.session.phase !== "signedIn")
+        .every((snapshot) => snapshot.planner === null),
+    ).toBe(true);
+  });
+
   test("样本里不出现任何凭据或本机路径", () => {
     const text = JSON.stringify(checked());
     for (const forbidden of [

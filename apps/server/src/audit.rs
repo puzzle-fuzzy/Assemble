@@ -46,6 +46,18 @@ pub mod actions {
     pub const DRIVE_CREATED: &str = "drive.created";
     pub const DRIVE_RENAMED: &str = "drive.renamed";
     pub const DRIVE_DELETED: &str = "drive.deleted";
+    pub const SCHEDULE_CREATED: &str = "schedule.created";
+    pub const SCHEDULE_UPDATED: &str = "schedule.updated";
+    pub const SCHEDULE_COMPLETED: &str = "schedule.completed";
+    pub const SCHEDULE_CANCELLED: &str = "schedule.cancelled";
+    pub const SCHEDULE_REOPENED: &str = "schedule.reopened";
+    pub const SCHEDULE_DELETED: &str = "schedule.deleted";
+    pub const REMINDER_CREATED: &str = "reminder.created";
+    pub const REMINDER_UPDATED: &str = "reminder.updated";
+    pub const REMINDER_DISMISSED: &str = "reminder.dismissed";
+    pub const REMINDER_CANCELLED: &str = "reminder.cancelled";
+    pub const REMINDER_DELETED: &str = "reminder.deleted";
+    pub const NOTIFICATION_READ: &str = "notification.read";
 }
 
 #[cfg(test)]

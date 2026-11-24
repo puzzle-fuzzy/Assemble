@@ -41,6 +41,20 @@ pub enum RecurrenceError {
 }
 
 impl Recurrence {
+    /// 直接用毫秒时间戳给出规则。
+    pub const fn new(start_at: i64, repeat: Repeat, repeat_until: Option<i64>) -> Self {
+        Self {
+            start_at,
+            repeat,
+            repeat_until,
+        }
+    }
+
+    /// 某个时刻是不是一次出现。
+    pub fn occurs_at(&self, at_ms: i64) -> bool {
+        self.latest_at_or_before(at_ms) == Some(at_ms)
+    }
+
     /// 从一条日程记录读出规则。开始时间无效的日程永远不会出现。
     pub fn from_schedule(schedule: &ScheduleData) -> Result<Self, RecurrenceError> {
         let start_at = parse(&schedule.start_at).ok_or(RecurrenceError::InvalidStart)?;
@@ -195,7 +209,7 @@ fn is_leap(year: i64) -> bool {
     year % 4 == 0 && (year % 100 != 0 || year % 400 == 0)
 }
 
-/// 公历日期：`month` 从 0 开始，与云端的 JavaScript 实现一致。
+/// 公历日期：`month` 从 0 开始，沿用被移植的那份 JavaScript 实现的写法，方便逐行对照。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct Civil {
     year: i64,

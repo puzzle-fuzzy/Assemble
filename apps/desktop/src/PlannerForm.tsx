@@ -1,0 +1,299 @@
+// 日程卡片里的表单：新建或修改一条日程、一条提醒。
+//
+// 这里只管收集。填得对不对，Rust 还会按服务端同一套规则校验一次；
+// 这边先把最常见的几种填错说清楚，省得等一个来回。
+// 时间在输入框里是本地时间，交出去之前换成 UTC。
+
+import { type ReactNode, useId, useState } from "react";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Select } from "@/components/ui/select";
+import { Textarea } from "@/components/ui/textarea";
+import {
+  fromLocalInput,
+  LEADS,
+  leadLabel,
+  problemWith,
+  repeatLabel,
+  toLocalInput,
+} from "@/lib/planner-text";
+import type { ReminderView, Repeat, ScheduleView } from "@/lib/types";
+
+/** 正在填的表单；新建的没有 `original`。 */
+export type Form =
+  | { kind: "schedule"; original: ScheduleView | null }
+  | { kind: "reminder"; original: ReminderView | null };
+
+/** 表单填好之后交出去的东西：时间已经换成 UTC，没填的可选项是 null。 */
+export interface Draft {
+  title: string;
+  /** 日程的开始时间，或者提醒的到点时间。 */
+  start: string;
+  end: string | null;
+  repeat: Repeat;
+  remindBefore: number | null;
+  /** 地点的名字；没填是空串。 */
+  place: string;
+  notes: string | null;
+}
+
+/** 日程可以怎么重复，下拉框里的次序。 */
+const REPEATS: ReadonlyArray<Repeat> = ["none", "daily", "weekly", "monthly"];
+
+export function PlannerForm({
+  form,
+  pending,
+  onSave,
+  onClose,
+  onRemove,
+}: {
+  form: Form;
+  pending: boolean;
+  onSave: (draft: Draft) => Promise<void>;
+  onClose: () => void;
+  /** 删掉正在修改的这一条；新建的表单没有这一项。 */
+  onRemove: (() => Promise<void>) | null;
+}) {
+  const schedule = form.kind === "schedule" ? form.original : null;
+  const reminder = form.kind === "reminder" ? form.original : null;
+  const [title, setTitle] = useState(schedule?.title ?? reminder?.title ?? "");
+  const [at, setAt] = useState(
+    toLocalInput(schedule?.startAt ?? reminder?.dueAt ?? ""),
+  );
+  const [end, setEnd] = useState(
+    schedule?.endAt ? toLocalInput(schedule.endAt) : "",
+  );
+  const [repeat, setRepeat] = useState<Repeat>(schedule?.repeat ?? "none");
+  // 下拉框的值是文字：空串就是"到点时提醒"。
+  const [lead, setLead] = useState(String(schedule?.remindBefore ?? ""));
+  const [place, setPlace] = useState(schedule?.location?.label ?? "");
+  const [notes, setNotes] = useState(schedule?.notes ?? reminder?.notes ?? "");
+  const [problem, setProblem] = useState<string | null>(null);
+  const [confirming, setConfirming] = useState(false);
+
+  // 助手定下的提前量不在常选的那几个里：照样列出来，不改它就不会丢。
+  const chosen = schedule?.remindBefore ?? null;
+  const leads: ReadonlyArray<readonly [number | null, string]> =
+    chosen !== null && !LEADS.some(([minutes]) => minutes === chosen)
+      ? [...LEADS, [chosen, leadLabel(chosen)]]
+      : LEADS;
+  const heading =
+    form.kind === "schedule"
+      ? schedule
+        ? "修改日程"
+        : "新建日程"
+      : reminder
+        ? "修改提醒"
+        : "新建提醒";
+
+  function submit() {
+    const issue = problemWith({ title, at, end });
+    const start = fromLocalInput(at);
+    if (issue !== null || start === null) {
+      setProblem(issue ?? "时间要填到哪一天、几点几分。");
+      return;
+    }
+    setProblem(null);
+    void onSave({
+      title: title.trim(),
+      start,
+      end: end ? fromLocalInput(end) : null,
+      repeat,
+      remindBefore: lead === "" ? null : Number(lead),
+      place: place.trim(),
+      notes: notes.trim() || null,
+    });
+  }
+
+  return (
+    <form
+      aria-label={heading}
+      className="flex flex-col gap-3"
+      onSubmit={(event) => {
+        event.preventDefault();
+        submit();
+      }}
+    >
+      <h2 className="text-sm font-medium">{heading}</h2>
+      <Field
+        label="标题"
+        control={(id) => (
+          <Input
+            id={id}
+            value={title}
+            maxLength={200}
+            autoFocus
+            disabled={pending}
+            onChange={(event) => setTitle(event.target.value)}
+          />
+        )}
+      />
+      <div className="grid grid-cols-2 gap-3">
+        <Field
+          label={form.kind === "schedule" ? "开始时间" : "到点时间"}
+          control={(id) => (
+            <Input
+              id={id}
+              type="datetime-local"
+              value={at}
+              disabled={pending}
+              onChange={(event) => setAt(event.target.value)}
+            />
+          )}
+        />
+        {form.kind === "schedule" ? (
+          <Field
+            label="结束时间"
+            control={(id) => (
+              <Input
+                id={id}
+                type="datetime-local"
+                value={end}
+                disabled={pending}
+                onChange={(event) => setEnd(event.target.value)}
+              />
+            )}
+          />
+        ) : null}
+      </div>
+      {form.kind === "schedule" ? (
+        <>
+          <div className="grid grid-cols-2 gap-3">
+            <Field
+              label="重复"
+              control={(id) => (
+                <Select
+                  id={id}
+                  value={repeat}
+                  disabled={pending}
+                  onChange={(event) => setRepeat(event.target.value as Repeat)}
+                >
+                  {REPEATS.map((option) => (
+                    <option key={option} value={option}>
+                      {repeatLabel(option)}
+                    </option>
+                  ))}
+                </Select>
+              )}
+            />
+            <Field
+              label="提醒"
+              control={(id) => (
+                <Select
+                  id={id}
+                  value={lead}
+                  disabled={pending}
+                  onChange={(event) => setLead(event.target.value)}
+                >
+                  {leads.map(([minutes, text]) => (
+                    <option
+                      key={text}
+                      value={minutes === null ? "" : String(minutes)}
+                    >
+                      {text}
+                    </option>
+                  ))}
+                </Select>
+              )}
+            />
+          </div>
+          <Field
+            label="地点"
+            control={(id) => (
+              <Input
+                id={id}
+                value={place}
+                maxLength={200}
+                disabled={pending}
+                onChange={(event) => setPlace(event.target.value)}
+              />
+            )}
+          />
+        </>
+      ) : null}
+      <Field
+        label="备注"
+        control={(id) => (
+          <Textarea
+            id={id}
+            value={notes}
+            maxLength={4000}
+            disabled={pending}
+            onChange={(event) => setNotes(event.target.value)}
+          />
+        )}
+      />
+      {problem ? (
+        <p role="alert" className="text-xs text-destructive">
+          {problem}
+        </p>
+      ) : null}
+      <div className="flex flex-wrap gap-2">
+        <Button type="submit" disabled={pending}>
+          保存
+        </Button>
+        <Button
+          type="button"
+          variant="outline"
+          disabled={pending}
+          onClick={onClose}
+        >
+          取消
+        </Button>
+        {onRemove ? (
+          confirming ? (
+            <>
+              <Button
+                type="button"
+                variant="destructive"
+                disabled={pending}
+                onClick={() => void onRemove()}
+              >
+                确认删除
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                disabled={pending}
+                onClick={() => setConfirming(false)}
+              >
+                算了
+              </Button>
+            </>
+          ) : (
+            <Button
+              type="button"
+              variant="outline"
+              disabled={pending}
+              onClick={() => setConfirming(true)}
+            >
+              删除…
+            </Button>
+          )
+        ) : null}
+      </div>
+    </form>
+  );
+}
+
+/**
+ * 一栏：标签和控件用同一个编号连起来，读屏念得出这是哪一项，点文字也能把焦点放进去。
+ * 控件自己决定是什么，只要把 `id` 挂上去。
+ */
+function Field({
+  label,
+  control,
+}: {
+  label: string;
+  control: (id: string) => ReactNode;
+}) {
+  const id = useId();
+  return (
+    <div className="flex min-w-0 flex-col gap-1 text-sm">
+      <label htmlFor={id} className="text-muted-foreground">
+        {label}
+      </label>
+      {control(id)}
+    </div>
+  );
+}

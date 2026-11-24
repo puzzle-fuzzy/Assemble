@@ -1,10 +1,10 @@
-//! 通知去重账本：同一条通知在本机只显示一次。
+//! 通知去重账本：同一条通知在这台电脑上只弹一次。
 //!
-//! 云端在设备重新上线时会补发未读通知，所以同一条通知可能到达多次。
-//! 账本记住已经真正显示过的通知编号——显示失败的不记，云端可以重发。
+//! 服务端给的名单里带着全部还没读的通知：每次连上、每一处改动，都是整份再来一遍。
+//! 账本记住这台电脑已经弹过哪些，同一份名单再来一次就不会再弹。它存在本机设置里，
+//! 所以应用重启之后，弹过的也不会再来一遍。
 //!
-//! 与 Electron 版不同，账本是有界的：超过上限时淘汰最早的记录，
-//! 状态文件不会随着时间无限增长。
+//! 账本是有界的：超过上限时淘汰最早的记录，设置文件不会随着时间无限增长。
 
 use std::collections::{HashSet, VecDeque};
 
@@ -12,6 +12,13 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 /// 账本的默认容量：足以覆盖很长一段时间的通知，又不至于让状态文件变大。
 pub const DEFAULT_CAPACITY: usize = 2_000;
+
+impl Default for DeliveryLedger {
+    /// 容量取默认值的空账本。
+    fn default() -> Self {
+        Self::new(DEFAULT_CAPACITY)
+    }
+}
 
 /// 已显示通知的编号，按记录先后排列。
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -70,7 +77,7 @@ impl DeliveryLedger {
     }
 }
 
-// 落盘就是一个编号数组，与 Electron 版状态文件里的 `notifications` 相同。
+// 落盘就是一个按先后排列的编号数组。
 impl Serialize for DeliveryLedger {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         serializer.collect_seq(self.order.iter())
@@ -102,7 +109,7 @@ mod tests {
         assert!(ledger.contains("n-1"));
         assert_eq!(ledger.len(), 1);
 
-        // 云端重新上线时补发同一条通知：不再是新记录，账本也不变。
+        // 同一份名单再来一遍：不再是新记录，账本也不变。
         assert!(!ledger.record("n-1"));
         assert_eq!(ledger.len(), 1);
         assert!(ledger.record("n-2"));
@@ -163,7 +170,7 @@ mod tests {
             json!([])
         );
 
-        // Electron 版留下的数组可以直接读，重复项会合并。
+        // 存下来的数组里有重复项时直接读回来，重复的并成一个。
         let restored: DeliveryLedger = serde_json::from_str(r#"["n-1","n-2","n-1"]"#).unwrap();
         assert_eq!(restored.len(), 2);
         assert!(restored.contains("n-2"));

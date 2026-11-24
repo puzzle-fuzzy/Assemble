@@ -22,8 +22,8 @@ pub mod login;
 
 pub use assemble_protocol::origin::{OriginError, ServerOrigin};
 pub use client::{
-    Client, ClientBuildError, Download, OutgoingFile, RequestOptions, TransferOptions,
-    TransferProgress,
+    Client, ClientBuildError, Download, OutgoingFile, ReminderAction, RequestOptions,
+    ScheduleAction, TransferOptions, TransferProgress,
 };
 pub use error::ClientError;
 pub use events::EventStream;

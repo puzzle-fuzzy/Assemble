@@ -19,6 +19,51 @@ const VALID: Snapshot = {
   receive: { customFolder: null },
   launchAtLogin: "disabled",
   notice: null,
+  planner: null,
+  plannerMuted: false,
+};
+
+/** 一份日程名单：一条日程、一条提醒、一条没读的通知，定位在其中一条上。 */
+const PLANNER = {
+  notifications: [
+    {
+      id: "n1",
+      title: "周会",
+      body: null,
+      scheduleId: "s1",
+      reminderId: null,
+      raisedAt: "2026-11-25T01:00:00.000Z",
+    },
+  ],
+  schedules: [
+    {
+      id: "s1",
+      version: 2,
+      createdBy: "ZCode 的助手",
+      title: "周会",
+      location: { label: "三楼", address: "小会议室" },
+      startAt: "2026-11-25T01:00:00.000Z",
+      endAt: null,
+      repeat: "daily",
+      repeatUntil: null,
+      remindBefore: 30,
+      notes: null,
+      occurrences: ["2026-11-25T01:00:00.000Z"],
+    },
+  ],
+  reminders: [
+    {
+      id: "r1",
+      version: 1,
+      status: "scheduled",
+      createdBy: "本机",
+      title: "取快递",
+      dueAt: "2026-11-25T03:00:00.000Z",
+      notes: "楼下",
+    },
+  ],
+  focus: "n1",
+  compose: null,
 };
 
 /** 一条已经收好的传输。 */
@@ -66,8 +111,68 @@ describe("状态守卫", () => {
         devices: [DEVICE, { ...DEVICE, id: "d2", online: false }],
         launchAtLogin: "unknown",
         notice: { kind: "info", message: "ok" },
+        planner: PLANNER,
       }),
     ).toBe(true);
+  });
+
+  test("认得日程名单，拦下形状不对的", () => {
+    expect(isSnapshot({ ...VALID, planner: PLANNER })).toBe(true);
+    expect(isSnapshot({ ...VALID, planner: { ...PLANNER, focus: null } })).toBe(
+      true,
+    );
+    // 从托盘的"新建提醒…"进来：带着要摆出的表单。
+    expect(
+      isSnapshot({
+        ...VALID,
+        planner: { ...PLANNER, compose: "reminder" },
+      }),
+    ).toBe(true);
+    const at = { ...PLANNER, notifications: [] };
+    const invalid: unknown[] = [
+      { ...VALID, planner: {} },
+      { ...VALID, plannerMuted: null },
+      { ...VALID, planner: { ...at, compose: "note" } },
+      { ...VALID, planner: { ...at, reminders: [{ id: "r1" }] } },
+      {
+        ...VALID,
+        // 名单里不会有"办完了"的提醒：那种不该再摆给人看。
+        planner: {
+          ...at,
+          reminders: [{ ...PLANNER.reminders[0], status: "dismissed" }],
+        },
+      },
+      {
+        ...VALID,
+        planner: {
+          ...at,
+          schedules: [{ ...PLANNER.schedules[0], repeat: "hourly" }],
+        },
+      },
+      {
+        ...VALID,
+        planner: {
+          ...at,
+          schedules: [
+            {
+              ...PLANNER.schedules[0],
+              // 场次的时刻是一串时间，不是一个字符串。
+              occurrences: "2026-11-25T01:00:00.000Z",
+            },
+          ],
+        },
+      },
+      {
+        ...VALID,
+        planner: {
+          ...at,
+          notifications: [{ ...PLANNER.notifications[0], scheduleId: 42 }],
+        },
+      },
+    ];
+    for (const value of invalid) {
+      expect(isSnapshot(value)).toBe(false);
+    }
   });
 
   test("拦下缺字段或取值不对的状态", () => {

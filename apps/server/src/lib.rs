@@ -19,6 +19,7 @@ pub mod error;
 pub mod events;
 pub mod http;
 pub mod maintenance;
+pub mod planner;
 pub mod presence;
 pub mod secrets;
 pub mod sends;
@@ -71,6 +72,8 @@ pub async fn run_server() -> Result<(), StartupError> {
         tracing::warn!(%error, "the first maintenance round failed; it will be retried");
     }
     maintenance::start(Arc::clone(&state), stop.clone());
+    // 看一眼到点的日程与提醒。第一轮在一个间隔之后：停机期间到点的提醒那时补发。
+    planner::tick::start(Arc::clone(&state), stop.clone());
     http::serve((*state.config).clone(), state, stop).await?;
     tracing::info!("server stopped");
     Ok(())

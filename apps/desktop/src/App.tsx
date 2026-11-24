@@ -1,11 +1,9 @@
 // 应用主界面。
 //
-// 现在有五类真实内容：账户与连接、账户里的设备、文件传输、云盘、本机设置。
-// 日程的视图在对应的后台能力接通之后再加入，不放空页面占位。
+// 现在有六类真实内容：账户与连接、账户里的设备、文件传输、日程与提醒、云盘、本机设置。
 
 import { ArrowDownToLine, ArrowUpToLine } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
-
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -39,6 +37,7 @@ import type {
   Snapshot,
   TransferView,
 } from "@/lib/types";
+import { PlannerCard } from "@/PlannerCard";
 
 export interface AppProps {
   /** 默认使用真实的桥接；测试时注入替身。 */
@@ -87,6 +86,11 @@ export function App({ bridge: source = bridge }: AppProps) {
         onError={setActionError}
       />
       <TransfersCard
+        source={source}
+        snapshot={snapshot}
+        onError={setActionError}
+      />
+      <PlannerCard
         source={source}
         snapshot={snapshot}
         onError={setActionError}
@@ -896,6 +900,27 @@ function LaunchCard({ source, snapshot, onError }: CardProps) {
             ) : null}
           </div>
         </div>
+        {/* 提醒有没有用，要看登录没登录：没登录就收不到，这一项也不必摆出来。 */}
+        {snapshot?.session.phase === "signedIn" ? (
+          <div className="flex items-center justify-between gap-3 border-t border-border pt-3">
+            <div className="min-w-0">
+              <p className="text-sm font-medium">到点提醒</p>
+              <p className="text-sm text-muted-foreground">
+                {snapshot.plannerMuted
+                  ? "这台电脑不弹提醒，到点的只留在日程里。"
+                  : "日程和提醒到点时，这台电脑会弹系统通知。"}
+              </p>
+            </div>
+            <Switch
+              aria-label="到点时弹提醒"
+              checked={!snapshot.plannerMuted}
+              disabled={pending}
+              onCheckedChange={(checked) =>
+                void flip(() => source.setPlannerMuted(!checked))
+              }
+            />
+          </div>
+        ) : null}
         {sendMenu === "unsupported" ? null : (
           <div className="flex items-center justify-between gap-3 border-t border-border pt-3">
             <div className="min-w-0">

@@ -14,7 +14,7 @@ use axum::http::header;
 use axum::http::header::HeaderValue;
 use axum::http::{Method, StatusCode};
 use axum::response::{IntoResponse, Response};
-use axum::routing::{get, patch, post};
+use axum::routing::{get, patch, post, put};
 use serde::de::DeserializeOwned;
 use sqlx::SqlitePool;
 use tokio::net::TcpListener;
@@ -107,6 +107,46 @@ pub fn router(state: Shared) -> Router {
         .route(
             "/v1/drive/files/{id}",
             patch(crate::drive::rename).delete(crate::drive::remove),
+        )
+        // 日程规划：日程、提醒与通知。改动带着版本号，新建可以带幂等键。
+        .route("/v1/planner", get(crate::planner::planner))
+        .route("/v1/schedules", post(crate::planner::schedules::create))
+        .route(
+            "/v1/schedules/{id}",
+            put(crate::planner::schedules::update).delete(crate::planner::schedules::remove),
+        )
+        .route(
+            "/v1/schedules/{id}/complete",
+            post(crate::planner::schedules::complete),
+        )
+        .route(
+            "/v1/schedules/{id}/cancel",
+            post(crate::planner::schedules::cancel),
+        )
+        .route(
+            "/v1/schedules/{id}/reopen",
+            post(crate::planner::schedules::reopen),
+        )
+        .route("/v1/reminders", post(crate::planner::reminders::create))
+        .route(
+            "/v1/reminders/{id}",
+            put(crate::planner::reminders::update).delete(crate::planner::reminders::remove),
+        )
+        .route(
+            "/v1/reminders/{id}/dismiss",
+            post(crate::planner::reminders::dismiss),
+        )
+        .route(
+            "/v1/reminders/{id}/cancel",
+            post(crate::planner::reminders::cancel),
+        )
+        .route(
+            "/v1/notifications/read",
+            post(crate::planner::notifications::read),
+        )
+        .route(
+            "/v1/notifications/read-all",
+            post(crate::planner::notifications::read_all),
         )
         .layer(DefaultBodyLimit::max(upload_limit()))
         .with_state(state)

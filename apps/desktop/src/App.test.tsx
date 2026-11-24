@@ -9,6 +9,7 @@ import type { TransferView } from "@/lib/types";
 import {
   button,
   buttons,
+  card,
   cleanup,
   click,
   launchSwitch,
@@ -205,7 +206,7 @@ describe("账户", () => {
       });
     });
     expect(text(view.host)).toContain("这台设备：家里的 Mac");
-    expect(text(view.host)).not.toContain("MacBook-Pro");
+    expect(text(view.host)).not.toContain("这台设备：MacBook-Pro");
   });
 
   test("命令失败时显示固定文案，不回显技术细节", async () => {
@@ -505,10 +506,11 @@ describe("传输", () => {
     expect(page).toContain("发送失败：那台设备刚刚下线了。");
     expect(page).toContain("发送失败：对方设备没能把文件写下来。");
     // 还没到头的三条可以取消；只有文件没到服务端的那次失败可以重发。
-    expect(buttons(view.host, "取消")).toHaveLength(3);
-    expect(buttons(view.host, "重发")).toHaveLength(1);
+    // 日程的每一行上也有"取消"：只在传输卡片里数。
+    expect(buttons(card(view.host, "传输"), "取消")).toHaveLength(3);
+    expect(buttons(card(view.host, "传输"), "重发")).toHaveLength(1);
     // 发出去的文件不在这台电脑上，没有"在文件夹中显示"。
-    expect(buttons(view.host, "在文件夹中显示")).toHaveLength(0);
+    expect(buttons(card(view.host, "传输"), "在文件夹中显示")).toHaveLength(0);
   });
 
   test("取消与重发只交出传输的标识", async () => {
@@ -536,8 +538,9 @@ describe("传输", () => {
     await settle();
 
     // 两个按钮各属于各自的那条记录。
-    await click(button(view.host, "取消"));
-    await click(button(view.host, "重发"));
+    const transfers = card(view.host, "传输");
+    await click(button(transfers, "取消"));
+    await click(button(transfers, "重发"));
     expect(source.calls).toEqual(["cancelTransfer:t2", "retryTransfer:t1"]);
   });
 
@@ -607,11 +610,11 @@ describe("云盘", () => {
 
     await click(button(view.host, "删除"));
     expect(source.calls).toEqual([]);
-    expect(button(view.host, "确认删除")).toBeDefined();
+    expect(button(card(view.host, "云盘"), "确认删除")).toBeDefined();
 
-    await click(button(view.host, "取消"));
+    await click(button(card(view.host, "云盘"), "取消"));
     expect(source.calls).toEqual([]);
-    expect(button(view.host, "确认删除")).toBeUndefined();
+    expect(button(card(view.host, "云盘"), "确认删除")).toBeUndefined();
 
     await click(button(view.host, "删除"));
     await click(button(view.host, "确认删除"));
@@ -893,8 +896,8 @@ describe("设备", () => {
     await click(button(view.host, "移除"));
     // 只是把按钮换成确认，还没有发请求。
     expect(source.calls).toEqual([]);
-    await click(button(view.host, "取消"));
-    expect(button(view.host, "移除")).toBeDefined();
+    await click(button(card(view.host, "设备"), "取消"));
+    expect(button(card(view.host, "设备"), "移除")).toBeDefined();
 
     await click(button(view.host, "移除"));
     await click(button(view.host, "确认移除"));

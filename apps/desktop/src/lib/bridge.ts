@@ -7,7 +7,12 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 
 import { isSnapshot } from "@/lib/guard";
-import type { LaunchState, Snapshot } from "@/lib/types";
+import type {
+  LaunchState,
+  ReminderContent,
+  ScheduleContent,
+  Snapshot,
+} from "@/lib/types";
 
 export type { UnlistenFn } from "@tauri-apps/api/event";
 
@@ -70,6 +75,40 @@ export interface Bridge {
   setSendMenu(enabled: boolean): Promise<Snapshot>;
   /** 提示看过了，收起来。 */
   dismissNotice(): Promise<Snapshot>;
+  /** 向服务端要一份最新的日程名单。 */
+  plannerRefresh(): Promise<Snapshot>;
+  /** 新建一条日程。每次提交带一个新的幂等键，重试不会建出两条。 */
+  scheduleCreate(content: ScheduleContent): Promise<Snapshot>;
+  /** 整份替换一条日程的内容。 */
+  scheduleUpdate(
+    id: string,
+    version: number,
+    content: ScheduleContent,
+  ): Promise<Snapshot>;
+  scheduleComplete(id: string, version: number): Promise<Snapshot>;
+  scheduleCancel(id: string, version: number): Promise<Snapshot>;
+  /** 完成或取消之后改回进行中。 */
+  scheduleReopen(id: string, version: number): Promise<Snapshot>;
+  scheduleDelete(id: string, version: number): Promise<Snapshot>;
+  reminderCreate(content: ReminderContent): Promise<Snapshot>;
+  reminderUpdate(
+    id: string,
+    version: number,
+    content: ReminderContent,
+  ): Promise<Snapshot>;
+  /** 一条提醒办完了，或者到点之后看过了。 */
+  reminderDismiss(id: string, version: number): Promise<Snapshot>;
+  reminderCancel(id: string, version: number): Promise<Snapshot>;
+  reminderDelete(id: string, version: number): Promise<Snapshot>;
+  /** 把几条通知标成已读。 */
+  notificationsRead(ids: string[]): Promise<Snapshot>;
+  notificationsReadAll(): Promise<Snapshot>;
+  /** 点开了一条通知（或者看完收起）：主窗口定位到它。 */
+  plannerFocus(notificationId: string | null): Promise<Snapshot>;
+  /** 摆出一张新建表单，或者把它收起。 */
+  plannerCompose(kind: "reminder" | "schedule" | null): Promise<Snapshot>;
+  /** 这台电脑到点时要不要弹提醒。 */
+  setPlannerMuted(muted: boolean): Promise<Snapshot>;
   /** 订阅状态变化，返回取消订阅的函数。 */
   subscribe(listener: (snapshot: Snapshot) => void): Promise<UnlistenFn>;
 }
@@ -110,6 +149,39 @@ export const bridge: Bridge = {
   setSendMenu: (enabled) =>
     checked(() => invoke<unknown>("set_send_menu", { enabled })),
   dismissNotice: () => checked(() => invoke<unknown>("dismiss_notice")),
+  plannerRefresh: () => checked(() => invoke<unknown>("planner_refresh")),
+  scheduleCreate: (content) =>
+    checked(() => invoke<unknown>("schedule_create", { content })),
+  scheduleUpdate: (id, version, content) =>
+    checked(() => invoke<unknown>("schedule_update", { id, version, content })),
+  scheduleComplete: (id, version) =>
+    checked(() => invoke<unknown>("schedule_complete", { id, version })),
+  scheduleCancel: (id, version) =>
+    checked(() => invoke<unknown>("schedule_cancel", { id, version })),
+  scheduleReopen: (id, version) =>
+    checked(() => invoke<unknown>("schedule_reopen", { id, version })),
+  scheduleDelete: (id, version) =>
+    checked(() => invoke<unknown>("schedule_delete", { id, version })),
+  reminderCreate: (content) =>
+    checked(() => invoke<unknown>("reminder_create", { content })),
+  reminderUpdate: (id, version, content) =>
+    checked(() => invoke<unknown>("reminder_update", { id, version, content })),
+  reminderDismiss: (id, version) =>
+    checked(() => invoke<unknown>("reminder_dismiss", { id, version })),
+  reminderCancel: (id, version) =>
+    checked(() => invoke<unknown>("reminder_cancel", { id, version })),
+  reminderDelete: (id, version) =>
+    checked(() => invoke<unknown>("reminder_delete", { id, version })),
+  notificationsRead: (ids) =>
+    checked(() => invoke<unknown>("notifications_read", { ids })),
+  notificationsReadAll: () =>
+    checked(() => invoke<unknown>("notifications_read_all")),
+  plannerFocus: (notificationId) =>
+    checked(() => invoke<unknown>("planner_focus", { notificationId })),
+  plannerCompose: (kind) =>
+    checked(() => invoke<unknown>("planner_compose", { compose: kind })),
+  setPlannerMuted: (muted) =>
+    checked(() => invoke<unknown>("set_planner_muted", { muted })),
   subscribe: (listener) =>
     listen<unknown>(SNAPSHOT_EVENT, (event) => {
       listener(requireSnapshot(event.payload));

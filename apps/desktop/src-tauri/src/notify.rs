@@ -1,4 +1,5 @@
 //! 系统通知：文件收到之后告诉用户；点一下就在访达或资源管理器里显示它。
+//! 日程与提醒到点了也走这里；点一下，主窗口打开并定位到那一条。
 //!
 //! 通知里只有"谁发来了哪个文件"。文件在本机的位置不出通知：
 //! 点通知时由 Rust 按通知的标识找回它。只显示、不打开——收到的东西是不信任的内容，
@@ -31,6 +32,11 @@ pub fn install(app: &AppHandle) {
                 return;
             };
             let state = watcher.state::<AppState>();
+            // 日程与提醒的通知：主窗口打开，定位到那一条。
+            if let Some(notification) = state.notification_for_handle(handle) {
+                crate::planner::focus(&watcher, &notification);
+                return;
+            }
             if let Some(path) = state.saved_file_for_handle(handle) {
                 reveal(&watcher, path);
             }
@@ -54,6 +60,26 @@ impl SystemNotifier {
 impl Notifier for SystemNotifier {
     fn received(&self, handle: i32, peer: &str, file_name: &str, fell_back: bool) {
         received(&self.app, handle, peer, file_name, fell_back);
+    }
+
+    fn reminder(&self, handle: i32, title: &str, body: &str) {
+        reminder(&self.app, handle, title, body);
+    }
+}
+
+/// 一条日程或提醒到点了。标题就是它的名字，正文是"几点开始"与备注。
+///
+/// `handle` 同样得先在状态里登记好：点通知时按它找回是哪一条。
+fn reminder(app: &AppHandle, handle: i32, title: &str, body: &str) {
+    if let Err(error) = app
+        .notification()
+        .builder()
+        .title(title)
+        .body(body)
+        .id(handle)
+        .show()
+    {
+        tracing::debug!(%error, "a reminder could not be shown");
     }
 }
 

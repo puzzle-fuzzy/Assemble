@@ -173,9 +173,11 @@ dependencies = [
  "assemble-client",
  "assemble-device",
  "assemble-protocol",
+ "assemble-schedule",
  "assemble-server",
  "assemble-store",
  "assemble-transfer",
+ "chrono",
  "futures-util",
  "hostname",
  "serde",
@@ -224,6 +226,7 @@ dependencies = [
 name = "assemble-schedule"
 version = "0.1.0"
 dependencies = [
+ "assemble-protocol",
  "chrono",
  "serde",
  "serde_json",
@@ -238,6 +241,7 @@ dependencies = [
  "assemble-client",
  "assemble-device",
  "assemble-protocol",
+ "assemble-schedule",
  "assemble-store",
  "assemble-transfer",
  "axum",

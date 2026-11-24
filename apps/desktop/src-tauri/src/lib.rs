@@ -14,6 +14,7 @@
 mod commands;
 mod launch;
 mod notify;
+mod planner;
 mod registry;
 mod runtime;
 mod send_menu;
@@ -94,6 +95,23 @@ pub fn run() -> Result<(), StartupError> {
             commands::retry_transfer,
             commands::open_main,
             commands::dismiss_notice,
+            commands::planner_refresh,
+            commands::schedule_create,
+            commands::schedule_update,
+            commands::schedule_complete,
+            commands::schedule_cancel,
+            commands::schedule_reopen,
+            commands::schedule_delete,
+            commands::reminder_create,
+            commands::reminder_update,
+            commands::reminder_dismiss,
+            commands::reminder_cancel,
+            commands::reminder_delete,
+            commands::notifications_read,
+            commands::notifications_read_all,
+            commands::planner_focus,
+            commands::planner_compose,
+            commands::set_planner_muted,
         ])
         .setup(move |app| start(app, client, background, handed_over))
         .on_window_event(|window, event| {
