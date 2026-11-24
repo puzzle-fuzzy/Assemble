@@ -31,13 +31,22 @@ Assemble 是一个全新的、自带服务端的项目，用来完全替换 jarv
 
 ## 验证
 
-- 提交前运行 `bun run verify`。它覆盖 Biome、类型检查、界面测试、前端构建、Rust 格式、静态检查与全部 Rust 测试（含服务端）。装了 Windows 的 Rust 目标时，它还会给能在本机上检查的五个基础库做一次针对 Windows 目标的静态检查；没装则如实跳过。客户端与服务端带着 TLS 与 SQLite 的本机依赖，从 macOS 上检查不了 Windows 目标，它们在 Windows 上对不对，只能到 Windows 环境里验证。
-- Windows 专用的代码放在不依赖 Tauri 的 crate 里，这样它至少能被类型检查。只在 Windows 上才会出现的编译错误和静态检查错误，这一步抓得到（已经抓到过五处）；真正在 Windows 上跑起来对不对，只有 Windows 环境能回答。
+- 提交前运行 `bun run verify`。它覆盖 Biome、类型检查、界面与工具脚本的测试、前端构建、Rust 格式、静态检查与全部 Rust 测试（含服务端）。装了 Windows 的 Rust 目标时（`rust-toolchain.toml` 里列了它），它还会给能在本机上检查的五个基础库做一次针对 Windows 目标的静态检查。
+- **工具链钉在 `rust-toolchain.toml`**，工作区的 `rust-version` 与 `deploy/Dockerfile` 里的基础镜像和它一致；升级时三处一起改。稳定版每六周更新一次，新版本会带来新的检查，钉住之后验证只会在有人主动升级时才可能变红。不要在流程里另外安装"最新的稳定版"。
+- **仓库是公开的**：<https://github.com/puzzle-fuzzy/Assemble>。每次推送，持续集成在 macOS 与 Windows 上各跑一遍 `bun run verify`，并构建服务端镜像；打标签或手动触发时产出安装包。推完去看结果：<https://github.com/puzzle-fuzzy/Assemble/actions>。
+- Windows 专用的代码放在不依赖 Tauri 的 crate 里，这样在本机上就能对它做类型检查。但客户端与服务端带着 TLS 与 SQLite 的本机依赖，从 macOS 上检查不了 Windows 目标，桌面应用壳更是一次都没在这台 Mac 上为 Windows 编译过：**持续集成的 Windows 那一栏是它们唯一的 Windows 环境**。本机那一步抓到过五处，那一栏又抓到过一批只在 Windows 上才有的（没有 await 的异步函数、不必要的返回值、不需要的可变标记、和定时器赛跑的测试）。真正在 Windows 桌面上跑起来对不对，只有真机回答得了。
 - 汇报时区分三种证据，不能互相替代：
   - 自动化测试（`bun run verify`）；
   - 真实启动（在 macOS 上构建并运行服务端与桌面端，核对窗口、托盘、登录、退出清理，步骤见 [运行手册](docs/runbooks/verify-macos-launch.md)）。主流程由 `bun run acceptance` 引导：它需要人登录，所以让用户在自己的终端里运行它，再把它打印的结果拿回来；读窗口内容之前先确认屏幕没锁，锁着的时候读不到不说明任何问题；
   - 真机验收（Windows、两台真实设备之间的收发、通知、开机启动；Windows 的清单在运行手册末尾）。
-- 实际运行抓到过单元测试没暴露的问题，所以涉及应用壳、服务端或生命周期的改动，要真的把它们跑起来。
+- 实际运行抓到过单元测试没暴露的问题，所以涉及应用壳、服务端或生命周期的改动，要真的把它们跑起来。新写的 Dockerfile、流程文件也一样：只做不依赖它们的检查不算验证过，镜像第一次真的构建时就暴露了三处问题。
+
+## 正式服务
+
+- 服务端部署在用户的服务器上，地址 <https://as.yxswy.com>。材料在 `deploy/`，步骤、升级与注意事项见[部署手册](docs/runbooks/deploy.md)。
+- 这次部署是你（用户）在 2026-11-24 明确定的：用 yxswy 的服务器，正式地址 `as.yxswy.com`。除此之外，服务器上任何手册之外的改动都要先问：那台机器上还跑着别的站点，nginx 是共用的，改之前 `nginx -t`。
+- 建账户时密码由用户自己在终端里设，不经过助手；不要在正式服务器上为了测试建临时账户。
+- 服务器在国内，拉不到 GitHub 的镜像仓库：升级用 `deploy/push-image.sh` 把镜像经 SSH 送过去。
 
 ## 文档
 

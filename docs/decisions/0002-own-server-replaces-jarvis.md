@@ -11,7 +11,7 @@
 
 这个假设是我采用的，不是你提的要求。它决定的是整个仓库的边界，本该在动手前单独说明、等你答复，而不是埋在一张默认值表的某一行里。以后凡是会改变项目边界的假设（要不要服务端、要不要迁移数据、要不要动别的仓库），开工前都要单独说出来。
 
-你同一天还要求先用 Git 初始化项目，对应 0001 的 J 项，已于 2026-11-24 执行：仓库在 `main` 分支，不建远程。
+你同一天还要求先用 Git 初始化项目，对应 0001 的 J 项，已于 2026-11-24 执行：仓库在 `main` 分支，起初不建远程。当天晚些时候你定了仓库公开：[github.com/puzzle-fuzzy/Assemble](https://github.com/puzzle-fuzzy/Assemble)。
 
 ## 你要的文件传输
 
@@ -92,8 +92,8 @@
 
 ## 留到以后的
 
-- 日程规划：规则库已经就绪；[方案](../plans/2026-11-24-schedule-planning.md)已出，等你定。
-- 部署方式（Docker Compose 或 systemd）与域名，需要你来定。材料在 `deploy/`，步骤见[部署手册](../runbooks/deploy.md)。
+- 日程规划：规则库已经就绪；[方案](../plans/2026-11-24-schedule-planning.md)已出，第一批的范围与对话式入口已定（[决策 0003](0003-schedule-first-batch-and-conversational-entry.md)）。
+- 部署方式与域名：2026-11-24 当天你就定了——用 yxswy 的服务器，正式地址 <https://as.yxswy.com>，Docker Compose 加 nginx；当晚部署上线。材料在 `deploy/`，做过的与没验证过的见[部署手册](../runbooks/deploy.md)。
 - Windows 11 右键菜单第一层、访达右键菜单、网页端、管理端、iOS、小程序。
 
 ## 从真实启动中学到的
