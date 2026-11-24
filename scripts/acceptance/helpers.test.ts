@@ -3,6 +3,7 @@ import { mkdtemp, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  clock,
   DEFAULT_ACCOUNT,
   DEFAULT_TIMEOUT_SECONDS,
   findLanded,
@@ -77,6 +78,29 @@ describe("markerLines", () => {
     ]);
     expect(markerLines(text, "send-settled")).toEqual([]);
     expect(markerLines("", "online")).toEqual([]);
+  });
+
+  test("提醒的标记：标识与到点时刻、通知生成的时刻、办完了", () => {
+    const text = [
+      "已新建提醒「看看 Assemble 有没有弹提醒」（3fd8），01:40 到点。",
+      "reminder\t3fd85bc3\t1795542026330",
+      "notification\tn-3fd85bc3\t1795542033308",
+      "reminder-closed\t3fd85bc3",
+    ].join("\n");
+    expect(markerLines(text, "reminder")).toEqual([
+      ["3fd85bc3", "1795542026330"],
+    ]);
+    expect(markerLines(text, "notification")).toEqual([
+      ["n-3fd85bc3", "1795542033308"],
+    ]);
+    expect(markerLines(text, "reminder-closed")).toEqual([["3fd85bc3"]]);
+  });
+});
+
+describe("clock", () => {
+  test("本地时刻写成 时:分", () => {
+    expect(clock(new Date(2026, 10, 25, 9, 5).getTime())).toBe("09:05");
+    expect(clock(new Date(2026, 10, 25, 23, 0).getTime())).toBe("23:00");
   });
 });
 

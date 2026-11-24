@@ -3,8 +3,9 @@
 //   bun run acceptance           起环境、等你登录、自动核对
 //   bun run acceptance stop      收摊：停掉替身设备与本脚本起的服务端
 //
-// 需要你亲手做的只有三件：在应用里登录、往回发一个文件、从菜单栏退出应用。
-// 其余的——起服务端、建账户、让替身设备发文件、核对落盘的摘要与回执——都由这个脚本做，
+// 需要你亲手做的只有四件：在应用里登录、往回发一个文件、到点时看一眼通知并点“看过了”、
+// 从菜单栏退出应用。其余的——起服务端、建账户、让替身设备发文件、核对落盘的摘要与回执、
+// 建一条一分钟后到点的提醒并等它生成通知——都由这个脚本做，
 // 每一步的结果如实打印。它只在屏幕上显示文字、启动应用，不替你点任何东西。
 //
 // 它起的东西都在本机：服务端的数据在 data/local/server；替身设备“工作电脑”的令牌、
@@ -26,6 +27,7 @@ import { homedir } from "node:os";
 import { join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
+  clock,
   findLanded,
   formatSize,
   markerLines,
@@ -79,12 +81,18 @@ const NOTE_TEXT = [
 const BLOB_NAME = "Assemble 验收数据.bin";
 const BLOB_BYTES = 2 * 1024 * 1024;
 
+/** 替身设备建的那条提醒：多久之后到点。服务端每十秒查一次，所以到点后十几秒内才会响。 */
+const REMINDER_TITLE = "看看 Assemble 有没有弹提醒";
+const REMINDER_IN_SECONDS = 60;
+
 /** 脚本看不见、只能由人确认的几样。 */
 const BY_HAND = [
   "收到文件时弹了系统通知；点它，访达打开并选中那个文件。",
   "“传输”卡片里：收到的两条写着“已保存”，你发出去的那条写着“已送达”。",
   "把一个文件夹拖进 Assemble 窗口：应当提示“只能发送文件，不能发送文件夹。”。",
   "“云盘”卡片：点“上传…”存一个文件，再点“取回”，最后点“删除”。",
+  "刚才到点的那条提醒：系统通知弹出来了吗？点它之后主窗口打开、滚到那一条了吗？",
+  "菜单栏图标 →“新建提醒…”：主窗口打开，直接摆出新建提醒的表单。",
   "让应用挂着放上十几分钟，再打开窗口，看是不是空白。",
 ];
 
@@ -637,6 +645,95 @@ async function start(options: Options): Promise<number> {
           : `“${fakeName}”收到了“${name}”，但落盘之后的摘要与声明的不一致：${path}`,
       );
     }
+  }
+
+  step("到点提醒");
+  note(
+    `替身设备建一条 ${REMINDER_IN_SECONDS} 秒后到点的提醒：在线的设备该立刻收到名单，服务端到点后生成通知。`,
+  );
+  // 新建这一下就会推一份名单：先记下替身设备的日志读到哪儿，等会儿只看之后的新内容。
+  const fakeLogBefore = size(log.fake);
+  const created = await fake([
+    "remind",
+    "--origin",
+    origin,
+    "--title",
+    REMINDER_TITLE,
+    "--in",
+    String(REMINDER_IN_SECONDS),
+  ]);
+  const [reminder] = markerLines(created.stdout, "reminder");
+  if (created.code !== 0 || !reminder || reminder.length < 2) {
+    record(
+      checks,
+      false,
+      `“${fakeName}”没能新建提醒：${created.stderr.trim() || "它没有报告提醒的标识"}`,
+    );
+  } else {
+    const [reminderId, rawDueAt] = reminder;
+    const dueAt = Number(rawDueAt);
+    const pushed = await waitUntil(
+      async () =>
+        readFrom(log.fake, fakeLogBefore).includes("[planner_changed]")
+          ? true
+          : null,
+      15,
+      "等这份新名单推到在线的替身设备",
+    );
+    record(
+      checks,
+      pushed !== null,
+      pushed !== null
+        ? "一处改动，在线的设备立刻收到了新的名单。"
+        : "15 秒内在线的替身设备没有收到新的名单。",
+    );
+
+    console.log(`  提醒已建好，${clock(dueAt)} 到点。到时请你：`);
+    console.log("    1. 看屏幕右上角：有没有弹出一条系统通知。");
+    console.log("    2. 点它：主窗口打开，“日程”卡片里滚到那一条并标出来。");
+    console.log("    3. 在“日程”卡片里点那一条旁边的“看过了”。");
+    const fired = await fake([
+      "wait",
+      "--origin",
+      origin,
+      "--until",
+      "notification",
+      "--reminder",
+      reminderId,
+      "--timeout",
+      String(REMINDER_IN_SECONDS + 90),
+    ]);
+    const late = Math.round((Date.now() - dueAt) / 1000);
+    record(
+      checks,
+      fired.code === 0,
+      fired.code === 0
+        ? `到点后 ${late} 秒内服务端生成了通知（它每十秒查一次）。`
+        : fired.code === 3
+          ? `到点之后 ${REMINDER_IN_SECONDS + 90} 秒，服务端还没有生成这条提醒的通知。`
+          : `等服务端生成通知时替身设备出了错：${fired.stderr.trim()}`,
+    );
+
+    const closed = await fake([
+      "wait",
+      "--origin",
+      origin,
+      "--until",
+      "reminder-closed",
+      "--reminder",
+      reminderId,
+      "--timeout",
+      String(options.timeout),
+    ]);
+    record(
+      checks,
+      closed.code === 0,
+      closed.code === 0
+        ? "你在应用里点了“看过了”：服务端上这条提醒已办完，它的通知也不再是没读的。"
+        : closed.code === 3
+          ? `等了 ${options.timeout} 秒，这条提醒还没有被标成办完。`
+          : `等这条提醒办完时替身设备出了错：${closed.stderr.trim()}`,
+    );
   }
 
   step("退出");

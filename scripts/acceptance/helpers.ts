@@ -63,6 +63,13 @@ export function parseArguments(argv: readonly string[]): Options | string {
   return options;
 }
 
+/** 给人看的本地时刻：`时:分`。 */
+export function clock(milliseconds: number): string {
+  const at = new Date(milliseconds);
+  const pad = (value: number) => String(value).padStart(2, "0");
+  return `${pad(at.getHours())}:${pad(at.getMinutes())}`;
+}
+
 /**
  * 替身设备输出里给脚本读的行：行首是标记，后面用制表符分开字段。
  * 其余的行是给人看的，措辞随时会改，所以只认行首的标记，并且要求标记后面紧跟制表符或行尾。

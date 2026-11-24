@@ -13,6 +13,9 @@
 //! fake-device --token a.json devices  --origin http://127.0.0.1:8787
 //! fake-device --token a.json send     --origin http://127.0.0.1:8787 --to 替身B --file 合同.pdf --wait
 //! fake-device --token a.json sends    --origin http://127.0.0.1:8787
+//! fake-device --token a.json remind   --origin http://127.0.0.1:8787 --title 取快递 --in 60
+//! fake-device --token a.json planner  --origin http://127.0.0.1:8787
+//! fake-device --token a.json wait     --origin http://127.0.0.1:8787 --until notification
 //! fake-device --token a.json forget   --origin http://127.0.0.1:8787
 //! ```
 //!
@@ -21,8 +24,10 @@
 //!
 //! `wait` 与带了 `--wait` 的 `send` 是给脚本用的：等到要等的事才以 0 退出，到时没等到以 3 退出，
 //! 别的失败是 1。给脚本读的结果各占一行，行首是固定的英文标记（`online`、`peer-online`、
-//! `peer-offline`、`received`、`send-settled`），后面用制表符分开；
-//! 其余的输出是给人看的，措辞随时会改。
+//! `peer-offline`、`received`、`send-settled`、`reminder`、`notification`、`reminder-closed`），
+//! 后面用制表符分开；其余的输出是给人看的，措辞随时会改。
+//!
+//! `remind` 新建一条多少秒之后到点的提醒，`planner` 列出日程名单：用来验证"到点会不会提醒"。
 //!
 //! 令牌只对登记时的那个账户有效：`register` 发现令牌文件属于别的账户，会重新登记一台。
 
@@ -39,13 +44,15 @@ use assemble_device::inbox::{ReceiveFailure, accept, is_source_failure, sweep_st
 use assemble_device::validate_directory;
 use assemble_protocol::device::NewDevice;
 use assemble_protocol::events::Event;
-use assemble_protocol::primitives::{MAX_FILE_SIZE, Platform};
+use assemble_protocol::primitives::{MAX_FILE_SIZE, Platform, Timestamp};
+use assemble_protocol::schedule::{Planner, ReminderContent, ReminderStatus, ScheduleStatus};
 use assemble_protocol::sends::{
     Direction, FailInput, FailReason, SEND_PAGE_MAX, Send as SendRecord, SendQuery, SendState,
 };
 use assemble_store::secret::SecretString;
 use assemble_transfer::TransferError;
 use assemble_transfer::download::SaveOptions;
+use chrono::TimeZone;
 use clap::{Parser, Subcommand, ValueEnum};
 use futures_util::StreamExt;
 use tokio_util::sync::CancellationToken;
@@ -91,12 +98,30 @@ enum Command {
         origin: String,
         #[arg(long)]
         until: Until,
+        /// 等的是哪一条提醒的事：它的标识。
+        #[arg(long)]
+        reminder: Option<String>,
         /// 最多等多少秒。
         #[arg(long, default_value_t = 600)]
         timeout: u64,
     },
     /// 列出账户里的设备与在线状态。
     Devices {
+        #[arg(long)]
+        origin: String,
+    },
+    /// 新建一条提醒，多少秒之后到点。
+    Remind {
+        #[arg(long)]
+        origin: String,
+        #[arg(long)]
+        title: String,
+        /// 多少秒之后到点。
+        #[arg(long = "in")]
+        in_seconds: u64,
+    },
+    /// 列出日程名单：日程、提醒、没读的通知。
+    Planner {
         #[arg(long)]
         origin: String,
     },
@@ -146,12 +171,16 @@ impl From<Kind> for Platform {
 }
 
 /// `wait --until`：等的是什么。
-#[derive(Debug, Clone, Copy, ValueEnum)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
 enum Until {
     /// 账户里出现了别的在线设备。
     PeerOnline,
     /// 账户里别的设备都下线了。
     PeerOffline,
+    /// 账户里出现了没读的通知；`--reminder` 可以限定是某一条提醒的。
+    Notification,
+    /// `--reminder` 指定的那一条提醒办完了，或者不办了。
+    ReminderClosed,
 }
 
 /// 命令没走完的原因。没等到要等的事时退出码是 3，别的失败是 1：脚本靠它分清"没等到"和"出错了"。
@@ -332,48 +361,48 @@ async fn run() -> Result<(), Problem> {
         Command::Wait {
             origin,
             until,
+            reminder,
             timeout,
         } => {
             let identity = read_identity(token_file)?;
             let client = client(&origin, &identity)?;
+            if until == Until::ReminderClosed && reminder.is_none() {
+                return Err("等某一条提醒办完，要用 --reminder 说明是哪一条。"
+                    .to_string()
+                    .into());
+            }
             let deadline = Instant::now() + Duration::from_secs(timeout);
             let mut complained = false;
             loop {
                 let cancel = CancellationToken::new();
-                match client.devices(&RequestOptions::new(&cancel)).await {
-                    Ok(devices) => {
-                        complained = false;
-                        let peers: Vec<_> = devices
-                            .iter()
-                            .filter(|device| device.id != identity.device_id)
-                            .collect();
-                        let met = match until {
-                            Until::PeerOnline => match peers.iter().find(|device| device.online) {
-                                Some(device) => {
-                                    println!("peer-online\t{}\t{}", device.id, device.name);
-                                    true
-                                }
-                                None => false,
-                            },
-                            Until::PeerOffline => {
-                                let online = peers.iter().filter(|device| device.online).count();
-                                if online == 0 {
-                                    println!("peer-offline");
-                                }
-                                online == 0
+                // 一秒问一次。问不到（服务端还没起来或者刚重启）不算失败，时限之内接着等。
+                let met = match until {
+                    Until::PeerOnline | Until::PeerOffline => {
+                        match client.devices(&RequestOptions::new(&cancel)).await {
+                            Ok(devices) => {
+                                complained = false;
+                                peer_wait(until, &devices, &identity.device_id)
                             }
-                        };
-                        if met {
-                            return Ok(());
+                            Err(error) => complain(&mut complained, &error.to_string()),
                         }
                     }
-                    // 服务端还没起来或者刚重启：还在时限之内就接着等，不急着判失败。
-                    Err(error) => {
-                        if !complained {
-                            println!("[暂时问不到设备列表，接着等] {error}");
-                            complained = true;
+                    Until::Notification | Until::ReminderClosed => {
+                        match client.planner(&RequestOptions::new(&cancel)).await {
+                            Ok(planner) => {
+                                complained = false;
+                                match until {
+                                    Until::Notification => {
+                                        awaited_notification(reminder.as_deref(), &planner)
+                                    }
+                                    _ => reminder_closed(reminder.as_deref(), &planner),
+                                }
+                            }
+                            Err(error) => complain(&mut complained, &error.to_string()),
                         }
                     }
+                };
+                if met {
+                    return Ok(());
                 }
                 if Instant::now() >= deadline {
                     return Err(not_in_time(format!(
@@ -381,6 +410,8 @@ async fn run() -> Result<(), Problem> {
                         match until {
                             Until::PeerOnline => "没有别的设备上线",
                             Until::PeerOffline => "别的设备还没有都下线",
+                            Until::Notification => "没有等到没读的通知",
+                            Until::ReminderClosed => "那条提醒还没有办完",
                         }
                     )));
                 }
@@ -532,6 +563,108 @@ async fn run() -> Result<(), Problem> {
                         state_word(send.state)
                     );
                 }
+            }
+            Ok(())
+        }
+        Command::Remind {
+            origin,
+            title,
+            in_seconds,
+        } => {
+            let identity = read_identity(token_file)?;
+            let client = client(&origin, &identity)?;
+            let cancel = CancellationToken::new();
+            let due_ms = i64::try_from(in_seconds).unwrap_or(i64::MAX);
+            let due_at = Timestamp::from_millis(Timestamp::now().as_millis() + due_ms * 1000)
+                .ok_or_else(|| "到点的时间超出了可以表示的范围。".to_string())?;
+            // 每次一个新的幂等键：这次命令要是超时重试，不会建出两条。
+            let key = format!(
+                "fake-{}",
+                assemble_server::secrets::random_id().map_err(|error| error.to_string())?
+            );
+            let reminder = client
+                .create_reminder(
+                    &ReminderContent {
+                        title: title.clone(),
+                        due_at,
+                        notes: None,
+                    },
+                    Some(&key),
+                    &RequestOptions::new(&cancel),
+                )
+                .await
+                .map_err(|error| format!("提醒没有建成：{error}"))?;
+            println!(
+                "已新建提醒「{}」（{}），{} 到点。",
+                reminder.content.title,
+                reminder.id,
+                when(reminder.content.due_at)
+            );
+            println!(
+                "reminder\t{}\t{}",
+                reminder.id,
+                reminder.content.due_at.as_millis()
+            );
+            Ok(())
+        }
+        Command::Planner { origin } => {
+            let identity = read_identity(token_file)?;
+            let client = client(&origin, &identity)?;
+            let cancel = CancellationToken::new();
+            let planner = client
+                .planner(&RequestOptions::new(&cancel))
+                .await
+                .map_err(|error| error.to_string())?;
+            println!("日程：");
+            for schedule in &planner.schedules {
+                println!(
+                    "    {} · {} · {}（{} 记下的）",
+                    one_line(&schedule.content.title),
+                    when(schedule.content.start_at),
+                    schedule_status(schedule.status),
+                    schedule.created_by
+                );
+                println!(
+                    "schedule\t{}\t{}\t{}\t{}\t{}",
+                    schedule.id,
+                    schedule.version,
+                    schedule_status(schedule.status),
+                    schedule.content.start_at.as_millis(),
+                    one_line(&schedule.content.title)
+                );
+            }
+            println!("提醒：");
+            for reminder in &planner.reminders {
+                println!(
+                    "    {} · {} · {}",
+                    one_line(&reminder.content.title),
+                    when(reminder.content.due_at),
+                    reminder_status(reminder.status)
+                );
+                println!(
+                    "reminder\t{}\t{}\t{}\t{}\t{}",
+                    reminder.id,
+                    reminder.version,
+                    reminder_status(reminder.status),
+                    reminder.content.due_at.as_millis(),
+                    one_line(&reminder.content.title)
+                );
+            }
+            println!("没读的通知：");
+            for notification in &planner.notifications {
+                println!(
+                    "    {} · {}",
+                    one_line(&notification.title),
+                    when(notification.raised_at)
+                );
+                println!(
+                    "notification\t{}\t{}\t{}\t{}\t{}",
+                    notification.id,
+                    notification.schedule_id.as_deref().unwrap_or("-"),
+                    notification.reminder_id.as_deref().unwrap_or("-"),
+                    notification.raised_at.as_millis(),
+                    one_line(&notification.title)
+                );
             }
             Ok(())
         }
@@ -749,10 +882,117 @@ fn print_event(event: &Event) {
                 );
             }
         }
+        Event::PlannerChanged { planner } => println!(
+            "[planner_changed] 日程 {} 条，提醒 {} 条，没读的通知 {} 条",
+            planner.schedules.len(),
+            planner.reminders.len(),
+            planner.notifications.len()
+        ),
         other => println!(
             "[{}] {}",
             other.kind(),
             serde_json::to_string(other).unwrap_or_default()
         ),
+    }
+}
+
+/// `wait --until peer-online` 或 `peer-offline`：等到了就打印给脚本读的那一行。
+fn peer_wait(until: Until, devices: &[assemble_protocol::device::Device], me: &str) -> bool {
+    let peers: Vec<_> = devices.iter().filter(|device| device.id != me).collect();
+    match until {
+        Until::PeerOnline => match peers.iter().find(|device| device.online) {
+            Some(device) => {
+                println!("peer-online\t{}\t{}", device.id, device.name);
+                true
+            }
+            None => false,
+        },
+        _ => {
+            let online = peers.iter().filter(|device| device.online).count();
+            if online == 0 {
+                println!("peer-offline");
+            }
+            online == 0
+        }
+    }
+}
+
+/// `wait --until notification`：名单里有一条没读的通知（可以限定是某一条提醒的）。
+fn awaited_notification(reminder: Option<&str>, planner: &Planner) -> bool {
+    let found = planner.notifications.iter().find(|notification| {
+        reminder.is_none_or(|id| notification.reminder_id.as_deref() == Some(id))
+    });
+    match found {
+        Some(notification) => {
+            println!(
+                "notification\t{}\t{}",
+                notification.id,
+                notification.raised_at.as_millis()
+            );
+            true
+        }
+        None => false,
+    }
+}
+
+/// `wait --until reminder-closed`：那一条提醒办完了，或者不办了。
+fn reminder_closed(reminder: Option<&str>, planner: &Planner) -> bool {
+    let Some(id) = reminder else {
+        return false;
+    };
+    let closed = planner.reminders.iter().any(|item| {
+        item.id == id
+            && matches!(
+                item.status,
+                ReminderStatus::Dismissed | ReminderStatus::Cancelled
+            )
+    });
+    if closed {
+        println!("reminder-closed\t{id}");
+    }
+    closed
+}
+
+/// 问不到的那一瞬间只抱怨一次，免得把日志刷满。
+fn complain(complained: &mut bool, error: &str) -> bool {
+    if !*complained {
+        println!("[暂时问不到，接着等] {error}");
+        *complained = true;
+    }
+    false
+}
+
+/// 本机时区下的"月日 时:分"。
+fn when(at: Timestamp) -> String {
+    chrono::Local
+        .timestamp_millis_opt(at.as_millis())
+        .single()
+        .map(|at| at.format("%m月%d日 %H:%M").to_string())
+        .unwrap_or_default()
+}
+
+/// 给脚本读的那一行里不能有制表符和换行：标题里有就压成空格。
+fn one_line(text: &str) -> String {
+    text.split(['\t', '\r', '\n'])
+        .map(str::trim)
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn schedule_status(status: ScheduleStatus) -> &'static str {
+    match status {
+        ScheduleStatus::Upcoming => "upcoming",
+        ScheduleStatus::Done => "done",
+        ScheduleStatus::Cancelled => "cancelled",
+    }
+}
+
+fn reminder_status(status: ReminderStatus) -> &'static str {
+    match status {
+        ReminderStatus::Scheduled => "scheduled",
+        ReminderStatus::Fired => "fired",
+        ReminderStatus::Dismissed => "dismissed",
+        ReminderStatus::Cancelled => "cancelled",
     }
 }
