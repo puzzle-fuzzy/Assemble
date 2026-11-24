@@ -14,7 +14,8 @@ use std::time::Duration;
 use assemble_client::{
     ClientError, LoginError, LoginListener, LoginRequest, RequestOptions, WaitOptions,
 };
-use assemble_protocol::device::{DEVICE_NAME_MAX_UNITS, NewDevice, is_valid_device_name};
+use assemble_protocol::account::Account;
+use assemble_protocol::device::{DEVICE_NAME_MAX_UNITS, Device, NewDevice, is_valid_device_name};
 use assemble_protocol::login::{ExchangeResponse, LOGIN_DEADLINE};
 use assemble_protocol::primitives::Platform;
 use assemble_store::secret::SecretString;
@@ -136,14 +137,12 @@ pub async fn restore(state: &AppState) {
         Ok(Some(stored)) => stored,
         Ok(None) => {
             state.set_session(SessionView::SignedOut);
-            state.broadcast();
             return;
         }
         Err(error) => {
             // 读不出来就当作没有登录；原记录留着不动，避免误删。
             tracing::warn!(?error, "the stored session could not be read");
             state.set_session(SessionView::SignedOut);
-            state.broadcast();
             return;
         }
     };
@@ -164,28 +163,20 @@ pub async fn restore(state: &AppState) {
             if state.store_session(&refreshed).is_err() {
                 tracing::debug!("the refreshed account could not be saved");
             }
-            state.set_session(SessionView::SignedIn {
-                account: AccountView::from(&refreshed.account),
-                device: DeviceView::from(&refreshed.device),
-            });
+            adopt(state, &refreshed.account, &refreshed.device);
         }
         Err(error) if error.is_unauthorized() => {
             // 服务端已经不认这条令牌：可以放心忘掉。
-            state.client.set_bearer(None);
-            let _ = state.clear_stored_session();
+            forget(state);
             state.set_notice(Some(Notice::info("登录已失效，请重新登录。")));
-            state.set_session(SessionView::SignedOut);
         }
         Err(error) => {
             // 连不上服务，无法确认。保留本机保存的会话，下次联网再核对。
+            // 后台任务会一直试着连事件流：一连上就等于核对过了。
             tracing::debug!(%error, "the stored session could not be verified yet");
-            state.set_session(SessionView::SignedIn {
-                account: AccountView::from(&stored.account),
-                device: DeviceView::from(&stored.device),
-            });
+            adopt(state, &stored.account, &stored.device);
         }
     }
-    state.broadcast();
 }
 
 /// 登录：在系统浏览器完成授权，用授权码换取设备令牌。
@@ -203,12 +194,10 @@ pub async fn sign_in(state: &AppState) -> Result<(), SessionError> {
     if let Err(error) = retire_current_session(state, &attempt).await {
         state.end_sign_in(&attempt);
         state.set_notice(notice_for(&error));
-        state.broadcast();
         return Err(error);
     }
 
     state.set_session(SessionView::SigningIn);
-    state.broadcast();
 
     let outcome = login(state, &attempt).await;
     state.end_sign_in(&attempt);
@@ -219,7 +208,6 @@ pub async fn sign_in(state: &AppState) -> Result<(), SessionError> {
             state.set_notice(notice_for(error));
         }
     }
-    state.broadcast();
     outcome
 }
 
@@ -235,13 +223,35 @@ pub async fn sign_out(state: &AppState) -> Result<(), SessionError> {
     if state.client.has_bearer()
         && let Err(error) = retire_current_session(state, &state.lifetime).await
     {
-        state.broadcast();
         return Err(error);
     }
     state.set_notice(None);
     state.set_session(SessionView::SignedOut);
-    state.broadcast();
     Ok(())
+}
+
+/// 服务端不再认这台设备（在别的设备上被撤销、账户被删）：不必也无法再去撤销，直接忘掉。
+pub fn revoked(state: &AppState) {
+    forget(state);
+    state.set_notice(Some(Notice::info("这台设备的登录已失效，请重新登录。")));
+}
+
+/// 采用一次登录：记下账户与设备，并让后台任务为它开始工作。
+fn adopt(state: &AppState, account: &Account, device: &Device) {
+    state.set_session(SessionView::SignedIn {
+        account: AccountView::from(account),
+        device: DeviceView::from(device),
+    });
+    state.begin_session();
+}
+
+/// 忘掉本机的登录状态。调用方必须已经确认服务端那边也撤销了，或者已经不认了。
+fn forget(state: &AppState) {
+    state.client.set_bearer(None);
+    // 钥匙串里的条目删不掉也没关系：下次启动会被服务端判为失效。
+    let _ = state.clear_stored_session();
+    state.end_session();
+    state.set_session(SessionView::SignedOut);
 }
 
 /// 结束当前会话。返回错误表示服务端没有确认撤销，当前会话原样保留。
@@ -264,9 +274,7 @@ async fn retire_current_session(
             return Err(SessionError::Unreachable(error));
         }
     }
-    state.client.set_bearer(None);
-    // 钥匙串里的条目删不掉也没关系：下次启动会被服务端判为失效。
-    let _ = state.clear_stored_session();
+    forget(state);
     Ok(())
 }
 
@@ -328,10 +336,7 @@ async fn login(state: &AppState, attempt: &CancellationToken) -> Result<(), Sess
         return Err(SessionError::NotSaved);
     }
     state.client.set_bearer(Some(stored.token.clone()));
-    state.set_session(SessionView::SignedIn {
-        account: AccountView::from(&stored.account),
-        device: DeviceView::from(&stored.device),
-    });
+    adopt(state, &stored.account, &stored.device);
     Ok(())
 }
 

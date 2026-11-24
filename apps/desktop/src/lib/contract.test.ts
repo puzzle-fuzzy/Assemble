@@ -16,6 +16,11 @@ function checked(): Snapshot[] {
   return samples as Snapshot[];
 }
 
+/** 会话里这台设备自己的标识；没登录时为 null。 */
+function thisDevice(session: Snapshot["session"]): string | null {
+  return session.phase === "signedIn" ? session.device.id : null;
+}
+
 describe("状态契约样本", () => {
   test("每一条样本都符合界面认得的形状", () => {
     expect(checked().length).toBeGreaterThan(0);
@@ -34,6 +39,32 @@ describe("状态契约样本", () => {
     expect(
       new Set(snapshots.map((snapshot) => snapshot.service.reachable)),
     ).toEqual(new Set([true, false, null]));
+    expect(
+      new Set(snapshots.map((snapshot) => snapshot.service.stream)),
+    ).toEqual(new Set(["off", "connecting", "connected", "reconnecting"]));
+    // 没登录就没有设备列表；登录了列表里有自己，也有别的设备。
+    expect(
+      snapshots
+        .filter((snapshot) => snapshot.session.phase !== "signedIn")
+        .every((snapshot) => snapshot.devices.length === 0),
+    ).toBe(true);
+    // 逐条判断阶段，类型才知道会话里一定有设备。
+    const signedIn = snapshots.flatMap((snapshot) =>
+      snapshot.session.phase === "signedIn" ? [snapshot] : [],
+    );
+    expect(signedIn.length).toBeGreaterThan(0);
+    expect(
+      signedIn.every((snapshot) =>
+        snapshot.devices.some(
+          (device) => device.id === thisDevice(snapshot.session),
+        ),
+      ),
+    ).toBe(true);
+    expect(
+      new Set(
+        snapshots.flatMap((snapshot) => snapshot.devices).map((d) => d.online),
+      ),
+    ).toEqual(new Set([true, false]));
     const notices = snapshots
       .map((snapshot) => snapshot.notice)
       .filter((notice): notice is Notice => notice !== null);

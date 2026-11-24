@@ -123,13 +123,16 @@ pub async fn exists(pool: &SqlitePool, device_id: &str) -> Result<bool, sqlx::Er
 }
 
 /// 一个账户的全部设备，按注册先后排列。在线与否问 [`Presence`]。
+///
+/// 同一毫秒内注册的设备靠 `rowid` 分先后：`id` 是随机的，拿它当次序会让
+/// 列表顺序时对时错（测试里偶尔复现）。
 pub async fn list(
     pool: &SqlitePool,
     presence: &Presence,
     account_id: &str,
 ) -> Result<Vec<Device>, ApiError> {
     let rows = sqlx::query_as::<_, DeviceRow>(
-        "SELECT * FROM devices WHERE account_id = ? ORDER BY created_at, id",
+        "SELECT * FROM devices WHERE account_id = ? ORDER BY created_at, rowid",
     )
     .bind(account_id)
     .fetch_all(pool)
@@ -386,6 +389,21 @@ mod tests {
         assert_eq!(listed.len(), 2);
         assert_eq!(listed[0].name, "Mac");
         assert_eq!(listed[0].platform, Platform::Macos);
+        // 同一毫秒内注册（时间戳完全相同）时，先后仍按注册顺序，而不是看随机的主键。
+        sqlx::query("UPDATE devices SET created_at = ?")
+            .bind(mac.created_at)
+            .execute(&fixture.pool)
+            .await
+            .unwrap();
+        let tied = list(&fixture.pool, &fixture.presence, &fixture.account.id)
+            .await
+            .unwrap();
+        assert_eq!(
+            tied.iter()
+                .map(|device| device.name.as_str())
+                .collect::<Vec<_>>(),
+            vec!["Mac", "工作电脑"]
+        );
         assert_eq!(listed[1].platform, Platform::Windows);
         assert!(!listed[0].online);
 

@@ -347,7 +347,14 @@ async fn the_login_page_is_served_with_its_defences() {
     assert!(!policy.contains("unsafe-inline"));
     assert!(!policy.contains("script-src"));
     assert_eq!(page.headers.get("cache-control").unwrap(), "no-store");
-    assert_eq!(page.headers.get("referrer-policy").unwrap(), "no-referrer");
+    // 来源策略必须是 same-origin。用 no-referrer 的话，真实浏览器会把同源 POST 的 Origin
+    // 发成 null，登录表单就被服务端自己的校验拒掉了（真实启动时踩到过）。
+    assert_eq!(page.headers.get("referrer-policy").unwrap(), "same-origin");
+    assert!(
+        page.html
+            .contains(r#"name="referrer" content="same-origin""#)
+    );
+    assert!(!page.html.contains("no-referrer"));
 
     // 页面里的防伪值与 Cookie 里的成对；Cookie 不暴露给页面脚本。
     let csrf = hidden(&page.html, "csrf").unwrap();
@@ -1147,4 +1154,42 @@ async fn a_server_restart_reports_every_device_as_offline_since_then() {
         .await
         .unwrap();
     assert!(seen > 1_700_000_000_000);
+}
+
+#[tokio::test]
+async fn stopping_the_server_ends_open_event_streams_promptly() {
+    let mut fixture = fixture().await;
+    let mac = register(&fixture, 'a', "MacBook", Platform::Macos).await;
+    let events = mac.open_events();
+    let mut events = events;
+    // 收到 hello 说明事件流已经建立。
+    next_event(&mut events).await;
+
+    // 事件流是永不主动结束的长连接。服务端退出时必须自己把它收掉，
+    // 否则"优雅退出"会一直等下去——本机真机上见过旧进程收到 SIGTERM 后迟迟不退。
+    let started = Instant::now();
+    fixture.server.stop().await;
+    let taken = started.elapsed();
+    assert!(
+        taken < Duration::from_secs(3),
+        "stopping took {taken:?}: an open event stream kept the server alive"
+    );
+    // 收尾是正常走完的：设备被记成离线，并且带着离线时间。
+    assert!(
+        !fixture
+            .server
+            .state
+            .presence
+            .is_online(&account_of(&fixture).await, &mac.device.id)
+    );
+    let seen: Option<i64> = sqlx::query_scalar("SELECT last_seen_at FROM devices WHERE id = ?")
+        .bind(&mac.device.id)
+        .fetch_one(&fixture.server.state.pool)
+        .await
+        .unwrap();
+    assert!(
+        seen.is_some(),
+        "the offline time should be written on shutdown"
+    );
+    mac.cancel.cancel();
 }

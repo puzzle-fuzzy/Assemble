@@ -142,11 +142,22 @@ fn cookie_lifetime(duration: Duration) -> time::Duration {
 }
 
 /// 写操作要求请求来自本站：`Origin` 必须正好是服务端对外的地址。
+///
+/// 不匹配时记一条日志，写明收到的是什么：真实浏览器被拒的原因要能从日志里看出来。
+/// `Origin` 只是协议、主机和端口，不含任何凭据，记下来没有问题。
 pub fn is_same_origin(headers: &HeaderMap, public_origin: &str) -> bool {
-    headers
+    let received = headers
         .get(axum::http::header::ORIGIN)
-        .and_then(|value| value.to_str().ok())
-        .is_some_and(|origin| origin == public_origin)
+        .and_then(|value| value.to_str().ok());
+    let matched = received == Some(public_origin);
+    if !matched {
+        tracing::warn!(
+            origin = received,
+            expected = public_origin,
+            "request rejected: Origin does not match the public origin"
+        );
+    }
+    matched
 }
 
 #[cfg(test)]

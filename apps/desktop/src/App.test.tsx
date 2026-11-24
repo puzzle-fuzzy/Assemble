@@ -6,7 +6,12 @@ import { createRoot, type Root } from "react-dom/client";
 
 import { App } from "@/App";
 import { type Bridge, BridgeError, type UnlistenFn } from "@/lib/bridge";
-import type { LaunchState, Snapshot } from "@/lib/types";
+import type {
+  DeviceView,
+  LaunchState,
+  ServiceView,
+  Snapshot,
+} from "@/lib/types";
 
 const ACCOUNT = {
   id: "account-1",
@@ -14,11 +19,25 @@ const ACCOUNT = {
   displayName: "Example",
 };
 
-const DEVICE = {
+/** 这台电脑自己。 */
+const DEVICE: DeviceView = {
   id: "device-1",
   name: "MacBook-Pro",
   platform: "macos",
-} as const;
+  online: true,
+};
+
+/** 账户里的另一台电脑。 */
+const OTHER: DeviceView = {
+  id: "device-2",
+  name: "工作电脑",
+  platform: "windows",
+  online: false,
+};
+
+function service(overrides: Partial<ServiceView> = {}): ServiceView {
+  return { target: "production", reachable: true, stream: "off", ...overrides };
+}
 
 type Overrides = Partial<Omit<Snapshot, "session">> & {
   phase?: Snapshot["session"]["phase"];
@@ -37,8 +56,10 @@ function snapshot(overrides: Overrides = {}): Snapshot {
         ? signedIn()
         : { phase: "signedOut" };
   return {
-    service: { target: "production", reachable: true },
+    service: service(),
     session,
+    // 没登录时 Rust 不会给出设备列表。
+    devices: phase === "signedIn" ? [{ ...DEVICE }] : [],
     launchAtLogin: "disabled",
     notice: null,
     ...rest,
@@ -60,7 +81,7 @@ class FakeBridge implements Bridge {
   private gate(): Promise<void> {
     this.pending = true;
     return new Promise((resolve) => {
-      // 让调用方有机会观察到"进行中"的状态。
+      // 让调用方有机会观察"进行中"的状态。
       setTimeout(() => {
         this.pending = false;
         resolve();
@@ -91,6 +112,18 @@ class FakeBridge implements Bridge {
     return this.answer("signOut", this.current);
   }
 
+  renameDevice(deviceId: string, name: string) {
+    return this.answer(`renameDevice:${deviceId}:${name}`, this.current);
+  }
+
+  removeDevice(deviceId: string) {
+    return this.answer(`removeDevice:${deviceId}`, this.current);
+  }
+
+  dismissNotice() {
+    return this.answer("dismissNotice", this.current);
+  }
+
   launchAtLogin() {
     return this.answer<LaunchState>(
       "launchAtLogin",
@@ -115,8 +148,7 @@ class FakeBridge implements Bridge {
     return this.listeners.size;
   }
 
-  /** 模拟 Rust 推来新的状态。
-   */
+  /** 模拟 Rust 推来新的状态。 */
   push(next: Snapshot) {
     this.current = next;
     for (const listener of this.listeners) listener(next);
@@ -168,6 +200,33 @@ function button(
   );
 }
 
+function buttons(host: HTMLElement, name: string): HTMLButtonElement[] {
+  return [...host.querySelectorAll("button")].filter(
+    (candidate) => candidate.textContent?.trim() === name,
+  );
+}
+
+function textField(host: HTMLElement): HTMLInputElement {
+  const found = host.querySelector<HTMLInputElement>(
+    "input:not([type=checkbox])",
+  );
+  if (!found) throw new Error("没有找到输入框");
+  return found;
+}
+
+/** 在输入框里打字：走浏览器自己的 value 设置器，React 才会看到变化。 */
+async function typeInto(host: HTMLElement, value: string) {
+  await act(async () => {
+    const input = textField(host);
+    const setter = Object.getOwnPropertyDescriptor(
+      HTMLInputElement.prototype,
+      "value",
+    )?.set;
+    setter?.call(input, value);
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+}
+
 function launchSwitch(host: HTMLElement): HTMLButtonElement {
   const found = host.querySelector<HTMLButtonElement>('[role="switch"]');
   if (!found) throw new Error("没有找到开机启动开关");
@@ -204,7 +263,9 @@ afterEach(async () => {
 describe("连接状态", () => {
   test("探测出结果前显示正在检测，之后显示服务名", async () => {
     const source = new FakeBridge(
-      snapshot({ service: { target: "development", reachable: null } }),
+      snapshot({
+        service: service({ target: "development", reachable: null }),
+      }),
     );
     const view = await render(<App bridge={source} />);
     await settle();
@@ -212,7 +273,9 @@ describe("连接状态", () => {
 
     await act(async () => {
       source.push(
-        snapshot({ service: { target: "development", reachable: true } }),
+        snapshot({
+          service: service({ target: "development", reachable: true }),
+        }),
       );
     });
     expect(text(view.host)).toContain("本地开发服务");
@@ -222,11 +285,56 @@ describe("连接状态", () => {
 
   test("服务不可达时如实说明", async () => {
     const source = new FakeBridge(
-      snapshot({ service: { target: "production", reachable: false } }),
+      snapshot({
+        service: service({ target: "production", reachable: false }),
+      }),
     );
     const view = await render(<App bridge={source} />);
     await settle();
     expect(text(view.host)).toContain("正式服务暂不可达");
+  });
+
+  test("登录后显示事件流的连接情况", async () => {
+    const source = new FakeBridge(
+      snapshot({
+        phase: "signedIn",
+        service: service({ stream: "connecting" }),
+      }),
+    );
+    const view = await render(<App bridge={source} />);
+    await settle();
+    // 事件流还在建立：不能说成"已连接"。
+    expect(text(view.host)).toContain("正在连接…");
+
+    await act(async () => {
+      source.push(
+        snapshot({
+          phase: "signedIn",
+          service: service({ stream: "connected" }),
+        }),
+      );
+    });
+    expect(text(view.host)).toContain("已连接");
+    expect(text(view.host)).not.toContain("正在连接");
+
+    await act(async () => {
+      source.push(
+        snapshot({
+          phase: "signedIn",
+          service: service({ stream: "reconnecting" }),
+        }),
+      );
+    });
+    expect(text(view.host)).toContain("连接已断开，正在重连");
+
+    // 连服务都探不到：同一句话，不再说成服务名不可达。
+    await act(async () => {
+      source.push(
+        snapshot({ phase: "signedIn", service: service({ reachable: false }) }),
+      );
+    });
+    expect(text(view.host)).toContain("连接已断开，正在重连");
+    expect(text(view.host)).not.toContain("正式服务暂不可达");
   });
 });
 
@@ -250,7 +358,9 @@ describe("账户", () => {
 
   test("服务不可达时不能登录，并说明原因", async () => {
     const source = new FakeBridge(
-      snapshot({ service: { target: "production", reachable: false } }),
+      snapshot({
+        service: service({ target: "production", reachable: false }),
+      }),
     );
     const view = await render(<App bridge={source} />);
     await settle();
@@ -310,6 +420,7 @@ describe("账户", () => {
           account: ACCOUNT,
           device: { ...DEVICE, name: "家里的 Mac" },
         },
+        devices: [{ ...DEVICE, name: "家里的 Mac" }],
       });
     });
     expect(text(view.host)).toContain("这台设备：家里的 Mac");
@@ -342,7 +453,21 @@ describe("提示", () => {
     await settle();
 
     const alert = view.host.querySelector('[role="alert"]');
-    expect(alert?.textContent).toBe("等待浏览器登录超时，请重试。");
+    expect(alert?.textContent).toContain("等待浏览器登录超时，请重试。");
+    expect(button(view.host, "知道了")).toBeDefined();
+  });
+
+  test("点「知道了」告诉 Rust 收起提示", async () => {
+    const source = new FakeBridge(
+      snapshot({
+        notice: { kind: "info", message: "登录已失效，请重新登录。" },
+      }),
+    );
+    const view = await render(<App bridge={source} />);
+    await settle();
+
+    await click(button(view.host, "知道了"));
+    expect(source.calls).toEqual(["dismissNotice"]);
   });
 
   test("随后的状态推送会替换掉旧提示", async () => {
@@ -425,5 +550,121 @@ describe("订阅生命周期", () => {
       source.push(snapshot({ phase: "signedIn" }));
     });
     expect(text(view.host)).toBe("");
+  });
+});
+
+describe("设备", () => {
+  test("列出账户里的全部设备，标出本机与在线情况", async () => {
+    const source = new FakeBridge(
+      snapshot({ phase: "signedIn", devices: [{ ...DEVICE }, { ...OTHER }] }),
+    );
+    const view = await render(<App bridge={source} />);
+    await settle();
+
+    const page = text(view.host);
+    expect(page).toContain("MacBook-Pro");
+    expect(page).toContain("本机");
+    expect(page).toContain("工作电脑");
+    expect(page).toContain("Windows · 离线");
+    expect(page).toContain("Mac · 在线");
+    // 本机不能被改名或移除；别的设备可以。
+    expect(buttons(view.host, "改名")).toHaveLength(1);
+    expect(buttons(view.host, "移除")).toHaveLength(1);
+  });
+
+  test("没登录时不显示设备，哪怕状态里残留着设备", async () => {
+    const source = new FakeBridge(snapshot({ devices: [{ ...OTHER }] }));
+    const view = await render(<App bridge={source} />);
+    await settle();
+    expect(text(view.host)).not.toContain("工作电脑");
+    expect(text(view.host)).not.toContain("设备");
+  });
+
+  test("别的设备上线或下线时跟着状态推送更新", async () => {
+    const source = new FakeBridge(
+      snapshot({ phase: "signedIn", devices: [{ ...DEVICE }, { ...OTHER }] }),
+    );
+    const view = await render(<App bridge={source} />);
+    await settle();
+    expect(text(view.host)).toContain("Windows · 离线");
+
+    await act(async () => {
+      source.push(
+        snapshot({
+          phase: "signedIn",
+          devices: [{ ...DEVICE }, { ...OTHER, online: true }],
+        }),
+      );
+    });
+    expect(text(view.host)).toContain("Windows · 在线");
+  });
+
+  test("给别的设备改名", async () => {
+    const source = new FakeBridge(
+      snapshot({ phase: "signedIn", devices: [{ ...DEVICE }, { ...OTHER }] }),
+    );
+    const view = await render(<App bridge={source} />);
+    await settle();
+
+    await click(button(view.host, "改名"));
+    // 从当前名字开始改。
+    expect(textField(view.host).value).toBe("工作电脑");
+    await typeInto(view.host, "公司的电脑");
+    await click(button(view.host, "保存"));
+
+    expect(source.calls).toEqual(["renameDevice:device-2:公司的电脑"]);
+  });
+
+  test("名字没变就不发请求，空名字在本地拦下", async () => {
+    const source = new FakeBridge(
+      snapshot({ phase: "signedIn", devices: [{ ...DEVICE }, { ...OTHER }] }),
+    );
+    const view = await render(<App bridge={source} />);
+    await settle();
+
+    await click(button(view.host, "改名"));
+    await click(button(view.host, "保存"));
+    expect(source.calls).toEqual([]);
+    expect(button(view.host, "改名")).toBeDefined();
+
+    await click(button(view.host, "改名"));
+    await typeInto(view.host, "   ");
+    await click(button(view.host, "保存"));
+    expect(source.calls).toEqual([]);
+    expect(text(view.host)).toContain("名字不能为空");
+    // 还停在编辑状态，可以直接改。
+    expect(textField(view.host)).toBeDefined();
+  });
+
+  test("移除别的设备要先确认", async () => {
+    const source = new FakeBridge(
+      snapshot({ phase: "signedIn", devices: [{ ...DEVICE }, { ...OTHER }] }),
+    );
+    const view = await render(<App bridge={source} />);
+    await settle();
+
+    await click(button(view.host, "移除"));
+    // 只是把按钮换成确认，还没有发请求。
+    expect(source.calls).toEqual([]);
+    await click(button(view.host, "取消"));
+    expect(button(view.host, "移除")).toBeDefined();
+
+    await click(button(view.host, "移除"));
+    await click(button(view.host, "确认移除"));
+    expect(source.calls).toEqual(["removeDevice:device-2"]);
+  });
+
+  test("改动失败时显示固定文案，不回显技术细节", async () => {
+    const source = new FakeBridge(
+      snapshot({ phase: "signedIn", devices: [{ ...DEVICE }, { ...OTHER }] }),
+    );
+    source.failWith = new BridgeError("NOT_FOUND", "devices/abc row not found");
+    const view = await render(<App bridge={source} />);
+    await settle();
+
+    await click(button(view.host, "移除"));
+    await click(button(view.host, "确认移除"));
+    expect(text(view.host)).toContain("这台设备已经不在账户里了。");
+    expect(text(view.host)).not.toContain("row not found");
   });
 });

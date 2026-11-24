@@ -12,6 +12,7 @@
 )]
 
 mod commands;
+mod runtime;
 mod session;
 mod state;
 mod tray;
@@ -63,6 +64,9 @@ pub fn run() -> Result<(), StartupError> {
             commands::sign_out,
             commands::launch_at_login,
             commands::set_launch_at_login,
+            commands::rename_device,
+            commands::remove_device,
+            commands::dismiss_notice,
         ])
         .setup(move |app| {
             let handle = app.handle().clone();
@@ -75,6 +79,7 @@ pub fn run() -> Result<(), StartupError> {
 
             tray::build(&handle)?;
             open_main_window(&handle, !background)?;
+            runtime::start(&handle);
 
             // 核对保存过的会话需要联网，放到后台做，不拖慢启动。
             let restore = handle.clone();

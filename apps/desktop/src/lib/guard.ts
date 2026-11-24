@@ -12,6 +12,7 @@ import type {
   ServiceTarget,
   SessionView,
   Snapshot,
+  StreamState,
 } from "@/lib/types";
 
 export function isRecord(value: unknown): value is Record<string, unknown> {
@@ -20,15 +21,6 @@ export function isRecord(value: unknown): value is Record<string, unknown> {
 
 function hasString(record: Record<string, unknown>, key: string): boolean {
   return typeof record[key] === "string";
-}
-
-export function isAccountView(value: unknown): value is AccountView {
-  return (
-    isRecord(value) &&
-    hasString(value, "id") &&
-    hasString(value, "username") &&
-    hasString(value, "displayName")
-  );
 }
 
 export function isPlatform(value: unknown): value is Platform {
@@ -40,7 +32,26 @@ export function isDeviceView(value: unknown): value is DeviceView {
     isRecord(value) &&
     hasString(value, "id") &&
     hasString(value, "name") &&
-    isPlatform(value.platform)
+    isPlatform(value.platform) &&
+    typeof value.online === "boolean"
+  );
+}
+
+export function isStreamState(value: unknown): value is StreamState {
+  return (
+    value === "off" ||
+    value === "connecting" ||
+    value === "connected" ||
+    value === "reconnecting"
+  );
+}
+
+export function isAccountView(value: unknown): value is AccountView {
+  return (
+    isRecord(value) &&
+    hasString(value, "id") &&
+    hasString(value, "username") &&
+    hasString(value, "displayName")
   );
 }
 
@@ -85,7 +96,10 @@ export function isSnapshot(value: unknown): value is Snapshot {
     isRecord(service) &&
     isServiceTarget(service.target) &&
     (service.reachable === null || typeof service.reachable === "boolean") &&
+    isStreamState(service.stream) &&
     isSessionView(value.session) &&
+    Array.isArray(value.devices) &&
+    value.devices.every(isDeviceView) &&
     isLaunchState(value.launchAtLogin) &&
     (value.notice === null || isNotice(value.notice))
   );

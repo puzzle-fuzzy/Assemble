@@ -133,15 +133,29 @@ pub async fn serve(
 ) -> Result<(), ServeError> {
     let listener = TcpListener::bind(config.addr).await?;
     tracing::info!(address = %listener.local_addr()?.to_string(), "listening");
+    let closing = Arc::clone(&state);
     let shutdown = async move {
         stop.cancelled().await;
         tracing::info!("shutting down");
+        // 事件流是永不主动结束的长连接。不先收掉它们，优雅退出会一直等下去。
+        closing.hub.close();
     };
-    axum::serve(listener, router(state))
-        .with_graceful_shutdown(shutdown)
-        .await
-        .map_err(ServeError::Server)
+    // 优雅退出最多等这么久：某个连接再怎么拖，也不能让进程卡在退出这一步。
+    let drained = tokio::time::timeout(
+        SHUTDOWN_GRACE,
+        axum::serve(listener, router(state)).with_graceful_shutdown(shutdown),
+    )
+    .await;
+    if let Ok(result) = drained {
+        result.map_err(ServeError::Server)
+    } else {
+        tracing::warn!("some connections did not close in time; exiting anyway");
+        Ok(())
+    }
 }
+
+/// 优雅退出等待在途连接收尾的上限。
+const SHUTDOWN_GRACE: Duration = Duration::from_secs(10);
 
 /// 绑定到一个空闲的回环端口，在后台开始服务。测试与开发工具用它拿到真实的服务。
 pub struct TestServer {
@@ -206,6 +220,7 @@ impl TestServer {
     /// 优雅退出会等还在用的连接自己收尾；测试里的客户端可能留着空闲的长连接
     /// 或事件流，所以最多等几秒，之后直接收掉。
     pub async fn stop(&mut self) {
+        self.state.hub.close();
         self.stop.cancel();
         if tokio::time::timeout(Duration::from_secs(5), &mut self.task)
             .await

@@ -1,18 +1,36 @@
 [
   {
-    "service": { "target": "development", "reachable": null },
-    "session": { "phase": "signedOut" },
+    "service": {
+      "target": "development",
+      "reachable": null,
+      "stream": "off"
+    },
+    "session": {
+      "phase": "signedOut"
+    },
+    "devices": [],
     "launchAtLogin": "unsupported",
     "notice": null
   },
   {
-    "service": { "target": "production", "reachable": true },
-    "session": { "phase": "signingIn" },
+    "service": {
+      "target": "production",
+      "reachable": true,
+      "stream": "off"
+    },
+    "session": {
+      "phase": "signingIn"
+    },
+    "devices": [],
     "launchAtLogin": "disabled",
     "notice": null
   },
   {
-    "service": { "target": "production", "reachable": true },
+    "service": {
+      "target": "production",
+      "reachable": true,
+      "stream": "connected"
+    },
     "session": {
       "phase": "signedIn",
       "account": {
@@ -23,20 +41,65 @@
       "device": {
         "id": "9b2e7c4d1a5f4e3b8c6d0a1b2c3d4e5f",
         "name": "MacBook-Pro",
-        "platform": "macos"
+        "platform": "macos",
+        "online": true
       }
     },
+    "devices": [
+      {
+        "id": "9b2e7c4d1a5f4e3b8c6d0a1b2c3d4e5f",
+        "name": "MacBook-Pro",
+        "platform": "macos",
+        "online": true
+      },
+      {
+        "id": "c1d2e3f4a5b64c7d8e9f0a1b2c3d4e5f",
+        "name": "工作电脑",
+        "platform": "windows",
+        "online": true
+      }
+    ],
     "launchAtLogin": "enabled",
     "notice": null
   },
   {
-    "service": { "target": "production", "reachable": false },
-    "session": { "phase": "signedOut" },
+    "service": {
+      "target": "production",
+      "reachable": false,
+      "stream": "off"
+    },
+    "session": {
+      "phase": "signedOut"
+    },
+    "devices": [],
     "launchAtLogin": "unknown",
-    "notice": { "kind": "error", "message": "等待浏览器登录超时，请重试。" }
+    "notice": {
+      "kind": "error",
+      "message": "等待浏览器登录超时，请重试。"
+    }
   },
   {
-    "service": { "target": "production", "reachable": true },
+    "service": {
+      "target": "production",
+      "reachable": true,
+      "stream": "off"
+    },
+    "session": {
+      "phase": "signedOut"
+    },
+    "devices": [],
+    "launchAtLogin": "enabled",
+    "notice": {
+      "kind": "info",
+      "message": "登录已失效，请重新登录。"
+    }
+  },
+  {
+    "service": {
+      "target": "production",
+      "reachable": true,
+      "stream": "connecting"
+    },
     "session": {
       "phase": "signedIn",
       "account": {
@@ -47,10 +110,62 @@
       "device": {
         "id": "c1d2e3f4a5b64c7d8e9f0a1b2c3d4e5f",
         "name": "工作电脑",
-        "platform": "windows"
+        "platform": "windows",
+        "online": false
       }
     },
+    "devices": [
+      {
+        "id": "9b2e7c4d1a5f4e3b8c6d0a1b2c3d4e5f",
+        "name": "MacBook-Pro",
+        "platform": "macos",
+        "online": false
+      },
+      {
+        "id": "c1d2e3f4a5b64c7d8e9f0a1b2c3d4e5f",
+        "name": "工作电脑",
+        "platform": "windows",
+        "online": false
+      }
+    ],
     "launchAtLogin": "enabled",
-    "notice": { "kind": "info", "message": "登录已失效，请重新登录。" }
+    "notice": null
+  },
+  {
+    "service": {
+      "target": "production",
+      "reachable": false,
+      "stream": "reconnecting"
+    },
+    "session": {
+      "phase": "signedIn",
+      "account": {
+        "id": "3d1c0a5e-6cf4-4d3a-9a67-1f2f4c1f6f01",
+        "username": "example",
+        "displayName": "Example"
+      },
+      "device": {
+        "id": "9b2e7c4d1a5f4e3b8c6d0a1b2c3d4e5f",
+        "name": "MacBook-Pro",
+        "platform": "macos",
+        "online": true
+      }
+    },
+    "devices": [
+      {
+        "id": "9b2e7c4d1a5f4e3b8c6d0a1b2c3d4e5f",
+        "name": "MacBook-Pro",
+        "platform": "macos",
+        "online": true
+      },
+      {
+        "id": "c1d2e3f4a5b64c7d8e9f0a1b2c3d4e5f",
+        "name": "工作电脑",
+        "platform": "windows",
+        "online": false
+      }
+    ],
+    "launchAtLogin": "enabled",
+    "notice": null
   }
 ]

@@ -34,6 +34,12 @@ export interface Bridge {
   signOut(): Promise<Snapshot>;
   launchAtLogin(): Promise<LaunchState>;
   setLaunchAtLogin(enabled: boolean): Promise<LaunchState>;
+  /** 给账户里的另一台设备改名。 */
+  renameDevice(deviceId: string, name: string): Promise<Snapshot>;
+  /** 移除账户里的另一台设备，它的登录随之撤销。移除自己请用 signOut。 */
+  removeDevice(deviceId: string): Promise<Snapshot>;
+  /** 提示看过了，收起来。 */
+  dismissNotice(): Promise<Snapshot>;
   /** 订阅状态变化，返回取消订阅的函数。 */
   subscribe(listener: (snapshot: Snapshot) => void): Promise<UnlistenFn>;
 }
@@ -46,6 +52,11 @@ export const bridge: Bridge = {
   launchAtLogin: () => invoke<LaunchState>("launch_at_login"),
   setLaunchAtLogin: (enabled) =>
     invoke<LaunchState>("set_launch_at_login", { enabled }),
+  renameDevice: (deviceId, name) =>
+    checked(() => invoke<unknown>("rename_device", { deviceId, name })),
+  removeDevice: (deviceId) =>
+    checked(() => invoke<unknown>("remove_device", { deviceId })),
+  dismissNotice: () => checked(() => invoke<unknown>("dismiss_notice")),
   subscribe: (listener) =>
     listen<unknown>(SNAPSHOT_EVENT, (event) => {
       listener(requireSnapshot(event.payload));

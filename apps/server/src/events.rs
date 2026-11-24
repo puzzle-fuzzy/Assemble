@@ -21,6 +21,7 @@ use axum::response::sse::{Event as SseEvent, Sse};
 use futures_util::StreamExt;
 use tokio::sync::{broadcast, mpsc};
 use tokio_stream::wrappers::ReceiverStream;
+use tokio_util::sync::CancellationToken;
 
 use crate::auth::Identity;
 use crate::http::Shared;
@@ -51,9 +52,17 @@ pub enum Message {
 #[derive(Debug, Default)]
 pub struct Hub {
     channels: Mutex<HashMap<String, broadcast::Sender<Arc<Message>>>>,
+    /// 服务端退出时触发。事件流是永不主动结束的长连接，不主动收掉它们，
+    /// "优雅退出"就会一直等下去——真机上见过：旧进程收到 SIGTERM 后迟迟不退出。
+    closing: CancellationToken,
 }
 
 impl Hub {
+    /// 通知所有事件流：服务端要退出了，各自收尾。
+    pub fn close(&self) {
+        self.closing.cancel();
+    }
+
     /// 订阅一个账户的广播。
     pub fn subscribe(&self, account_id: &str) -> broadcast::Receiver<Arc<Message>> {
         let mut channels = self.channels.lock().unwrap_or_else(PoisonError::into_inner);
@@ -76,6 +85,10 @@ impl Hub {
         if sender.receiver_count() == 0 {
             channels.remove(account_id);
         }
+    }
+
+    fn closing_token(&self) -> CancellationToken {
+        self.closing.clone()
     }
 
     /// 通知一个账户里的所有设备：设备情况变了。
@@ -113,6 +126,7 @@ pub async fn stream(State(state): State<Shared>, identity: Identity) -> Response
         pool: state.pool.clone(),
         account_id: identity.account_id,
         device_id: identity.device_id,
+        closing: state.hub.closing_token(),
     };
     // 连接登记在这个任务里：任务一结束，设备就离线。
     tokio::spawn(feed.run());
@@ -141,6 +155,8 @@ struct Feed {
     pool: sqlx::SqlitePool,
     account_id: String,
     device_id: String,
+    /// 服务端退出时触发。
+    closing: CancellationToken,
 }
 
 impl Feed {
@@ -154,6 +170,7 @@ impl Feed {
             pool,
             account_id,
             device_id,
+            closing,
         } = &mut self;
         // 第一条永远是 hello：设备据此知道服务端认定的它是谁。
         if !emit(
@@ -202,6 +219,8 @@ impl Feed {
                 }
                 // 响应正文被丢掉，也就是设备断开了：不必等到下一次心跳。
                 () = sender.closed() => break,
+                // 服务端要退出了：正常注销（写离线时间、通知别的设备），然后结束响应。
+                () = closing.cancelled() => break,
             }
         }
         // 注销登记：先写离线时间，再通知别的设备。

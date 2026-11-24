@@ -13,12 +13,16 @@ export interface AccountView {
   displayName: string;
 }
 
-/** 一台设备在界面上的样子：这台安装在本账户里的身份。 */
+/** 一台设备在界面上的样子。 */
 export interface DeviceView {
   id: string;
   name: string;
   platform: Platform;
+  online: boolean;
 }
+
+/** 与服务端之间那条事件流的状态。别的设备在不在线，靠它才知道。 */
+export type StreamState = "off" | "connecting" | "connected" | "reconnecting";
 
 export type SessionView =
   | { phase: "signedOut" }
@@ -39,11 +43,14 @@ export interface ServiceView {
   target: ServiceTarget;
   /** 还没探测过时为 null。 */
   reachable: boolean | null;
+  stream: StreamState;
 }
 
 export interface Snapshot {
   service: ServiceView;
   session: SessionView;
+  /** 账户里的全部设备，包括这台自己。没登录时为空。 */
+  devices: DeviceView[];
   launchAtLogin: LaunchState;
   notice: Notice | null;
 }

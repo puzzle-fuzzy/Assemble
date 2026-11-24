@@ -12,6 +12,10 @@ const MESSAGES: Record<string, string> = {
   ACCOUNT_DISABLED: "这个账户已被禁用。",
   UNSUPPORTED: "当前运行方式不支持设置开机启动。",
   SYSTEM_REJECTED: "系统没有接受这个设置，请稍后重试。",
+  INVALID_INPUT: "输入的内容不合法：名字不能为空，也不能超过 60 个字符。",
+  NOT_FOUND: "这台设备已经不在账户里了。",
+  IS_THIS_DEVICE: "要移除这台设备，请使用「退出登录」。",
+  INVALID_RESPONSE: "服务端的回答看不懂，请稍后重试。",
 };
 
 const GENERIC = "操作没有完成，请稍后重试。";

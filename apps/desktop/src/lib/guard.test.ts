@@ -5,15 +5,16 @@ import { describe, expect, test } from "bun:test";
 import { isSnapshot } from "@/lib/guard";
 import type { Snapshot } from "@/lib/types";
 
+const ACCOUNT = { id: "a", username: "u", displayName: "U" };
+const DEVICE = { id: "d", name: "MacBook", platform: "macos", online: true };
+
 const VALID: Snapshot = {
-  service: { target: "production", reachable: true },
+  service: { target: "production", reachable: true, stream: "off" },
   session: { phase: "signedOut" },
+  devices: [],
   launchAtLogin: "disabled",
   notice: null,
 };
-
-const ACCOUNT = { id: "a", username: "u", displayName: "U" };
-const DEVICE = { id: "d", name: "MacBook", platform: "macos" };
 
 describe("状态守卫", () => {
   test("认得合法的状态", () => {
@@ -21,8 +22,13 @@ describe("状态守卫", () => {
     expect(
       isSnapshot({
         ...VALID,
-        service: { target: "development", reachable: null },
+        service: {
+          target: "development",
+          reachable: null,
+          stream: "connected",
+        },
         session: { phase: "signedIn", account: ACCOUNT, device: DEVICE },
+        devices: [DEVICE, { ...DEVICE, id: "d2", online: false }],
         launchAtLogin: "unknown",
         notice: { kind: "info", message: "ok" },
       }),
@@ -37,6 +43,15 @@ describe("状态守卫", () => {
       {},
       { ...VALID, service: { target: "production" } },
       { ...VALID, service: { target: "staging", reachable: true } },
+      { ...VALID, service: { target: "production", reachable: true } },
+      {
+        ...VALID,
+        service: { target: "production", reachable: true, stream: "paused" },
+      },
+      { ...VALID, devices: undefined },
+      { ...VALID, devices: {} },
+      { ...VALID, devices: [DEVICE, { id: "d2", name: "PC" }] },
+      { ...VALID, devices: [{ ...DEVICE, online: "yes" }] },
       { ...VALID, session: { phase: "signedIn" } },
       { ...VALID, session: { phase: "signedIn", account: ACCOUNT } },
       {

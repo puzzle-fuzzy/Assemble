@@ -17,6 +17,7 @@ tauri-build.workspace = true
 assemble-client.workspace = true
 assemble-protocol.workspace = true
 assemble-store.workspace = true
+futures-util.workspace = true
 hostname = "0.4.2"
 serde.workspace = true
 serde_json.workspace = true

@@ -92,7 +92,6 @@ fn toggle_launch(app: &AppHandle) {
             "暂时无法完成开机启动的设置，请稍后重试。",
         )));
         tracing::warn!(code = error.code, message = %error.message, "launch at login failed");
-        state.broadcast();
         state::show_main(app);
     }
     refresh(app);

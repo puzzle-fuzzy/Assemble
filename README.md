@@ -1,5 +1,9 @@
 # Assemble
 
+> **本文已过时，重写排在文件收发打通之后。** 下面描述的是转向之前的 Assemble——"Jarvis 桌面端的重写，服务端沿用现有的 Jarvis API"。从 2026-11-24 起，Assemble 是一个全新的、自带 Rust 服务端的项目，用来完全替换 jarvis，见 [决策 0002](docs/decisions/0002-own-server-replaces-jarvis.md)。
+>
+> 已经落地的部分：`apps/server`（账户、登录页、桌面授权、设备与在线状态、事件流），以及桌面端的登录流程与设备列表。怎么把它们真的跑起来，见 [运行手册](docs/runbooks/verify-macos-launch.md)。本文的其余内容不要照着做。
+
 Jarvis 桌面端的重写：把原来以 Electron 为主的桌面应用，换成以 Rust 为核心、Tauri 2 只做窗口与系统集成的方式。服务端沿用现有的 Jarvis API，本仓库只负责桌面这一侧。
 
 当前阶段是**起步骨架**：基础库、应用壳、登录与账户、本机设置已经打通；文件传输、日程规划的底层规则已经写好并有测试，但把它们连成完整功能的后台循环与界面还没有做。详见 [路线图](docs/plans/2026-11-23-roadmap.md)。

@@ -35,12 +35,12 @@ pub fn content_security_policy() -> &'static str {
     &POLICY
 }
 
-/// 页面共用的安全响应头。
-pub const PAGE_HEADERS: [(&str, &str); 3] = [
-    ("content-type", "text/html; charset=utf-8"),
-    ("cache-control", "no-store"),
-    ("referrer-policy", "no-referrer"),
-];
+/// 页面的来源策略：地址只随同站请求发回，不发给任何别的站点。
+///
+/// 不能用 `no-referrer`。按 Fetch 标准，在那个策略下浏览器对**同源**的 POST
+/// 也会把 `Origin` 发成 `null`，写操作的 Origin 校验就会把自己的登录表单拒之门外。
+/// 这一条是真实启动时才发现的：测试里的"浏览器"自己构造 `Origin`，复现不了它。
+pub const REFERRER_POLICY: &str = "same-origin";
 
 /// 把动态文字转成可以安全放进 HTML 的形式。
 pub fn escape(value: &str) -> Cow<'_, str> {
@@ -69,8 +69,9 @@ fn page(title: &str, body: &str) -> String {
     format!(
         "<!doctype html><html lang=\"zh-CN\"><head><meta charset=\"utf-8\">\
 <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\
-<meta name=\"referrer\" content=\"no-referrer\">\
+<meta name=\"referrer\" content=\"{}\">\
 <title>{}</title><style>{STYLE}</style></head><body><main>{}</main></body></html>",
+        REFERRER_POLICY,
         escape(title),
         body
     )
@@ -177,6 +178,10 @@ mod tests {
         assert!(html.contains("用户名或密码不对"));
         assert!(!html.contains("<script"));
         assert!(!html.contains("onclick"));
+        // 来源策略不能是 no-referrer：浏览器在那种策略下会把同源 POST 的 Origin 发成 null。
+        assert!(html.contains(r#"<meta name="referrer" content="same-origin">"#));
+        assert!(!html.contains("no-referrer"));
+        assert!(message_page("t", "b").contains("same-origin"));
         let clean = login_page(None, "", "c");
         assert!(!clean.contains("role=\"alert\""));
     }

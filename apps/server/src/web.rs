@@ -140,7 +140,8 @@ pub fn page(status: StatusCode, body: String) -> Response {
             (header::CACHE_CONTROL, HeaderValue::from_static("no-store")),
             (
                 header::REFERRER_POLICY,
-                HeaderValue::from_static("no-referrer"),
+                // 不是 `no-referrer`：那会让真实浏览器把同源 POST 的 Origin 发成 null。
+                HeaderValue::from_static(templates::REFERRER_POLICY),
             ),
             (header::CONTENT_SECURITY_POLICY, policy),
         ],

@@ -8,8 +8,9 @@ import type { Snapshot } from "@/lib/types";
 type InvokeCall = { command: string; args: Record<string, unknown> };
 
 const STATE: Snapshot = {
-  service: { target: "production", reachable: true },
+  service: { target: "production", reachable: true, stream: "off" },
   session: { phase: "signedOut" },
+  devices: [],
   launchAtLogin: "disabled",
   notice: null,
 };
@@ -60,6 +61,9 @@ describe("桥接", () => {
     await bridge.signOut();
     await bridge.launchAtLogin();
     await bridge.setLaunchAtLogin(true);
+    await bridge.renameDevice("device-2", "家里的电脑");
+    await bridge.removeDevice("device-2");
+    await bridge.dismissNotice();
 
     expect(calls).toEqual([
       { command: "snapshot", args: {} },
@@ -68,6 +72,12 @@ describe("桥接", () => {
       { command: "sign_out", args: {} },
       { command: "launch_at_login", args: {} },
       { command: "set_launch_at_login", args: { enabled: true } },
+      {
+        command: "rename_device",
+        args: { deviceId: "device-2", name: "家里的电脑" },
+      },
+      { command: "remove_device", args: { deviceId: "device-2" } },
+      { command: "dismiss_notice", args: {} },
     ]);
   });
 

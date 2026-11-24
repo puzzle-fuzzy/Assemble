@@ -173,6 +173,7 @@ dependencies = [
  "assemble-client",
  "assemble-protocol",
  "assemble-store",
+ "futures-util",
  "hostname",
  "serde",
  "serde_json",
