@@ -171,6 +171,10 @@ describe("接下来的安排", () => {
     expect(scheduleLine(train, now)).toBe("明天 08:00 到 09:00 · 提前 30 分钟");
     expect(scheduleLine(daily, now)).toBe("明天 09:00 · 每天，到 12月31日");
     expect(scheduleLine(weekly, now)).toBe("周一 16:00 到 17:00 · 每周");
+    // 截止在另一年的：带上年份，不然"到 1月1日"看不出是哪一年。
+    expect(
+      scheduleLine({ ...weekly, repeatUntil: at(local(2027, 1, 1)) }, now),
+    ).toBe("周一 16:00 到 17:00 · 每周，到 2027年1月1日");
   });
 
   test("重复的日程报出后面还有哪几场", () => {

@@ -114,10 +114,14 @@ export function ago(iso: string, now: number): string {
   return `${dayLabel(iso, now)} ${clock(iso)}`;
 }
 
-/** `M月D日`。 */
-function monthDay(iso: string): string {
+/** `M月D日`；不是 `now` 那一年的，前面带上年份。 */
+function monthDay(iso: string, now: number): string {
   const at = new Date(iso);
-  return `${at.getMonth() + 1}月${at.getDate()}日`;
+  const year =
+    at.getFullYear() === new Date(now).getFullYear()
+      ? ""
+      : `${at.getFullYear()}年`;
+  return `${year}${at.getMonth() + 1}月${at.getDate()}日`;
 }
 
 /** 安排里的一行：一条日程按它最近的一场排，一条提醒按到点时间排。 */
@@ -173,7 +177,7 @@ export function scheduleLine(schedule: ScheduleView, now: number): string {
   }
   if (schedule.repeat !== "none") {
     const until = schedule.repeatUntil
-      ? `，到 ${monthDay(schedule.repeatUntil)}`
+      ? `，到 ${monthDay(schedule.repeatUntil, now)}`
       : "";
     parts.push(`${repeatLabel(schedule.repeat)}${until}`);
   }
@@ -191,7 +195,9 @@ export function laterLabel(schedule: ScheduleView, now: number): string | null {
   const next = upcoming(schedule, now);
   const rest = next === -1 ? [] : schedule.occurrences.slice(next + 1);
   if (rest.length === 0) return null;
-  const shown = rest.slice(0, 3).map((iso) => `${monthDay(iso)} ${clock(iso)}`);
+  const shown = rest
+    .slice(0, 3)
+    .map((iso) => `${monthDay(iso, now)} ${clock(iso)}`);
   const more = rest.length > 3 ? ` 等 ${rest.length} 场` : "";
   return `之后：${shown.join("、")}${more}`;
 }
