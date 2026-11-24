@@ -12,6 +12,8 @@
 )]
 
 mod commands;
+mod notify;
+mod receive;
 mod runtime;
 mod session;
 mod state;
@@ -57,6 +59,9 @@ pub fn run() -> Result<(), StartupError> {
             Some(vec![BACKGROUND_ARG]),
         ))
         .plugin(tauri_plugin_opener::init())
+        // 对话框与通知只从 Rust 这边用：窗口的能力清单不变，界面拿不到它们。
+        .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_notification::init())
         .invoke_handler(tauri::generate_handler![
             commands::snapshot,
             commands::sign_in,
@@ -66,6 +71,9 @@ pub fn run() -> Result<(), StartupError> {
             commands::set_launch_at_login,
             commands::rename_device,
             commands::remove_device,
+            commands::choose_receive_folder,
+            commands::reset_receive_folder,
+            commands::reveal_received,
             commands::dismiss_notice,
         ])
         .setup(move |app| {
@@ -75,9 +83,20 @@ pub fn run() -> Result<(), StartupError> {
             let secrets: Option<Arc<dyn SecretStore>> =
                 assemble_store::secret::system_secret_store()
                     .map(|store| Arc::new(store) as Arc<dyn SecretStore>);
-            handle.manage(AppState::new(handle.clone(), client, secrets));
+            let settings = receive::load_settings(&handle);
+            let notifier = Arc::new(notify::SystemNotifier::new(handle.clone()));
+            handle.manage(AppState::new(
+                handle.clone(),
+                client,
+                secrets,
+                settings,
+                receive::system_downloads_dir(&handle),
+                notifier,
+            ));
 
             tray::build(&handle)?;
+            // 点通知的处理要早于第一条通知登记好，否则点了也报不上来。
+            notify::install(&handle);
             open_main_window(&handle, !background)?;
             runtime::start(&handle);
 

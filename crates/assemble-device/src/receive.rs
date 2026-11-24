@@ -155,9 +155,17 @@ pub async fn validate_directory(path: &Path) -> Result<PathBuf, BoundaryError> {
     Ok(canonical)
 }
 
-/// 准备默认的接收目录："下载"之下的 `Assemble`。不存在就建出来。
+/// 默认接收目录在"下载"之下的名字。
+pub const DEFAULT_FOLDER: &str = "Assemble";
+
+/// 默认接收目录的位置："下载/Assemble"。不保证它已经存在。
+pub fn default_directory(downloads: &Path) -> PathBuf {
+    downloads.join(DEFAULT_FOLDER)
+}
+
+/// 准备默认的接收目录："下载/Assemble"。不存在就建出来。
 pub async fn ensure_default_directory(downloads: &Path) -> Result<PathBuf, BoundaryError> {
-    let directory = downloads.join("Assemble");
+    let directory = default_directory(downloads);
     match tokio::fs::create_dir_all(&directory).await {
         Ok(()) => {}
         // 两个进程同时启动时另一个可能已经建好；是不是目录由下一步确认。

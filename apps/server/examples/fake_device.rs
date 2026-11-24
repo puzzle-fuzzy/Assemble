@@ -10,6 +10,8 @@
 //! fake-device --token a.json register --data-dir <服务端的数据目录> --account <用户名> --name 替身A
 //! fake-device --token a.json online   --origin http://127.0.0.1:8787
 //! fake-device --token a.json devices  --origin http://127.0.0.1:8787
+//! fake-device --token a.json send     --origin http://127.0.0.1:8787 --to 替身B --file 合同.pdf
+//! fake-device --token a.json sends    --origin http://127.0.0.1:8787
 //! fake-device --token a.json forget   --origin http://127.0.0.1:8787
 //! ```
 
@@ -19,10 +21,11 @@
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use assemble_client::{Client, RequestOptions};
+use assemble_client::{Client, OutgoingFile, RequestOptions, TransferOptions};
 use assemble_protocol::device::NewDevice;
 use assemble_protocol::events::Event;
 use assemble_protocol::primitives::Platform;
+use assemble_protocol::sends::{Direction, FailReason, SendQuery, SendState};
 use assemble_store::secret::SecretString;
 use clap::{Parser, Subcommand, ValueEnum};
 use futures_util::StreamExt;
@@ -62,6 +65,21 @@ enum Command {
     },
     /// 列出账户里的设备与在线状态。
     Devices {
+        #[arg(long)]
+        origin: String,
+    },
+    /// 把一个文件发给同一账户里另一台在线设备。
+    Send {
+        #[arg(long)]
+        origin: String,
+        /// 收件的设备：名字或标识。
+        #[arg(long)]
+        to: String,
+        #[arg(long)]
+        file: PathBuf,
+    },
+    /// 列出这台替身发出去的与收到的记录。
+    Sends {
         #[arg(long)]
         origin: String,
     },
@@ -236,6 +254,80 @@ async fn run() -> Result<(), String> {
             println!("（* 是这台替身设备）");
             Ok(())
         }
+        Command::Send { origin, to, file } => {
+            let identity = read_identity(token_file)?;
+            let client = client(&origin, &identity)?;
+            let cancel = CancellationToken::new();
+            let devices = client
+                .devices(&RequestOptions::new(&cancel))
+                .await
+                .map_err(|error| error.to_string())?;
+            let target = devices
+                .iter()
+                .find(|device| device.id == to || device.name == to)
+                .cloned()
+                .ok_or_else(|| format!("账户里没有叫 {to} 的设备"))?;
+
+            let outgoing = OutgoingFile::open(&file, &cancel)
+                .await
+                .map_err(|error| format!("这个文件发不出去：{error}"))?;
+            let started = std::time::Instant::now();
+            let send = client
+                .send_to_device(&target.id, &outgoing, TransferOptions::new(&cancel), None)
+                .await
+                .map_err(|error| match (&error, error.remote_code()) {
+                    (_, Some(code)) => format!("没有发出去（{code}）"),
+                    (error, _) => format!("没有发出去：{error}"),
+                })?;
+            println!(
+                "已上传「{}」（{} 字节，用时 {:.1} 秒），收件方是「{}」（{}）。",
+                send.name,
+                send.size,
+                started.elapsed().as_secs_f64(),
+                send.peer_device_name,
+                if target.online { "在线" } else { "离线" },
+            );
+            println!("服务端记录 {}，状态 {}。", send.id, state_word(send.state));
+            // 上传完成只说明文件到了服务端；对方收下了没有，看 `sends` 或事件流。
+            Ok(())
+        }
+        Command::Sends { origin } => {
+            let identity = read_identity(token_file)?;
+            let client = client(&origin, &identity)?;
+            let cancel = CancellationToken::new();
+            for direction in [Direction::Out, Direction::In] {
+                let query = SendQuery {
+                    direction,
+                    state: None,
+                    limit: 20,
+                };
+                let sends = client
+                    .sends(&query, &RequestOptions::new(&cancel))
+                    .await
+                    .map_err(|error| error.to_string())?;
+                let title = match direction {
+                    Direction::Out => "发出去的",
+                    Direction::In => "收到的",
+                };
+                println!("{title}：");
+                if sends.is_empty() {
+                    println!("    （没有）");
+                }
+                for send in sends {
+                    let failure = send.failure.map_or(String::new(), |reason| {
+                        format!("（{}）", failure_word(reason))
+                    });
+                    println!(
+                        "    {} · {}（{} 字节）· {}{failure}",
+                        send.name,
+                        send.peer_device_name,
+                        send.size,
+                        state_word(send.state)
+                    );
+                }
+            }
+            Ok(())
+        }
         Command::Forget { origin } => {
             let identity = read_identity(token_file)?;
             let client = client(&origin, &identity)?;
@@ -248,6 +340,27 @@ async fn run() -> Result<(), String> {
             println!("已从账户里删除这台替身设备。");
             Ok(())
         }
+    }
+}
+
+/// 状态与失败原因在打印时的说法。
+fn state_word(state: SendState) -> &'static str {
+    match state {
+        SendState::Offered => "等对方接收",
+        SendState::Delivered => "对方已收下",
+        SendState::Declined => "对方拒收了",
+        SendState::Cancelled => "已撤回",
+        SendState::Failed => "对方接收失败",
+        SendState::Expired => "已过期",
+    }
+}
+
+fn failure_word(reason: FailReason) -> &'static str {
+    match reason {
+        FailReason::DiskFull => "磁盘已满",
+        FailReason::WriteFailed => "写入失败",
+        FailReason::Cancelled => "已取消",
+        FailReason::VerificationFailed => "收到的内容校验未通过",
     }
 }
 

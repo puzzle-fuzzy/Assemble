@@ -364,7 +364,6 @@ mod tests {
     use std::time::Instant;
 
     use assemble_transfer::hash::digest;
-    use tokio::io::AsyncWriteExt;
 
     use super::*;
 
@@ -376,13 +375,14 @@ mod tests {
     }
 
     /// 写一个测试用的暂存文件，并把它的时间拨回 `age` 之前。
+    /// 建一个暂存文件，并把它的修改时间改到 `age` 之前。
     async fn touch(path: &Path, age: Duration) {
         tokio::fs::create_dir_all(path.parent().unwrap())
             .await
             .unwrap();
-        let mut file = tokio::fs::File::create(path).await.unwrap();
-        file.write_all(b"leftover").await.unwrap();
-        drop(file);
+        // 写入与改时间都用同步接口、按顺序做完。异步文件在丢弃句柄之后才真正写完，
+        // 那次迟到的写入会把刚改旧的修改时间刷新成现在，测试就会时而过、时而不过。
+        std::fs::write(path, b"leftover").unwrap();
         let back = SystemTime::now() - age;
         let file = std::fs::OpenOptions::new().write(true).open(path).unwrap();
         file.set_times(std::fs::FileTimes::new().set_modified(back))

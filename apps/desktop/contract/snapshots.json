@@ -9,6 +9,10 @@
       "phase": "signedOut"
     },
     "devices": [],
+    "transfers": [],
+    "receive": {
+      "customFolder": null
+    },
     "launchAtLogin": "unsupported",
     "notice": null
   },
@@ -22,6 +26,10 @@
       "phase": "signingIn"
     },
     "devices": [],
+    "transfers": [],
+    "receive": {
+      "customFolder": null
+    },
     "launchAtLogin": "disabled",
     "notice": null
   },
@@ -59,6 +67,10 @@
         "online": true
       }
     ],
+    "transfers": [],
+    "receive": {
+      "customFolder": null
+    },
     "launchAtLogin": "enabled",
     "notice": null
   },
@@ -72,6 +84,10 @@
       "phase": "signedOut"
     },
     "devices": [],
+    "transfers": [],
+    "receive": {
+      "customFolder": null
+    },
     "launchAtLogin": "unknown",
     "notice": {
       "kind": "error",
@@ -88,6 +104,10 @@
       "phase": "signedOut"
     },
     "devices": [],
+    "transfers": [],
+    "receive": {
+      "customFolder": null
+    },
     "launchAtLogin": "enabled",
     "notice": {
       "kind": "info",
@@ -128,6 +148,10 @@
         "online": false
       }
     ],
+    "transfers": [],
+    "receive": {
+      "customFolder": null
+    },
     "launchAtLogin": "enabled",
     "notice": null
   },
@@ -165,6 +189,224 @@
         "online": false
       }
     ],
+    "transfers": [],
+    "receive": {
+      "customFolder": null
+    },
+    "launchAtLogin": "enabled",
+    "notice": null
+  },
+  {
+    "service": {
+      "target": "production",
+      "reachable": true,
+      "stream": "connected"
+    },
+    "session": {
+      "phase": "signedIn",
+      "account": {
+        "id": "3d1c0a5e-6cf4-4d3a-9a67-1f2f4c1f6f01",
+        "username": "example",
+        "displayName": "Example"
+      },
+      "device": {
+        "id": "9b2e7c4d1a5f4e3b8c6d0a1b2c3d4e5f",
+        "name": "MacBook-Pro",
+        "platform": "macos",
+        "online": true
+      }
+    },
+    "devices": [
+      {
+        "id": "9b2e7c4d1a5f4e3b8c6d0a1b2c3d4e5f",
+        "name": "MacBook-Pro",
+        "platform": "macos",
+        "online": true
+      },
+      {
+        "id": "c1d2e3f4a5b64c7d8e9f0a1b2c3d4e5f",
+        "name": "工作电脑",
+        "platform": "windows",
+        "online": true
+      }
+    ],
+    "transfers": [
+      {
+        "id": "5f4e3d2c1b0a69788796a5b4c3d2e1f0",
+        "direction": "in",
+        "peer": "工作电脑",
+        "name": "合同.pdf",
+        "size": 1048576,
+        "phase": "inProgress",
+        "progress": 0.45,
+        "savedAs": null,
+        "failure": null
+      },
+      {
+        "id": "0f1e2d3c4b5a69788796a5b4c3d2e1f2",
+        "direction": "in",
+        "peer": "工作电脑",
+        "name": "会议录音.m4a",
+        "size": 31457280,
+        "phase": "queued",
+        "progress": 0.0,
+        "savedAs": null,
+        "failure": null
+      },
+      {
+        "id": "1a2b3c4d5e6f708192a3b4c5d6e7f809",
+        "direction": "in",
+        "peer": "工作电脑",
+        "name": "照片.jpg",
+        "size": 2048000,
+        "phase": "complete",
+        "progress": 1.0,
+        "savedAs": "照片 (2).jpg",
+        "failure": null
+      },
+      {
+        "id": "2b3c4d5e6f708192a3b4c5d6e7f8091a",
+        "direction": "in",
+        "peer": "工作电脑",
+        "name": "视频.mp4",
+        "size": 52428800,
+        "phase": "failed",
+        "progress": 0.0,
+        "savedAs": null,
+        "failure": "diskFull"
+      },
+      {
+        "id": "3c4d5e6f708192a3b4c5d6e7f8091a2b",
+        "direction": "in",
+        "peer": "工作电脑",
+        "name": "报表.xlsx",
+        "size": 81920,
+        "phase": "cancelled",
+        "progress": 0.0,
+        "savedAs": null,
+        "failure": null
+      },
+      {
+        "id": "4d5e6f708192a3b4c5d6e7f8091a2b3c",
+        "direction": "in",
+        "peer": "工作电脑",
+        "name": "设计稿.sketch",
+        "size": 7340032,
+        "phase": "expired",
+        "progress": 0.0,
+        "savedAs": null,
+        "failure": null
+      }
+    ],
+    "receive": {
+      "customFolder": null
+    },
+    "launchAtLogin": "enabled",
+    "notice": null
+  },
+  {
+    "service": {
+      "target": "production",
+      "reachable": true,
+      "stream": "connected"
+    },
+    "session": {
+      "phase": "signedIn",
+      "account": {
+        "id": "3d1c0a5e-6cf4-4d3a-9a67-1f2f4c1f6f01",
+        "username": "example",
+        "displayName": "Example"
+      },
+      "device": {
+        "id": "9b2e7c4d1a5f4e3b8c6d0a1b2c3d4e5f",
+        "name": "MacBook-Pro",
+        "platform": "macos",
+        "online": true
+      }
+    },
+    "devices": [
+      {
+        "id": "9b2e7c4d1a5f4e3b8c6d0a1b2c3d4e5f",
+        "name": "MacBook-Pro",
+        "platform": "macos",
+        "online": true
+      },
+      {
+        "id": "c1d2e3f4a5b64c7d8e9f0a1b2c3d4e5f",
+        "name": "工作电脑",
+        "platform": "windows",
+        "online": true
+      }
+    ],
+    "transfers": [
+      {
+        "id": "6e7f8091a2b3c4d5e6f708192a3b4c5d",
+        "direction": "in",
+        "peer": "工作电脑",
+        "name": "资料.zip",
+        "size": 99614720,
+        "phase": "failed",
+        "progress": 0.0,
+        "savedAs": null,
+        "failure": "verificationFailed"
+      }
+    ],
+    "receive": {
+      "customFolder": "工作资料"
+    },
+    "launchAtLogin": "disabled",
+    "notice": null
+  },
+  {
+    "service": {
+      "target": "development",
+      "reachable": false,
+      "stream": "reconnecting"
+    },
+    "session": {
+      "phase": "signedIn",
+      "account": {
+        "id": "3d1c0a5e-6cf4-4d3a-9a67-1f2f4c1f6f01",
+        "username": "example",
+        "displayName": "Example"
+      },
+      "device": {
+        "id": "9b2e7c4d1a5f4e3b8c6d0a1b2c3d4e5f",
+        "name": "MacBook-Pro",
+        "platform": "macos",
+        "online": true
+      }
+    },
+    "devices": [
+      {
+        "id": "9b2e7c4d1a5f4e3b8c6d0a1b2c3d4e5f",
+        "name": "MacBook-Pro",
+        "platform": "macos",
+        "online": true
+      },
+      {
+        "id": "c1d2e3f4a5b64c7d8e9f0a1b2c3d4e5f",
+        "name": "工作电脑",
+        "platform": "windows",
+        "online": false
+      }
+    ],
+    "transfers": [
+      {
+        "id": "7f8091a2b3c4d5e6f708192a3b4c5d6",
+        "direction": "in",
+        "peer": "工作电脑",
+        "name": "笔记.md",
+        "size": 4096,
+        "phase": "failed",
+        "progress": 0.0,
+        "savedAs": null,
+        "failure": "writeFailed"
+      }
+    ],
+    "receive": {
+      "customFolder": null
+    },
     "launchAtLogin": "enabled",
     "notice": null
   }

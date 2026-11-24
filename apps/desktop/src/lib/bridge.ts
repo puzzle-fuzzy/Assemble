@@ -38,6 +38,12 @@ export interface Bridge {
   renameDevice(deviceId: string, name: string): Promise<Snapshot>;
   /** 移除账户里的另一台设备，它的登录随之撤销。移除自己请用 signOut。 */
   removeDevice(deviceId: string): Promise<Snapshot>;
+  /** 让用户挑一个接收文件夹。位置由系统选择器直接交给 Rust，不经过界面。 */
+  chooseReceiveFolder(): Promise<Snapshot>;
+  /** 回到默认的接收位置（下载/Assemble）。 */
+  resetReceiveFolder(): Promise<Snapshot>;
+  /** 在访达或资源管理器里显示一个已经收到的文件。界面只给得出传输的标识。 */
+  revealReceived(transferId: string): Promise<void>;
   /** 提示看过了，收起来。 */
   dismissNotice(): Promise<Snapshot>;
   /** 订阅状态变化，返回取消订阅的函数。 */
@@ -56,6 +62,12 @@ export const bridge: Bridge = {
     checked(() => invoke<unknown>("rename_device", { deviceId, name })),
   removeDevice: (deviceId) =>
     checked(() => invoke<unknown>("remove_device", { deviceId })),
+  chooseReceiveFolder: () =>
+    checked(() => invoke<unknown>("choose_receive_folder")),
+  resetReceiveFolder: () =>
+    checked(() => invoke<unknown>("reset_receive_folder")),
+  revealReceived: (transferId) =>
+    invoke<void>("reveal_received", { transferId }),
   dismissNotice: () => checked(() => invoke<unknown>("dismiss_notice")),
   subscribe: (listener) =>
     listen<unknown>(SNAPSHOT_EVENT, (event) => {

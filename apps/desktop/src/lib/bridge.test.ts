@@ -11,6 +11,8 @@ const STATE: Snapshot = {
   service: { target: "production", reachable: true, stream: "off" },
   session: { phase: "signedOut" },
   devices: [],
+  transfers: [],
+  receive: { customFolder: null },
   launchAtLogin: "disabled",
   notice: null,
 };
@@ -63,6 +65,9 @@ describe("桥接", () => {
     await bridge.setLaunchAtLogin(true);
     await bridge.renameDevice("device-2", "家里的电脑");
     await bridge.removeDevice("device-2");
+    await bridge.chooseReceiveFolder();
+    await bridge.resetReceiveFolder();
+    await bridge.revealReceived("transfer-1");
     await bridge.dismissNotice();
 
     expect(calls).toEqual([
@@ -77,6 +82,9 @@ describe("桥接", () => {
         args: { deviceId: "device-2", name: "家里的电脑" },
       },
       { command: "remove_device", args: { deviceId: "device-2" } },
+      { command: "choose_receive_folder", args: {} },
+      { command: "reset_receive_folder", args: {} },
+      { command: "reveal_received", args: { transferId: "transfer-1" } },
       { command: "dismiss_notice", args: {} },
     ]);
   });

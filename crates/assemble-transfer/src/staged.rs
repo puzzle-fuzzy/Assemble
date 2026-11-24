@@ -36,6 +36,24 @@ fn staging_path(destination: &Path) -> Result<PathBuf, TransferError> {
     Ok(destination.with_file_name(name))
 }
 
+/// 一个文件名是不是 [`StagedFile::create`] 会生成的暂存文件名：`<目标名>.<32 位小写十六进制>.part`。
+///
+/// 桌面端启动时靠它认出上次中断留下的暂存文件。清理只删认得出的名字，
+/// 所以这里的判断必须与上面生成的格式严格一致，而不是"以 .part 结尾就算"。
+pub fn is_staging_name(name: &str) -> bool {
+    let Some(inner) = name.strip_suffix(".part") else {
+        return false;
+    };
+    let Some((stem, random)) = inner.rsplit_once('.') else {
+        return false;
+    };
+    !stem.is_empty()
+        && random.len() == 32
+        && random
+            .bytes()
+            .all(|byte| matches!(byte, b'0'..=b'9' | b'a'..=b'f'))
+}
+
 /// 已写入、已落盘、等待发布的暂存文件。没被发布就会被清除。
 #[derive(Debug)]
 pub struct SealedStaging {
@@ -266,6 +284,31 @@ mod tests {
         // 两次创建得到不同的暂存文件，彼此不会覆盖。
         let other = StagedFile::create(&destination).await.unwrap();
         assert_ne!(other.path(), staged.path());
+        // 生成出来的名字，清理逻辑必须认得。
+        let name = path.file_name().unwrap().to_str().unwrap();
+        assert!(is_staging_name(name), "{name}");
+    }
+
+    #[test]
+    fn only_names_made_by_staging_count_as_staging_files() {
+        let made = |stem: &str| format!("{stem}.0123456789abcdef0123456789abcdef.part");
+        assert!(is_staging_name(&made("合同.pdf")));
+        assert!(is_staging_name(&made("a")));
+        // 大写的十六进制不会由生成器产生。
+        assert!(!is_staging_name(&made("a").replace("abc", "ABC")));
+        for not_staging in [
+            "",
+            ".part",
+            "a.part",
+            "a.0123456789abcdef0123456789abcdef", // 没有 .part
+            "a.0123456789abcdef0123456789abcde.part", // 少一位
+            "a.0123456789abcdef0123456789abcdef0.part", // 多一位
+            ".0123456789abcdef0123456789abcdef.part", // 没有目标名
+            "a.0123456789abcdef0123456789abcdeg.part", // 不是十六进制
+            "报告.pdf.part",                      // 只有后缀，没有随机段
+        ] {
+            assert!(!is_staging_name(not_staging), "{not_staging:?}");
+        }
     }
 
     #[tokio::test]

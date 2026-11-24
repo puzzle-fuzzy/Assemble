@@ -315,6 +315,72 @@ async fn a_device_that_is_offline_cannot_be_sent_to() {
     assert!(listed.is_empty());
 }
 
+/// 大到发送方不可能一口气塞进连接的那种文件。
+fn bulk() -> Vec<u8> {
+    // 同一段内容重复填充：比逐字节计算快得多，摘要照样是确定的。
+    let block = payload(64 * 1024);
+    block
+        .iter()
+        .copied()
+        .cycle()
+        .take(64 * 1024 * 1024)
+        .collect()
+}
+
+/// 流式上传的大文件被提前拒绝时，发送方也要看得到原因。
+///
+/// 服务端不等正文读完就回绝，连接会在发送方还在发送时被关掉，发送方只会报
+/// "连不上服务"。要复现它得满足两个条件，缺一个就复现不出来：
+///
+/// - 文件要大。小文件在回绝之前就已经全部进了连接的缓冲区，连接层自己就把剩下的读完了；
+/// - 服务端要真的与发送方同时运行。单线程的测试运行时里，发送方会一口气写到写不动为止，
+/// 服务端才有机会出手。所以这里用多线程的运行时。
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_streaming_sender_is_told_why_a_large_upload_was_refused() {
+    let fixture = fixture().await;
+    let (mut pc, mac) = pair(&fixture).await;
+    let file = outgoing(&fixture.dir, "big.bin", &bulk()).await;
+
+    // 对方下线了，发送方手里还是一个大文件。
+    drop(mac.events);
+    wait_devices(&mut pc.events, |devices| {
+        online_of(devices, "MacBook").is_some_and(|device| !device.online)
+    })
+    .await;
+    let error = pc
+        .device
+        .send_to_device(
+            &mac.device.device.id,
+            &file,
+            TransferOptions::new(&pc.device.cancel),
+            None,
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(error, http(409, "DEVICE_OFFLINE"));
+
+    // 给自己发：同样说得出原因，而不是"连不上服务"。
+    let error = pc
+        .device
+        .send_to_device(
+            &pc.device.device.id,
+            &file,
+            TransferOptions::new(&pc.device.cancel),
+            None,
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(error, http(400, "INVALID_REQUEST"));
+
+    // 两次的正文都丢掉了，没有落盘。
+    assert!(!fixture.server.state.blobs.path_for(&file.sha256).exists());
+    let rows: i64 = sqlx::query_scalar("SELECT count(*) FROM sends")
+        .fetch_one(&fixture.server.state.pool)
+        .await
+        .unwrap();
+    assert_eq!(rows, 0);
+}
+
 #[tokio::test]
 async fn sends_are_refused_before_any_content_is_stored() {
     let fixture = fixture().await;
@@ -780,6 +846,9 @@ async fn sends_nobody_accepts_expire_and_release_their_content() {
         .unwrap();
     wait_send(&mut mac.events, |send| send.id == offered.id).await;
 
+    // 时限是按毫秒比较的："建立时刻"早于"现在减去时限"才算过期。记录刚建好的那一毫秒里
+    // 两者相等，还不算过期。等时钟走过这一毫秒再清理，结果才每次都一样。
+    tokio::time::sleep(Duration::from_millis(5)).await;
     let report = assemble_server::maintenance::run_once(&fixture.server.state)
         .await
         .unwrap();

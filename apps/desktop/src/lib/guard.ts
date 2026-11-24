@@ -13,6 +13,10 @@ import type {
   SessionView,
   Snapshot,
   StreamState,
+  TransferDirection,
+  TransferFailure,
+  TransferPhase,
+  TransferView,
 } from "@/lib/types";
 
 export function isRecord(value: unknown): value is Record<string, unknown> {
@@ -76,6 +80,47 @@ export function isNotice(value: unknown): value is Notice {
   );
 }
 
+export function isTransferDirection(
+  value: unknown,
+): value is TransferDirection {
+  return value === "in" || value === "out";
+}
+
+export function isTransferPhase(value: unknown): value is TransferPhase {
+  return (
+    value === "queued" ||
+    value === "inProgress" ||
+    value === "complete" ||
+    value === "failed" ||
+    value === "cancelled" ||
+    value === "expired"
+  );
+}
+
+export function isTransferFailure(value: unknown): value is TransferFailure {
+  return (
+    value === "diskFull" ||
+    value === "writeFailed" ||
+    value === "verificationFailed" ||
+    value === "cancelled"
+  );
+}
+
+export function isTransferView(value: unknown): value is TransferView {
+  return (
+    isRecord(value) &&
+    hasString(value, "id") &&
+    isTransferDirection(value.direction) &&
+    hasString(value, "peer") &&
+    hasString(value, "name") &&
+    typeof value.size === "number" &&
+    isTransferPhase(value.phase) &&
+    typeof value.progress === "number" &&
+    (value.savedAs === null || typeof value.savedAs === "string") &&
+    (value.failure === null || isTransferFailure(value.failure))
+  );
+}
+
 export function isSessionView(value: unknown): value is SessionView {
   if (!isRecord(value)) return false;
   switch (value.phase) {
@@ -100,6 +145,11 @@ export function isSnapshot(value: unknown): value is Snapshot {
     isSessionView(value.session) &&
     Array.isArray(value.devices) &&
     value.devices.every(isDeviceView) &&
+    Array.isArray(value.transfers) &&
+    value.transfers.every(isTransferView) &&
+    isRecord(value.receive) &&
+    (value.receive.customFolder === null ||
+      typeof value.receive.customFolder === "string") &&
     isLaunchState(value.launchAtLogin) &&
     (value.notice === null || isNotice(value.notice))
   );

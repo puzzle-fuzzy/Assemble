@@ -15,14 +15,18 @@ tauri-build.workspace = true
 
 [dependencies]
 assemble-client.workspace = true
+assemble-device.workspace = true
 assemble-protocol.workspace = true
 assemble-store.workspace = true
+assemble-transfer.workspace = true
 futures-util.workspace = true
 hostname = "0.4.2"
 serde.workspace = true
 serde_json.workspace = true
 tauri.workspace = true
 tauri-plugin-autostart.workspace = true
+tauri-plugin-dialog.workspace = true
+tauri-plugin-notification.workspace = true
 tauri-plugin-opener.workspace = true
 tauri-plugin-single-instance.workspace = true
 thiserror.workspace = true
@@ -30,6 +34,13 @@ tokio.workspace = true
 tokio-util.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
+
+[dev-dependencies]
+# 接收流水线的测试对着真实的服务端跑：服务端库与 Tauri 的模拟应用只在这时用。
+assemble-server.workspace = true
+sqlx.workspace = true
+tempfile.workspace = true
+tauri = { workspace = true, features = ["test"] }
 
 [lints]
 workspace = true

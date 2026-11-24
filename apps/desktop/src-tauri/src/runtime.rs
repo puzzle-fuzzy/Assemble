@@ -1,22 +1,26 @@
 //! 登录之后常驻的后台任务。
 //!
-//! 两个循环，都随应用退出结束：
+//! 三个循环，都随应用退出结束：
 //!
 //! - [`watch_health`]：隔一段时间探一次服务，让界面上的"是否可达"不过期；
-//! - [`follow_events`]：登录期间维持一条事件流，把设备列表同步到状态里。
-//!   流断了由客户端自动重连；登录失效时收摊，并请用户重新登录。
+//! - [`follow_events`]：登录期间维持一条事件流，把设备列表与待接收的文件同步到状态里。
+//!   流断了由客户端自动重连；登录失效时收摊，并请用户重新登录；
+//! - [`receive::run`]：把别的设备发来的文件一个一个收到本机。
 //!
-//! 事件流不补送断线期间的变化，所以每次连上（收到 `hello`）都重新拉一遍设备列表。
+//! 事件流不补送断线期间的变化，所以每次连上（收到 `hello`）都重新拉一遍设备列表、
+//! 问一遍还有哪些文件在等我；连着的时候也隔一段时间问一次。
 
 use std::time::Duration;
 
 use assemble_client::{ClientError, RequestOptions};
 use assemble_protocol::device::Device;
 use assemble_protocol::events::Event;
+use assemble_protocol::sends::Send as SendRecord;
 use futures_util::StreamExt;
 use tauri::{AppHandle, Manager};
 use tokio_util::sync::CancellationToken;
 
+use crate::receive;
 use crate::session;
 use crate::state::{AppState, DeviceView, StreamState};
 
@@ -26,12 +30,14 @@ const HEALTH_INTERVAL: Duration = Duration::from_secs(30);
 /// 探活与拉设备列表的时限。
 const SHORT_TIMEOUT: Duration = Duration::from_secs(6);
 
-/// 启动两个后台循环。
+/// 启动后台循环。
 pub fn start(app: &AppHandle) {
     let health = app.clone();
     tauri::async_runtime::spawn(async move { watch_health(health).await });
     let events = app.clone();
     tauri::async_runtime::spawn(async move { follow_events(events).await });
+    let receiver = app.clone();
+    tauri::async_runtime::spawn(async move { receive::run(receiver).await });
 }
 
 /// 隔一段时间探一次服务。界面据此决定能不能发起登录。
@@ -65,6 +71,10 @@ enum Next {
     Connected,
     /// 换上新的设备列表。
     Devices(Vec<DeviceView>),
+    /// 别的设备发来了一个文件。
+    Offered(SendRecord),
+    /// 一次发送的状态变了。
+    Updated(SendRecord),
     /// 断了，客户端正在重连。
     Reconnecting,
     /// 服务端不再认这台设备的登录。
@@ -82,10 +92,10 @@ fn handle(item: Option<Result<Event, ClientError>>, own_device: Option<&str>) ->
             Event::DevicesChanged { devices } => {
                 Next::Devices(devices.iter().map(DeviceView::from).collect())
             }
-            // 发送相关的事件在传输接进来之后再处理。
-            Event::Hello { .. } | Event::SendOffered { .. } | Event::SendUpdated { .. } => {
-                Next::Nothing
-            }
+            Event::SendOffered { send } => Next::Offered(send),
+            Event::SendUpdated { send } => Next::Updated(send),
+            // 服务端认定的自己是另一台设备时，这条流不是我们的：当没连上处理。
+            Event::Hello { .. } => Next::Nothing,
         },
         Some(Err(error)) if error.is_unauthorized() => Next::Rejected,
         Some(Err(_)) => Next::Reconnecting,
@@ -117,12 +127,20 @@ async fn follow_events(app: AppHandle) {
         let own_device = state.device_id();
         state.set_stream(StreamState::Connecting);
         let mut stream = state.client.clone().events(cancel.child_token());
+        let mut resync = tokio::time::interval(receive::RESYNC_INTERVAL);
+        // 第一次对账跟着 `hello` 走，不要一上来就多发一次。
+        resync.tick().await;
         loop {
             tokio::select! {
                 biased;
                 () = cancel.cancelled() => break,
                 // 重新登录了：这条流属于上一次登录，丢掉它回到外层。
                 _ = sessions.changed() => break,
+                _ = resync.tick() => {
+                    if catch_up(&state, &cancel).await {
+                        break;
+                    }
+                }
                 item = stream.next() => match handle(item, own_device.as_deref()) {
                     Next::Nothing => {}
                     Next::Connected => {
@@ -134,8 +152,13 @@ async fn follow_events(app: AppHandle) {
                         {
                             break;
                         }
+                        if catch_up(&state, &cancel).await {
+                            break;
+                        }
                     }
                     Next::Devices(devices) => state.set_devices(devices),
+                    Next::Offered(send) => state.offer(&send),
+                    Next::Updated(send) => state.updated(&send),
                     Next::Reconnecting => state.set_stream(StreamState::Reconnecting),
                     // 流自己断了：登录失效，或者被取消。哪一种都由下面来分辨。
                     Next::Rejected | Next::Finished => break,
@@ -154,6 +177,17 @@ async fn follow_events(app: AppHandle) {
                 }
                 _ => {}
             }
+        }
+    }
+}
+
+/// 问一遍还有哪些文件在等我。返回 `true` 表示服务端不再认这台设备的登录。
+async fn catch_up(state: &AppState, cancel: &CancellationToken) -> bool {
+    match receive::resync(state, cancel).await {
+        Ok(()) => false,
+        Err(error) => {
+            tracing::debug!(%error, "the pending files could not be listed yet");
+            error.is_unauthorized()
         }
     }
 }
@@ -177,6 +211,7 @@ async fn pull_devices(
 #[cfg(test)]
 mod tests {
     use assemble_protocol::primitives::{Platform, Timestamp};
+    use assemble_protocol::sends::{Direction, SendState};
 
     use super::*;
 
@@ -252,32 +287,45 @@ mod tests {
         assert_eq!(handle(None, Some("me")), Next::Finished);
     }
 
-    #[test]
-    fn events_about_transfers_are_ignored_until_transfers_are_wired_up() {
-        let send = assemble_protocol::sends::Send {
+    fn send(state: SendState) -> SendRecord {
+        SendRecord {
             id: "s1".into(),
-            direction: assemble_protocol::sends::Direction::In,
+            direction: Direction::In,
             peer_device_id: "other".into(),
             peer_device_name: "别的设备".into(),
             name: "a.txt".into(),
             size: 1,
             mime_type: None,
             sha256: "a".repeat(64),
-            state: assemble_protocol::sends::SendState::Offered,
+            state,
             failure: None,
             created_at: Timestamp::now(),
             updated_at: Timestamp::now(),
-        };
+        }
+    }
+
+    #[test]
+    fn events_about_files_are_handed_over_as_they_are() {
+        // 别人发来一个文件、一次发送有了结局：交给状态去接，事件循环自己不改记录。
+        let offered = send(SendState::Offered);
         assert_eq!(
             handle(
-                Some(Ok(Event::SendOffered { send: send.clone() })),
+                Some(Ok(Event::SendOffered {
+                    send: offered.clone()
+                })),
                 Some("me")
             ),
-            Next::Nothing
+            Next::Offered(offered)
         );
+        let cancelled = send(SendState::Cancelled);
         assert_eq!(
-            handle(Some(Ok(Event::SendUpdated { send })), Some("me")),
-            Next::Nothing
+            handle(
+                Some(Ok(Event::SendUpdated {
+                    send: cancelled.clone()
+                })),
+                None
+            ),
+            Next::Updated(cancelled)
         );
     }
 }

@@ -1,8 +1,9 @@
 // 应用主界面。
 //
-// 本阶段有三类真实内容：账户与连接、账户里的设备、本机设置。文件传输与日程的视图
-// 在对应的后台能力接通之后再加入，不放空页面占位。
+// 现在有四类真实内容：账户与连接、账户里的设备、文件传输、本机设置。
+// 日程的视图在对应的后台能力接通之后再加入，不放空页面占位。
 
+import { ArrowDownToLine, ArrowUpToLine } from "lucide-react";
 import { useState } from "react";
 
 import { Badge } from "@/components/ui/badge";
@@ -16,6 +17,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { Progress } from "@/components/ui/progress";
 import { Switch } from "@/components/ui/switch";
 import { useSnapshot } from "@/hooks/use-snapshot";
 import { type Bridge, bridge, toBridgeError } from "@/lib/bridge";
@@ -28,6 +30,8 @@ import type {
   ServiceTarget,
   ServiceView,
   Snapshot,
+  TransferFailure,
+  TransferView,
 } from "@/lib/types";
 
 export interface AppProps {
@@ -72,6 +76,11 @@ export function App({ bridge: source = bridge }: AppProps) {
         onError={setActionError}
       />
       <DevicesCard
+        source={source}
+        snapshot={snapshot}
+        onError={setActionError}
+      />
+      <TransfersCard
         source={source}
         snapshot={snapshot}
         onError={setActionError}
@@ -457,6 +466,155 @@ function DeviceRow({
   );
 }
 
+/** 文件大小怎么显示。单文件不超过 100 MB，所以最大到 MB 就够了。 */
+function formatSize(bytes: number): string {
+  const kilobytes = bytes / 1024;
+  if (kilobytes < 1) return `${bytes} B`;
+  if (kilobytes < 1024)
+    return `${kilobytes < 10 ? kilobytes.toFixed(1) : Math.round(kilobytes)} KB`;
+  return `${(kilobytes / 1024).toFixed(1)} MB`;
+}
+
+const FAILURE_NAMES: Record<TransferFailure, string> = {
+  diskFull: "这台电脑的磁盘已满",
+  writeFailed: "文件没能写进接收文件夹",
+  verificationFailed: "收到的内容与发出的对不上",
+  cancelled: "已取消",
+};
+
+/** 一条传输现在怎么样了，用一句话说清楚。 */
+function transferStatus(transfer: TransferView): string {
+  switch (transfer.phase) {
+    case "queued":
+      return "等待接收…";
+    case "inProgress":
+      return `正在接收 ${Math.floor(transfer.progress * 100)}%`;
+    case "complete":
+      return "已保存";
+    case "failed":
+      return `接收失败：${transfer.failure ? FAILURE_NAMES[transfer.failure] : "原因不明"}。`;
+    case "cancelled":
+      return "对方撤回了，没有收到。";
+    case "expired":
+      return "过了时限，没有收到。";
+  }
+}
+
+/** 文件传输。别的设备发来的文件会自动存到接收位置，这里看得到每一次的结果。 */
+function TransfersCard({ source, snapshot, onError }: CardProps) {
+  if (snapshot?.session.phase !== "signedIn") return null;
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>传输</CardTitle>
+        <CardDescription>
+          别的设备发来的文件会自动存到接收位置，收到后有通知。
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="flex flex-col gap-2">
+        {snapshot.transfers.length === 0 ? (
+          <p className="text-sm text-muted-foreground">还没有收到过文件。</p>
+        ) : (
+          snapshot.transfers.map((transfer) => (
+            <TransferRow
+              key={transfer.id}
+              source={source}
+              transfer={transfer}
+              onError={onError}
+            />
+          ))
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+function TransferRow({
+  source,
+  transfer,
+  onError,
+}: {
+  source: Bridge;
+  transfer: TransferView;
+  onError: (message: string | null) => void;
+}) {
+  const [pending, setPending] = useState(false);
+  const failed = transfer.phase === "failed";
+
+  // 只在文件夹里选中它，不打开：收到的东西要不要打开由用户自己决定。
+  async function reveal() {
+    setPending(true);
+    onError(null);
+    try {
+      await source.revealReceived(transfer.id);
+    } catch (error: unknown) {
+      onError(messageFor(toBridgeError(error)));
+    } finally {
+      setPending(false);
+    }
+  }
+
+  return (
+    <div className="rounded-lg border border-border px-3 py-2">
+      <div className="flex items-start gap-3">
+        <span
+          aria-hidden
+          className="mt-0.5 text-muted-foreground"
+          data-direction={transfer.direction}
+        >
+          {transfer.direction === "in" ? (
+            <ArrowDownToLine className="size-4" />
+          ) : (
+            <ArrowUpToLine className="size-4" />
+          )}
+        </span>
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-sm font-medium" title={transfer.name}>
+            {transfer.name}
+          </p>
+          <p className="text-xs text-muted-foreground">
+            {transfer.peer} · {formatSize(transfer.size)}
+          </p>
+          {transfer.savedAs ? (
+            <p className="text-xs text-muted-foreground">
+              已存为「{transfer.savedAs}」
+            </p>
+          ) : null}
+        </div>
+        {transfer.phase === "complete" ? (
+          <Button
+            size="sm"
+            variant="outline"
+            className="shrink-0"
+            disabled={pending}
+            onClick={() => void reveal()}
+          >
+            在文件夹中显示
+          </Button>
+        ) : null}
+      </div>
+      {transfer.phase === "inProgress" ? (
+        <Progress
+          aria-hidden
+          className="mt-2"
+          value={transfer.progress * 100}
+        />
+      ) : null}
+      <p
+        role={failed ? "alert" : undefined}
+        className={
+          failed
+            ? "mt-1 text-xs text-destructive"
+            : "mt-1 text-xs text-muted-foreground"
+        }
+      >
+        {transferStatus(transfer)}
+      </p>
+    </div>
+  );
+}
+
 const LAUNCH_HINTS: Record<LaunchState, string | null> = {
   enabled: null,
   disabled: null,
@@ -464,16 +622,33 @@ const LAUNCH_HINTS: Record<LaunchState, string | null> = {
   unknown: "等待系统批准后生效。",
 };
 
+/** 默认的接收位置。它是一个固定的系统位置，不是哪个具体文件夹的路径。 */
+const DEFAULT_RECEIVE = "下载/Assemble";
+
 function LaunchCard({ source, snapshot, onError }: CardProps) {
   const [pending, setPending] = useState(false);
   const state: LaunchState = snapshot?.launchAtLogin ?? "unknown";
   const hint = LAUNCH_HINTS[state];
+  const customFolder = snapshot?.receive.customFolder ?? null;
 
   async function toggle(enabled: boolean) {
     setPending(true);
     onError(null);
     try {
       await source.setLaunchAtLogin(enabled);
+    } catch (error: unknown) {
+      onError(messageFor(toBridgeError(error)));
+    } finally {
+      setPending(false);
+    }
+  }
+
+  // 选文件夹时系统选择器一直开着，命令要到用户关掉它才返回。
+  async function locate(action: () => Promise<unknown>) {
+    setPending(true);
+    onError(null);
+    try {
+      await action();
     } catch (error: unknown) {
       onError(messageFor(toBridgeError(error)));
     } finally {
@@ -495,7 +670,39 @@ function LaunchCard({ source, snapshot, onError }: CardProps) {
           />
         </CardAction>
       </CardHeader>
-      {hint ? <CardContent>{hint}</CardContent> : null}
+      <CardContent className="flex flex-col gap-3">
+        {hint ? <p className="text-sm text-muted-foreground">{hint}</p> : null}
+        <div className="flex items-center justify-between gap-3 border-t border-border pt-3">
+          <div className="min-w-0">
+            <p className="text-sm font-medium">接收位置</p>
+            <p className="truncate text-sm text-muted-foreground">
+              {customFolder === null
+                ? DEFAULT_RECEIVE
+                : `「${customFolder}」文件夹`}
+            </p>
+          </div>
+          <div className="flex shrink-0 gap-2">
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={pending}
+              onClick={() => void locate(() => source.chooseReceiveFolder())}
+            >
+              更改…
+            </Button>
+            {customFolder !== null ? (
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={pending}
+                onClick={() => void locate(() => source.resetReceiveFolder())}
+              >
+                恢复默认
+              </Button>
+            ) : null}
+          </div>
+        </div>
+      </CardContent>
     </Card>
   );
 }

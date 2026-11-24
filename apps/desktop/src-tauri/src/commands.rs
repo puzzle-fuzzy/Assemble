@@ -6,6 +6,7 @@
 use assemble_client::RequestOptions;
 use tauri::{AppHandle, Manager};
 use tauri_plugin_autostart::ManagerExt;
+use tauri_plugin_dialog::DialogExt;
 
 use crate::session;
 use crate::state::{AppState, LaunchState, launch_state};
@@ -185,6 +186,71 @@ async fn finish_device_change<T>(
             Err(CommandError::from(&error))
         }
     }
+}
+
+/// 让用户挑一个接收文件夹。文件夹的位置由系统选择器直接交给 Rust，不经过界面。
+///
+/// 用户关掉选择器不算错误：什么都不改。
+#[tauri::command]
+pub async fn choose_receive_folder(app: AppHandle) -> Result<crate::state::Snapshot, CommandError> {
+    let state = app.state::<AppState>();
+    let (chosen, answer) = tokio::sync::oneshot::channel();
+    let mut picker = app.dialog().file().set_title("选择接收文件夹");
+    // 挂在主窗口上：它在窗口顶上以面板的形式出现，而不是另外弹一个窗口。
+    if let Some(window) = app.get_webview_window(crate::state::MAIN_WINDOW) {
+        picker = picker.set_parent(&window);
+    }
+    picker.pick_folder(move |folder| {
+        // 关掉选择器、或者选中的不是一个本机文件夹时送出一个空值：
+        // 接收这一侧据此知道"没有选"。
+        let _ = chosen
+            .send(folder.and_then(|folder| folder.as_path().map(std::path::Path::to_path_buf)));
+    });
+
+    let Some(folder) = answer.await.ok().flatten() else {
+        return Ok(state.snapshot());
+    };
+    let validated = assemble_device::validate_directory(&folder)
+        .await
+        .map_err(|error| CommandError::local("INVALID_RECEIVE_FOLDER", error.to_string()))?;
+    let settings = crate::state::Settings {
+        receive_directory: Some(validated),
+    };
+    if let Err(error) = crate::receive::save_settings(&app, &settings) {
+        tracing::warn!(%error, "the receive folder could not be saved");
+        return Err(CommandError::local("SYSTEM_REJECTED", error.to_string()));
+    }
+    state.set_receive_folder(settings.receive_directory.as_deref());
+    Ok(state.snapshot())
+}
+
+/// 回到默认的接收位置（下载/Assemble）。
+#[tauri::command]
+pub async fn reset_receive_folder(app: AppHandle) -> Result<crate::state::Snapshot, CommandError> {
+    let state = app.state::<AppState>();
+    let settings = crate::state::Settings {
+        receive_directory: None,
+    };
+    if let Err(error) = crate::receive::save_settings(&app, &settings) {
+        tracing::warn!(%error, "the receive folder could not be saved");
+        return Err(CommandError::local("SYSTEM_REJECTED", error.to_string()));
+    }
+    state.set_receive_folder(None);
+    Ok(state.snapshot())
+}
+
+/// 在访达或资源管理器里显示一个已经收到的文件。界面只给得出传输的标识。
+#[tauri::command]
+pub fn reveal_received(app: AppHandle, transfer_id: String) -> Result<(), CommandError> {
+    let state = app.state::<AppState>();
+    let Some(path) = state.saved_file(&transfer_id) else {
+        return Err(CommandError::local(
+            "NOT_SAVED",
+            "this transfer has no file on this computer",
+        ));
+    };
+    crate::notify::reveal(&app, path);
+    Ok(())
 }
 
 /// 提示看过了，收起来。

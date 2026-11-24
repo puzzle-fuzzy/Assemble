@@ -147,29 +147,76 @@ pub async fn serve(
 ) -> Result<(), ServeError> {
     let listener = TcpListener::bind(config.addr).await?;
     tracing::info!(address = %listener.local_addr()?.to_string(), "listening");
+    serve_until(listener, state, stop, SHUTDOWN_GRACE).await
+}
+
+/// 在已经绑定的监听地址上提供服务，直到 `stop` 被触发；之后最多再等 `grace` 这么久。
+///
+/// 正式服务与测试服务走的是同一段代码：退出逻辑只写一遍，测试测到的就是真实运行的那条路。
+///
+/// 计时从收到退出信号开始，而不是从启动开始。曾经把上限包在整个服务外面，
+/// 结果服务端启动十秒后自己退出——而测试用的是另一条启动路径，完全没碰到。
+pub async fn serve_until(
+    listener: TcpListener,
+    state: Shared,
+    stop: CancellationToken,
+    grace: Duration,
+) -> Result<(), ServeError> {
     let closing = Arc::clone(&state);
+    let waiting = stop.clone();
     let shutdown = async move {
-        stop.cancelled().await;
+        waiting.cancelled().await;
         tracing::info!("shutting down");
         // 事件流是永不主动结束的长连接。不先收掉它们，优雅退出会一直等下去。
         closing.hub.close();
     };
-    // 优雅退出最多等这么久：某个连接再怎么拖，也不能让进程卡在退出这一步。
-    let drained = tokio::time::timeout(
-        SHUTDOWN_GRACE,
-        axum::serve(listener, router(state)).with_graceful_shutdown(shutdown),
-    )
-    .await;
-    if let Ok(result) = drained {
-        result.map_err(ServeError::Server)
-    } else {
-        tracing::warn!("some connections did not close in time; exiting anyway");
-        Ok(())
+    let patience = async move {
+        stop.cancelled().await;
+        tokio::time::sleep(grace).await;
+    };
+    tokio::select! {
+        result = axum::serve(listener, router(state)).with_graceful_shutdown(shutdown) => {
+            result.map_err(ServeError::Server)
+        }
+        // 某个连接再怎么拖，也不能让进程卡在退出这一步。
+        () = patience => {
+            tracing::warn!("some connections did not close in time; exiting anyway");
+            Ok(())
+        }
     }
+}
+
+/// 在读完正文之前就要拒绝一个上传：等对方把正文送完、边收边丢，再把拒绝回答出去。
+///
+/// 客户端是流式上传的。不等它说完就回绝，连接会在它还在发送时被关掉，它看不到那个
+/// 回答，只会报"连不上服务"——而真实的原因是"对方不在线"。让客户端白传一遍并不好看，
+/// 但这种情况只出现在对方刚好在最后一刻下线时，比起说错原因要强。
+///
+/// 正文不进内存；超过单文件上限还不肯停的，或者太久不送数据的，就不等了。
+pub(crate) async fn refuse_upload(
+    body: axum::body::Body,
+    error: crate::error::ApiError,
+) -> crate::error::ApiError {
+    use futures_util::StreamExt;
+
+    let mut stream = body.into_data_stream();
+    let mut discarded = 0u64;
+    while discarded <= assemble_protocol::primitives::MAX_FILE_SIZE {
+        let chunk = tokio::time::timeout(crate::blobs::UPLOAD_STALL, stream.next()).await;
+        match chunk {
+            Ok(Some(Ok(bytes))) => discarded += bytes.len() as u64,
+            // 送完了、出错了，或者太久没送：都到此为止。
+            _ => break,
+        }
+    }
+    error
 }
 
 /// 优雅退出等待在途连接收尾的上限。
 const SHUTDOWN_GRACE: Duration = Duration::from_secs(10);
+
+/// 测试服务退出时等待的上限：测试要快，拖着的连接由 [`TestServer::stop`] 直接收掉。
+const TEST_GRACE: Duration = Duration::from_secs(2);
 
 /// 绑定到一个空闲的回环端口，在后台开始服务。测试与开发工具用它拿到真实的服务。
 pub struct TestServer {
@@ -212,13 +259,7 @@ impl TestServer {
         let state = Arc::new(AppState::new(pool, config));
         let served = Arc::clone(&state);
         let task = tokio::spawn(async move {
-            let shutdown = async move {
-                triggered.cancelled().await;
-            };
-            if let Err(error) = axum::serve(listener, router(served))
-                .with_graceful_shutdown(shutdown)
-                .await
-            {
+            if let Err(error) = serve_until(listener, served, triggered, TEST_GRACE).await {
                 tracing::debug!(%error, "test server stopped");
             }
         });
@@ -383,5 +424,45 @@ mod tests {
             .unwrap();
         drop(client);
         server.stop().await;
+    }
+
+    /// 上限只管退出，不给服务定寿命；拖着连接不放，到上限也会退出。
+    #[tokio::test]
+    async fn only_the_shutdown_has_a_time_limit() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        use tokio::net::TcpStream;
+
+        let dir = tempfile::tempdir().unwrap();
+        let pool = crate::db::open(dir.path()).await.unwrap();
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let origin = assemble_protocol::origin::ServerOrigin::parse(&format!("http://{address}"))
+            .expect("a loopback address is a valid origin");
+        let state = Arc::new(AppState::new(
+            pool,
+            Config::development(dir.path()).with_public_origin(origin),
+        ));
+        let stop = CancellationToken::new();
+        let grace = Duration::from_millis(300);
+        let triggered = stop.clone();
+        let served =
+            tokio::spawn(async move { serve_until(listener, state, triggered, grace).await });
+        let health = format!("http://{address}/healthz");
+
+        // 几个"上限"过去了，服务还在、还应答。
+        tokio::time::sleep(grace * 3).await;
+        let response = reqwest::get(&health).await.unwrap();
+        assert_eq!(response.status(), reqwest::StatusCode::OK);
+
+        // 留着一条空闲的长连接再让它退出：到上限也会退出，不会一直等下去。
+        let mut idle = TcpStream::connect(address).await.unwrap();
+        idle.write_all(b"GET /healthz HTTP/1.1\r\nHost: localhost\r\n\r\n")
+            .await
+            .unwrap();
+        let mut scratch = [0u8; 64];
+        assert!(idle.read(&mut scratch).await.unwrap() > 0);
+        stop.cancel();
+        let finished = tokio::time::timeout(grace + Duration::from_secs(5), served).await;
+        assert!(matches!(finished, Ok(Ok(Ok(())))), "{finished:?}");
     }
 }

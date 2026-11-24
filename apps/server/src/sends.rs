@@ -96,6 +96,7 @@ fn failure_name(reason: FailReason) -> &'static str {
         FailReason::DiskFull => "disk_full",
         FailReason::WriteFailed => "write_failed",
         FailReason::Cancelled => "cancelled",
+        FailReason::VerificationFailed => "verification_failed",
     }
 }
 
@@ -105,6 +106,7 @@ fn failure_from(stored: Option<&str>) -> Option<FailReason> {
         FailReason::DiskFull,
         FailReason::WriteFailed,
         FailReason::Cancelled,
+        FailReason::VerificationFailed,
     ]
     .into_iter()
     .find(|reason| failure_name(*reason) == stored)
@@ -237,24 +239,33 @@ pub async fn create(
 ) -> Result<Response, ApiError> {
     let Query(input) =
         query.map_err(|_| ApiError::invalid("the query string is not a valid send request"))?;
-    let name = check_new_send(&input, request.headers())?;
+    let (parts, body) = request.into_parts();
+    let name = check_new_send(&input, &parts.headers);
 
-    let target = crate::devices::find(&state.pool, &identity.account_id, &input.to_device_id)
-        .await?
-        .ok_or_else(ApiError::not_found)?;
-    if target.id == identity.device_id {
-        return Err(ApiError::invalid("a device cannot send to itself"));
-    }
-    // 只能发给在线设备：离线的设备没人收，服务端也不替它保管。
-    if !is_online(&state, &identity.account_id, &target.id) {
-        return Err(target_offline());
-    }
+    // 这几项检查不用看正文。拒绝之前要让对方把话说完，见 [`crate::http::refuse_upload`]。
+    let admitted = match (
+        name,
+        crate::devices::find(&state.pool, &identity.account_id, &input.to_device_id).await?,
+    ) {
+        (Ok(name), Some(target)) if target.id != identity.device_id => {
+            // 只能发给在线设备：离线的设备没人收，服务端也不替它保管。
+            if is_online(&state, &identity.account_id, &target.id) {
+                Ok((target, name))
+            } else {
+                Err(target_offline())
+            }
+        }
+        (Ok(_), Some(_)) => Err(ApiError::invalid("a device cannot send to itself")),
+        (Ok(_), None) => Err(ApiError::not_found()),
+        (Err(error), _) => Err(error),
+    };
+    let (target, name) = match admitted {
+        Ok(admitted) => admitted,
+        Err(error) => return Err(crate::http::refuse_upload(body, error).await),
+    };
 
     // 正文里的传输错误在进入存放逻辑之前统一成 I/O 错误。
-    let stream = request
-        .into_body()
-        .into_data_stream()
-        .map_err(std::io::Error::other);
+    let stream = body.into_data_stream().map_err(std::io::Error::other);
     let mut reader = StreamReader::new(stream);
     let cancel = CancellationToken::new();
     state
@@ -721,6 +732,7 @@ mod tests {
             FailReason::DiskFull,
             FailReason::WriteFailed,
             FailReason::Cancelled,
+            FailReason::VerificationFailed,
         ] {
             assert_eq!(
                 json!(failure_name(reason)),

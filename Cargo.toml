@@ -12,6 +12,7 @@ publish = false
 assemble-client = { path = "crates/assemble-client" }
 assemble-device = { path = "crates/assemble-device" }
 assemble-protocol = { path = "crates/assemble-protocol" }
+assemble-server = { path = "apps/server" }
 assemble-schedule = { path = "crates/assemble-schedule" }
 assemble-store = { path = "crates/assemble-store" }
 assemble-transfer = { path = "crates/assemble-transfer" }

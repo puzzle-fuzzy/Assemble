@@ -56,6 +56,9 @@ pub enum FailReason {
     WriteFailed,
     /// 用户在接收途中取消了。
     Cancelled,
+    /// 收到的内容与声明的长度或摘要对不上。这不是接收方磁盘的问题，
+    /// 所以单独报出来：发送方看到它就知道该重发，而不是去查对方的电脑。
+    VerificationFailed,
 }
 
 /// 一次发送在接口里的样子。`direction` 按发起请求的那台设备计算。
@@ -249,6 +252,7 @@ mod tests {
             (FailReason::DiskFull, "disk_full"),
             (FailReason::WriteFailed, "write_failed"),
             (FailReason::Cancelled, "cancelled"),
+            (FailReason::VerificationFailed, "verification_failed"),
         ] {
             let report = serde_json::to_value(FailInput { reason }).unwrap();
             assert_eq!(report, json!({ "reason": spelling }));

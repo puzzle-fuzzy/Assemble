@@ -16,6 +16,8 @@ const MESSAGES: Record<string, string> = {
   NOT_FOUND: "这台设备已经不在账户里了。",
   IS_THIS_DEVICE: "要移除这台设备，请使用「退出登录」。",
   INVALID_RESPONSE: "服务端的回答看不懂，请稍后重试。",
+  INVALID_RECEIVE_FOLDER: "这个文件夹不能用来保存收到的文件，请换一个。",
+  NOT_SAVED: "这个文件还没有保存到这台电脑上。",
 };
 
 const GENERIC = "操作没有完成，请稍后重试。";

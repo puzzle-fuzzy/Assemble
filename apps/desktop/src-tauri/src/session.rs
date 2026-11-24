@@ -231,7 +231,7 @@ pub async fn sign_out(state: &AppState) -> Result<(), SessionError> {
 }
 
 /// 服务端不再认这台设备（在别的设备上被撤销、账户被删）：不必也无法再去撤销，直接忘掉。
-pub fn revoked(state: &AppState) {
+pub fn revoked<R: tauri::Runtime>(state: &AppState<R>) {
     forget(state);
     state.set_notice(Some(Notice::info("这台设备的登录已失效，请重新登录。")));
 }
@@ -246,7 +246,7 @@ fn adopt(state: &AppState, account: &Account, device: &Device) {
 }
 
 /// 忘掉本机的登录状态。调用方必须已经确认服务端那边也撤销了，或者已经不认了。
-fn forget(state: &AppState) {
+fn forget<R: tauri::Runtime>(state: &AppState<R>) {
     state.client.set_bearer(None);
     // 钥匙串里的条目删不掉也没关系：下次启动会被服务端判为失效。
     let _ = state.clear_stored_session();

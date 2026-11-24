@@ -11,6 +11,7 @@ import type {
   LaunchState,
   ServiceView,
   Snapshot,
+  TransferView,
 } from "@/lib/types";
 
 const ACCOUNT = {
@@ -58,11 +59,29 @@ function snapshot(overrides: Overrides = {}): Snapshot {
   return {
     service: service(),
     session,
-    // 没登录时 Rust 不会给出设备列表。
+    // 没登录时 Rust 不会给出设备列表，也不会留着传输记录。
     devices: phase === "signedIn" ? [{ ...DEVICE }] : [],
+    transfers: [],
+    receive: { customFolder: null },
     launchAtLogin: "disabled",
     notice: null,
     ...rest,
+  };
+}
+
+/** 一条传输记录；不说明阶段时，是一个已经收好的文件。 */
+function transfer(overrides: Partial<TransferView> = {}): TransferView {
+  return {
+    id: "t1",
+    direction: "in",
+    peer: "工作电脑",
+    name: "合同.pdf",
+    size: 1536 * 1024,
+    phase: "complete",
+    progress: 1,
+    savedAs: null,
+    failure: null,
+    ...overrides,
   };
 }
 
@@ -122,6 +141,18 @@ class FakeBridge implements Bridge {
 
   dismissNotice() {
     return this.answer("dismissNotice", this.current);
+  }
+
+  chooseReceiveFolder() {
+    return this.answer("chooseReceiveFolder", this.current);
+  }
+
+  resetReceiveFolder() {
+    return this.answer("resetReceiveFolder", this.current);
+  }
+
+  revealReceived(transferId: string) {
+    return this.answer(`revealReceived:${transferId}`, undefined);
   }
 
   launchAtLogin() {
@@ -534,6 +565,203 @@ describe("开机启动", () => {
     await click(launchSwitch(view.host));
     expect(text(view.host)).toContain("系统没有接受这个设置，请稍后重试。");
     expect(text(view.host)).not.toContain("os error");
+  });
+});
+
+describe("传输", () => {
+  test("没登录时没有这一块；登录后没有记录时如实说还没有", async () => {
+    const signedOut = await render(<App bridge={new FakeBridge(snapshot())} />);
+    await settle();
+    expect(text(signedOut.host)).not.toContain("传输");
+
+    const view = await render(
+      <App bridge={new FakeBridge(snapshot({ phase: "signedIn" }))} />,
+    );
+    await settle();
+    expect(text(view.host)).toContain("还没有收到过文件。");
+  });
+
+  test("每条记录说清楚是谁发来的、多大的文件、现在怎么样", async () => {
+    const source = new FakeBridge(
+      snapshot({
+        phase: "signedIn",
+        transfers: [
+          transfer({
+            id: "t4",
+            name: "视频.mp4",
+            phase: "failed",
+            progress: 0,
+            failure: "diskFull",
+          }),
+          transfer({
+            id: "t3",
+            name: "报表.xlsx",
+            phase: "cancelled",
+            progress: 0,
+          }),
+          transfer({
+            id: "t2",
+            name: "会议录音.m4a",
+            phase: "expired",
+            progress: 0,
+          }),
+          transfer({
+            id: "t5",
+            name: "合同.pdf",
+            phase: "queued",
+            progress: 0,
+          }),
+          transfer({
+            id: "t6",
+            name: "照片.jpg",
+            phase: "inProgress",
+            progress: 0.452,
+          }),
+          transfer({ id: "t1", savedAs: "合同 (2).pdf" }),
+        ],
+      }),
+    );
+    const view = await render(<App bridge={source} />);
+    await settle();
+
+    const page = text(view.host);
+    expect(page).toContain("合同.pdf");
+    expect(page).toContain("工作电脑 · 1.5 MB");
+    expect(page).toContain("已存为「合同 (2).pdf」");
+    expect(page).toContain("正在接收 45%");
+    expect(page).toContain("等待接收…");
+    expect(page).toContain("已保存");
+    expect(page).toContain("接收失败：这台电脑的磁盘已满。");
+    expect(page).toContain("对方撤回了，没有收到。");
+    expect(page).toContain("过了时限，没有收到。");
+    // 失败以警示的方式读出来。
+    expect(view.host.querySelectorAll('[role="alert"]')).toHaveLength(1);
+    expect(page).not.toContain("原因不明");
+  });
+
+  test("每一种失败原因都有自己的说法", async () => {
+    for (const [failure, words] of [
+      ["writeFailed", "文件没能写进接收文件夹"],
+      ["verificationFailed", "收到的内容与发出的对不上"],
+      ["cancelled", "已取消"],
+    ] as const) {
+      document.body.replaceChildren();
+      const source = new FakeBridge(
+        snapshot({
+          phase: "signedIn",
+          transfers: [transfer({ phase: "failed", progress: 0, failure })],
+        }),
+      );
+      const view = await render(<App bridge={source} />);
+      await settle();
+      expect(text(view.host)).toContain(`接收失败：${words}。`);
+      await view.unmount();
+    }
+  });
+
+  test("只有收好的文件能要求显示，而且只交出传输的标识", async () => {
+    const source = new FakeBridge(
+      snapshot({
+        phase: "signedIn",
+        transfers: [
+          transfer(),
+          transfer({ id: "t2", phase: "inProgress", progress: 0.3 }),
+          transfer({
+            id: "t3",
+            phase: "failed",
+            progress: 0,
+            failure: "writeFailed",
+          }),
+        ],
+      }),
+    );
+    const view = await render(<App bridge={source} />);
+    await settle();
+
+    expect(buttons(view.host, "在文件夹中显示")).toHaveLength(1);
+    await click(button(view.host, "在文件夹中显示"));
+    expect(source.calls).toEqual(["revealReceived:t1"]);
+  });
+
+  test("文件已经不在时说明情况，不回显技术细节", async () => {
+    const source = new FakeBridge(
+      snapshot({ phase: "signedIn", transfers: [transfer()] }),
+    );
+    source.failWith = new BridgeError("NOT_SAVED", "no file for t1 on disk");
+    const view = await render(<App bridge={source} />);
+    await settle();
+
+    await click(button(view.host, "在文件夹中显示"));
+    expect(text(view.host)).toContain("这个文件还没有保存到这台电脑上。");
+    expect(text(view.host)).not.toContain("t1 on disk");
+  });
+
+  test("进度随状态推送更新，完成后出现显示按钮", async () => {
+    const source = new FakeBridge(
+      snapshot({
+        phase: "signedIn",
+        transfers: [transfer({ phase: "inProgress", progress: 0.2 })],
+      }),
+    );
+    const view = await render(<App bridge={source} />);
+    await settle();
+    expect(text(view.host)).toContain("正在接收 20%");
+    expect(button(view.host, "在文件夹中显示")).toBeUndefined();
+
+    await act(async () => {
+      source.push(snapshot({ phase: "signedIn", transfers: [transfer()] }));
+    });
+    expect(text(view.host)).toContain("已保存");
+    expect(button(view.host, "在文件夹中显示")).toBeDefined();
+  });
+});
+
+describe("接收位置", () => {
+  test("默认是下载/Assemble，点「更改」由系统选择器来挑", async () => {
+    const source = new FakeBridge(snapshot());
+    const view = await render(<App bridge={source} />);
+    await settle();
+
+    expect(text(view.host)).toContain("下载/Assemble");
+    expect(button(view.host, "恢复默认")).toBeUndefined();
+
+    await click(button(view.host, "更改…"));
+    expect(source.calls).toEqual(["chooseReceiveFolder"]);
+  });
+
+  test("选了文件夹之后只显示它的名字，可以恢复默认", async () => {
+    const source = new FakeBridge(
+      snapshot({ receive: { customFolder: "工作资料" } }),
+    );
+    const view = await render(<App bridge={source} />);
+    await settle();
+
+    expect(text(view.host)).toContain("「工作资料」文件夹");
+    expect(text(view.host)).not.toContain("下载/Assemble");
+
+    await click(button(view.host, "恢复默认"));
+    expect(source.calls).toEqual(["resetReceiveFolder"]);
+    // 结果由 Rust 经状态推送回来，界面不自行改写。
+    expect(text(view.host)).toContain("「工作资料」文件夹");
+
+    await act(async () => {
+      source.push(snapshot());
+    });
+    expect(text(view.host)).toContain("下载/Assemble");
+    expect(button(view.host, "恢复默认")).toBeUndefined();
+  });
+
+  test("选的文件夹不能用时说明原因", async () => {
+    const source = new FakeBridge(snapshot());
+    source.failWith = new BridgeError("INVALID_RECEIVE_FOLDER", "NotDirectory");
+    const view = await render(<App bridge={source} />);
+    await settle();
+
+    await click(button(view.host, "更改…"));
+    expect(text(view.host)).toContain(
+      "这个文件夹不能用来保存收到的文件，请换一个。",
+    );
+    expect(text(view.host)).not.toContain("NotDirectory");
   });
 });
 

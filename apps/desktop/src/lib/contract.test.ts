@@ -73,6 +73,52 @@ describe("状态契约样本", () => {
     );
   });
 
+  test("覆盖了传输的每个阶段、几种失败原因与两种接收位置", () => {
+    const snapshots = checked();
+    const transfers = snapshots.flatMap((snapshot) => snapshot.transfers);
+    expect(new Set(transfers.map((transfer) => transfer.phase))).toEqual(
+      new Set([
+        "queued",
+        "inProgress",
+        "complete",
+        "failed",
+        "cancelled",
+        "expired",
+      ]),
+    );
+    expect(new Set(transfers.map((transfer) => transfer.failure))).toEqual(
+      new Set([null, "diskFull", "writeFailed", "verificationFailed"]),
+    );
+    expect(
+      new Set(
+        snapshots.map((snapshot) => snapshot.receive.customFolder === null),
+      ),
+    ).toEqual(new Set([true, false]));
+    expect(
+      new Set(transfers.map((transfer) => transfer.savedAs === null)),
+    ).toEqual(new Set([true, false]));
+
+    // 只有失败的传输带失败原因；进度只在传输中才有意义，收好了就是 1。
+    for (const transfer of transfers) {
+      expect(transfer.failure !== null).toBe(transfer.phase === "failed");
+      // 收好了进度就是 1，传输中在 0 与 1 之间，其余都是 0。
+      expect(transfer.progress === 1).toBe(transfer.phase === "complete");
+      expect(transfer.progress > 0 && transfer.progress < 1).toBe(
+        transfer.phase === "inProgress",
+      );
+      // 只有收好的文件才有"实际存成了什么名字"。
+      expect(transfer.savedAs !== null && transfer.phase !== "complete").toBe(
+        false,
+      );
+    }
+    // 没登录就没有传输记录。
+    expect(
+      snapshots
+        .filter((snapshot) => snapshot.session.phase !== "signedIn")
+        .every((snapshot) => snapshot.transfers.length === 0),
+    ).toBe(true);
+  });
+
   test("样本里不出现任何凭据或本机路径", () => {
     const text = JSON.stringify(checked());
     for (const forbidden of [
