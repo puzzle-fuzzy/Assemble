@@ -28,6 +28,9 @@ jobs:
         env:
           TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: echo "$TOKEN" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+      # 运行器上默认的构建驱动不支持把中间层存回镜像仓库；先建一个支持的。
+      - name: 准备构建器
+        run: docker buildx create --name assemble-builder --driver docker-container --use
       # 标记：提交号的前 12 位；推送到 main 时另加 latest，打标签时另加那个标签。
       # 中间层存回仓库里，下一次构建可以直接复用。
       - name: 构建并推送
