@@ -63,7 +63,20 @@ sqlx = { version = "0.9.1", default-features = false, features = [
   "sqlite",
 ] }
 subtle = "2.6.1"
-tauri = { version = "2.12.7", features = ["tray-icon", "image-png"] }
+# 默认 feature 里的 common-controls-v6 不要：它让运行时与菜单去用只有通用控件库 6.0 才有的
+# TaskDialogIndirect，而库的单元测试是另一个可执行文件，没有应用清单，Windows 给它的是
+# 5.82 的旧版——测试程序一启动就以 STATUS_ENTRYPOINT_NOT_FOUND 退出，一个测试都没跑
+# （持续集成的 Windows 一栏抓到的，2026-11-24）。它只服务于预置的"关于"菜单项和
+# 运行时的消息对话框，这两样我们都没用。其余默认 feature 原样保留。
+tauri = { version = "2.12.7", default-features = false, features = [
+  "wry",
+  "compression",
+  "dynamic-acl",
+  "x11",
+  "dbus",
+  "tray-icon",
+  "image-png",
+] }
 tauri-build = { version = "2.7.6", features = [] }
 tauri-plugin-autostart = "2.7.0"
 tauri-plugin-dialog = "2.8.4"

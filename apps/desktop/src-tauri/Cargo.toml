@@ -12,8 +12,6 @@ crate-type = ["lib", "cdylib", "staticlib"]
 
 [build-dependencies]
 tauri-build.workspace = true
-# 把应用清单也链进测试程序（原因见 build.rs）。版本与 tauri-winres 用的同一个，锁文件里已经有了。
-embed-resource = "3.0.12"
 
 [dependencies]
 assemble-client.workspace = true

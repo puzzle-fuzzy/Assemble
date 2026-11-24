@@ -176,7 +176,6 @@ dependencies = [
  "assemble-server",
  "assemble-store",
  "assemble-transfer",
- "embed-resource",
  "futures-util",
  "hostname",
  "serde",
