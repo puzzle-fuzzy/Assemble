@@ -9,6 +9,7 @@
 pub mod accounts;
 pub mod audit;
 pub mod auth;
+pub mod blobs;
 pub mod config;
 pub mod db;
 pub mod desktop_login;
@@ -16,12 +17,15 @@ pub mod devices;
 pub mod error;
 pub mod events;
 pub mod http;
+pub mod maintenance;
 pub mod presence;
 pub mod secrets;
+pub mod sends;
 pub mod templates;
 pub mod web;
 
 use std::io::BufRead;
+use std::sync::Arc;
 
 use sqlx::SqlitePool;
 use tokio_util::sync::CancellationToken;
@@ -61,6 +65,11 @@ pub async fn run_server() -> Result<(), StartupError> {
     let state = std::sync::Arc::new(http::AppState::new(pool, config));
     let stop = CancellationToken::new();
     watch_for_shutdown(stop.clone());
+    // 先把上次运行留下的尾巴处理掉，再开始接客；之后每隔一分钟清理一次。
+    if let Err(error) = maintenance::run_once(&state).await {
+        tracing::warn!(%error, "the first maintenance round failed; it will be retried");
+    }
+    maintenance::start(Arc::clone(&state), stop.clone());
     http::serve((*state.config).clone(), state, stop).await?;
     tracing::info!("server stopped");
     Ok(())

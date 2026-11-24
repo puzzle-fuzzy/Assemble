@@ -1,7 +1,7 @@
 //! 各协议域共用的值原语。
 
 use std::borrow::Cow;
-use std::ops::Add;
+use std::ops::{Add, Sub};
 use std::time::Duration;
 
 use chrono::{DateTime, SecondsFormat, Utc};
@@ -106,6 +106,14 @@ impl Add<Duration> for Timestamp {
 
     fn add(self, duration: Duration) -> Self::Output {
         Self(self.0 + chrono::Duration::from_std(duration).unwrap_or(chrono::Duration::MAX))
+    }
+}
+
+impl Sub<Duration> for Timestamp {
+    type Output = Self;
+
+    fn sub(self, duration: Duration) -> Self::Output {
+        Self(self.0 - chrono::Duration::from_std(duration).unwrap_or(chrono::Duration::MAX))
     }
 }
 
@@ -215,5 +223,11 @@ mod tests {
         assert_eq!(at.elapsed_since(later), Duration::ZERO);
         assert!(later > at);
         assert!(Timestamp::now() > at);
+        // 往前推同样的时长回到原处。
+        assert_eq!(
+            (later - Duration::from_millis(86_400_000)).as_millis(),
+            at.as_millis()
+        );
+        assert!(later - Duration::from_secs(1) > at);
     }
 }

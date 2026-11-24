@@ -17,6 +17,7 @@ use sqlx::SqlitePool;
 use tokio::net::TcpListener;
 use tokio_util::sync::CancellationToken;
 
+use crate::blobs::BlobStore;
 use crate::config::Config;
 use crate::events::{Hub, stream};
 use crate::presence::Presence;
@@ -31,11 +32,14 @@ pub struct AppState {
     pub presence: Arc<Presence>,
     pub hub: Arc<Hub>,
     pub throttle: LoginThrottle,
+    /// 文件内容的存放处，按摘要寻址。
+    pub blobs: Arc<BlobStore>,
 }
 
 impl AppState {
     pub fn new(pool: SqlitePool, config: Config) -> Self {
         Self {
+            blobs: Arc::new(BlobStore::new(&config.data_dir, pool.clone())),
             pool,
             config: Arc::new(config),
             presence: Arc::new(Presence::default()),
@@ -78,6 +82,16 @@ pub fn router(state: Shared) -> Router {
             patch(crate::devices::rename_device).delete(crate::devices::remove_device),
         )
         .route(EVENT_STREAM_PATH, get(stream))
+        // 发送到设备：正文是文件的字节
+        .route(
+            "/v1/sends",
+            post(crate::sends::create).get(crate::sends::list),
+        )
+        .route("/v1/sends/{id}/content", get(crate::sends::content))
+        .route("/v1/sends/{id}/accept", post(crate::sends::accept))
+        .route("/v1/sends/{id}/decline", post(crate::sends::decline))
+        .route("/v1/sends/{id}/cancel", post(crate::sends::cancel))
+        .route("/v1/sends/{id}/failed", post(crate::sends::failed))
         .layer(DefaultBodyLimit::max(upload_limit()))
         .with_state(state)
 }
@@ -187,10 +201,12 @@ impl TestServer {
         Self::serve(listener, config, pool)
     }
 
-    fn serve(listener: TcpListener, config: Config, pool: SqlitePool) -> std::io::Result<Self> {
+    fn serve(listener: TcpListener, mut config: Config, pool: SqlitePool) -> std::io::Result<Self> {
         let address = listener.local_addr()?;
         let origin = assemble_protocol::origin::ServerOrigin::parse(&format!("http://{address}"))
             .expect("a loopback address is a valid origin");
+        // 测试服务的对外地址就是它实际监听的那个：网页登录要拿它核对 Origin。
+        config.public_origin = origin.clone();
         let stop = CancellationToken::new();
         let triggered = stop.clone();
         let state = Arc::new(AppState::new(pool, config));

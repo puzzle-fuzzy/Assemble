@@ -37,6 +37,12 @@ pub mod actions {
     pub const DEVICE_RENAMED: &str = "device.renamed";
     pub const DEVICE_REMOVED: &str = "device.removed";
     pub const DEVICE_LOGOUT: &str = "device.logout";
+    pub const SEND_CREATED: &str = "send.created";
+    pub const SEND_ACCEPTED: &str = "send.accepted";
+    pub const SEND_DECLINED: &str = "send.declined";
+    pub const SEND_CANCELLED: &str = "send.cancelled";
+    pub const SEND_FAILED: &str = "send.failed";
+    pub const SEND_EXPIRED: &str = "send.expired";
 }
 
 #[cfg(test)]

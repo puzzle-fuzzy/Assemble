@@ -21,6 +21,7 @@ axum = { version = "0.8.9", default-features = false, features = [
   "form",
   "http1",
   "json",
+  "macros",
   "query",
   "tokio",
 ] }

@@ -37,7 +37,8 @@ impl TransferProgress {
     }
 }
 
-pub type ProgressCallback<'a> = &'a mut dyn FnMut(TransferProgress);
+/// 进度回调必须能跨线程：传输会在异步运行时上被等待，future 也得能在线程之间移动。
+pub type ProgressCallback<'a> = &'a mut (dyn FnMut(TransferProgress) + Send);
 
 /// 一次暂存的参数。带有进度回调，所以按值传入、只使用一次。
 pub struct SaveOptions<'a> {
