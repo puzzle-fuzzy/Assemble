@@ -22,7 +22,7 @@ jobs:
       - name: 直接运行一次，看系统日志里怎么说
         shell: pwsh
         run: |
-          $exe = Get-ChildItem target\debug\deps\assemble_desktop_lib-*.exe | Select-Object -First 1
+          $exe = Get-ChildItem target\debug -Recurse -Filter assemble_desktop_lib-*.exe | Select-Object -First 1
           Write-Host "程序：$($exe.Name)"
           $p = Start-Process -FilePath $exe.FullName -ArgumentList '--list' -PassThru -Wait -ErrorAction SilentlyContinue
           Write-Host "退出码：0x{0:X8}" -f $p.ExitCode
@@ -36,7 +36,7 @@ jobs:
       - name: 逐个核对导入的函数在不在
         shell: pwsh
         run: |
-          $exe = Get-ChildItem target\debug\deps\assemble_desktop_lib-*.exe | Select-Object -First 1
+          $exe = Get-ChildItem target\debug -Recurse -Filter assemble_desktop_lib-*.exe | Select-Object -First 1
           $dumpbin = Get-ChildItem 'C:\Program Files\Microsoft Visual Studio' -Recurse -Filter dumpbin.exe -ErrorAction SilentlyContinue |
             Where-Object { $_.FullName -match 'Hostx64\\x64' } | Select-Object -First 1
           Write-Host "dumpbin：$($dumpbin.FullName)"
