@@ -694,10 +694,18 @@ mod tests {
 
     #[test]
     fn failures_are_reported_with_the_reasons_the_protocol_knows() {
-        let full = TransferError::Io(std::io::Error::from_raw_os_error(28));
+        // 按错误的种类来造：原始错误码在各个平台上不一样（类 Unix 上 28 是磁盘已满，
+        // Windows 上 28 是"打印机没纸了"）。把系统的错误翻译成种类是标准库的事。
+        let full = TransferError::Io(std::io::Error::new(
+            std::io::ErrorKind::StorageFull,
+            "no space left on the device",
+        ));
         assert_eq!(ReceiveFailure::from(&full), ReceiveFailure::DiskFull);
 
-        let denied = TransferError::Io(std::io::Error::from_raw_os_error(13));
+        let denied = TransferError::Io(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            "permission denied",
+        ));
         assert_eq!(ReceiveFailure::from(&denied), ReceiveFailure::WriteFailed);
         assert_eq!(
             ReceiveFailure::from(&TransferError::FileExists),

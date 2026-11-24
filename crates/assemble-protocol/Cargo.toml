@@ -9,8 +9,11 @@ description = "Assemble 服务端与桌面端之间的线上契约：账户、�
 [dependencies]
 chrono.workspace = true
 serde.workspace = true
-serde_json.workspace = true
 url.workspace = true
+
+# 库代码只做序列化，不做 JSON 的解析与拼接：serde_json 只有测试在用。
+[dev-dependencies]
+serde_json.workspace = true
 
 [lints]
 workspace = true
