@@ -332,10 +332,20 @@ mod tests {
         }
     }
 
-    /// 一个本机时区下的时刻。
+    /// 一个固定的时刻：给的是带偏移的时间，和机器在哪个时区无关。
     fn local(text: &str) -> Timestamp {
         let parsed = chrono::DateTime::parse_from_rfc3339(text).unwrap();
         Timestamp::from_millis(parsed.timestamp_millis()).unwrap()
+    }
+
+    /// 本机时区下的"年月日 时:分"换成的时刻。`local_time` 也是按本机时区写的，
+    /// 两个凑在一起，测试在哪个时区的机器上都一样。
+    fn local_clock(year: i32, month: u32, day: u32, hour: u32, minute: u32) -> Timestamp {
+        let at = chrono::Local
+            .with_ymd_and_hms(year, month, day, hour, minute, 0)
+            .single()
+            .unwrap();
+        Timestamp::from_millis(at.timestamp_millis()).unwrap()
     }
 
     fn planner() -> Planner {
@@ -568,7 +578,8 @@ mod tests {
 
     #[test]
     fn the_words_under_a_notification_name_when_it_starts() {
-        let at = local("2026-11-25T09:00:00+08:00");
+        // 按本机时区写下"九点"：`words` 也是按本机时区写的，机器在哪个时区都该是九点。
+        let at = local_clock(2026, 11, 25, 9, 0);
         let mut notification = Notification {
             id: "s1-1".into(),
             kind: assemble_protocol::schedule::NotificationKind::Schedule,
