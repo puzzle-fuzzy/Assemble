@@ -18,7 +18,7 @@ use assemble_protocol::schedule::{
     Location, Notification, Planner, ReminderStatus, Repeat, Schedule, ScheduleStatus,
 };
 use assemble_schedule::occurrences::Recurrence;
-use chrono::{Datelike, TimeZone};
+use chrono::TimeZone;
 use serde::{Deserialize, Serialize};
 use tauri::Manager;
 use tokio_util::sync::CancellationToken;
@@ -207,11 +207,6 @@ fn local_day_start() -> i64 {
         // 夏令时切换的那一小时里"零点"可能不存在：退回 UTC 的零点，只影响边界上的一场。
         None => midnight.and_utc().timestamp_millis(),
     }
-}
-
-/// 本机时区下今天是第几天（从公元元年数起）。过了零点它会变。
-pub fn local_day() -> i32 {
-    chrono::Local::now().date_naive().num_days_from_ce()
 }
 
 /// 接到一份名单：换上它，再把该弹的弹出去。

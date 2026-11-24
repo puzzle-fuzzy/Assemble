@@ -145,6 +145,11 @@ async fn follow_events(app: AppHandle) {
                     if catch_up(&state, &cancel).await {
                         break;
                     }
+                    // 过了零点，"接下来七天"要往前挪一天；事件流看着是连着的，也可能漏掉一份名单。
+                    // 同一条通知不会因此再弹一遍：弹过哪些，记在本机的账本里。
+                    if let Err(error) = planner::refresh(&state, &cancel).await {
+                        tracing::debug!(%error, "the planner could not be listed on the periodic check");
+                    }
                 }
                 item = stream.next() => match handle(item, own_device.as_deref()) {
                     Next::Nothing => {}

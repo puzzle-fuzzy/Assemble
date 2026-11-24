@@ -365,9 +365,8 @@ pub struct View {
     receive: ReceiveView,
     notice: Option<Notice>,
     /// 服务端最近一次给的名单；拿不到时留着上一份。没登录时为 `None`。
+    /// 接下来七天的场次在每次出快照时重算，所以过了零点"今天"自然就换了。
     planner: Option<Planner>,
-    /// 这份名单是在本机的哪一天拿到的。过了零点，"今天"要换：哪怕名单没变，也得重算一遍。
-    planner_day: i32,
     /// 点开某条通知之后要定位到的那一条。它已读或换了一份账户之后清掉。
     planner_focus: Option<String>,
     /// 最近弹过的系统通知：`handle` 对应哪一条通知。点通知时按 `handle` 找回它。
@@ -431,7 +430,6 @@ impl View {
             },
             notice: None,
             planner: None,
-            planner_day: 0,
             planner_focus: None,
             planner_handles: Vec::new(),
             planner_muted: false,
@@ -860,9 +858,7 @@ impl<R: tauri::Runtime> AppState<R> {
 
     /// 换上一份日程名单；传 `None` 清掉（没登录的时候）。
     pub fn set_planner(&self, planner: Option<Planner>) {
-        let day = crate::planner::local_day();
         self.update(|view| {
-            view.planner_day = day;
             view.planner = planner;
             // 要定位的那一条已经不在未读名单里了：不再定位。
             if view.planner_focus.as_ref().is_some_and(|focus| {
