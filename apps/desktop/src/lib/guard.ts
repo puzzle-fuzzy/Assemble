@@ -6,6 +6,7 @@
 import type {
   AccountView,
   DeviceView,
+  DraftView,
   LaunchState,
   Notice,
   Platform,
@@ -90,8 +91,10 @@ export function isTransferPhase(value: unknown): value is TransferPhase {
   return (
     value === "queued" ||
     value === "inProgress" ||
+    value === "waiting" ||
     value === "complete" ||
     value === "failed" ||
+    value === "declined" ||
     value === "cancelled" ||
     value === "expired"
   );
@@ -102,7 +105,11 @@ export function isTransferFailure(value: unknown): value is TransferFailure {
     value === "diskFull" ||
     value === "writeFailed" ||
     value === "verificationFailed" ||
-    value === "cancelled"
+    value === "cancelled" ||
+    value === "deviceOffline" ||
+    value === "tooLarge" ||
+    value === "fileUnreadable" ||
+    value === "rejected"
   );
 }
 
@@ -117,7 +124,22 @@ export function isTransferView(value: unknown): value is TransferView {
     isTransferPhase(value.phase) &&
     typeof value.progress === "number" &&
     (value.savedAs === null || typeof value.savedAs === "string") &&
-    (value.failure === null || isTransferFailure(value.failure))
+    (value.failure === null || isTransferFailure(value.failure)) &&
+    typeof value.retryable === "boolean"
+  );
+}
+
+export function isDraftView(value: unknown): value is DraftView {
+  return (
+    isRecord(value) &&
+    hasString(value, "id") &&
+    Array.isArray(value.files) &&
+    value.files.every(
+      (file) =>
+        isRecord(file) &&
+        hasString(file, "name") &&
+        typeof file.size === "number",
+    )
   );
 }
 
@@ -147,6 +169,7 @@ export function isSnapshot(value: unknown): value is Snapshot {
     value.devices.every(isDeviceView) &&
     Array.isArray(value.transfers) &&
     value.transfers.every(isTransferView) &&
+    (value.draft === null || isDraftView(value.draft)) &&
     isRecord(value.receive) &&
     (value.receive.customFolder === null ||
       typeof value.receive.customFolder === "string") &&

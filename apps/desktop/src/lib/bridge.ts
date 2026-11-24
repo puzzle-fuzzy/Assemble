@@ -44,6 +44,18 @@ export interface Bridge {
   resetReceiveFolder(): Promise<Snapshot>;
   /** 在访达或资源管理器里显示一个已经收到的文件。界面只给得出传输的标识。 */
   revealReceived(transferId: string): Promise<void>;
+  /** 挑要发送的文件，然后打开发送面板。位置由系统选择器直接交给 Rust，不经过界面。 */
+  startSend(): Promise<Snapshot>;
+  /** 把挑好的文件发给一台设备。返回每一条传输的标识，面板据此盯着进度。 */
+  sendToDevice(deviceId: string): Promise<string[]>;
+  /** 关掉发送面板。挑好却没发的文件不再留着。 */
+  closeSendPanel(): Promise<void>;
+  /** 把主窗口叫到前面。发送面板里"请先登录"时用。 */
+  openMain(): Promise<void>;
+  /** 取消一条传输：还没传完的停下，已经到服务端的撤回。 */
+  cancelTransfer(transferId: string): Promise<void>;
+  /** 再发一次。只有"文件根本没到服务端"的失败才有用。 */
+  retryTransfer(transferId: string): Promise<void>;
   /** 提示看过了，收起来。 */
   dismissNotice(): Promise<Snapshot>;
   /** 订阅状态变化，返回取消订阅的函数。 */
@@ -68,6 +80,14 @@ export const bridge: Bridge = {
     checked(() => invoke<unknown>("reset_receive_folder")),
   revealReceived: (transferId) =>
     invoke<void>("reveal_received", { transferId }),
+  startSend: () => checked(() => invoke<unknown>("start_send")),
+  sendToDevice: (deviceId) =>
+    ids(() => invoke<unknown>("send_to_device", { deviceId })),
+  closeSendPanel: () => invoke<void>("close_send_panel"),
+  openMain: () => invoke<void>("open_main"),
+  cancelTransfer: (transferId) =>
+    invoke<void>("cancel_transfer", { transferId }),
+  retryTransfer: (transferId) => invoke<void>("retry_transfer", { transferId }),
   dismissNotice: () => checked(() => invoke<unknown>("dismiss_notice")),
   subscribe: (listener) =>
     listen<unknown>(SNAPSHOT_EVENT, (event) => {
@@ -78,6 +98,21 @@ export const bridge: Bridge = {
 /** 取回一份状态，并在交界处核对它的形状。 */
 async function checked(load: () => Promise<unknown>): Promise<Snapshot> {
   return requireSnapshot(await run(load));
+}
+
+/** 取回一组标识，并在交界处核对它的形状。 */
+async function ids(load: () => Promise<unknown>): Promise<string[]> {
+  const value = await run(load);
+  if (
+    Array.isArray(value) &&
+    value.every((id) => typeof id === "string" && id.length > 0)
+  ) {
+    return value as string[];
+  }
+  throw new BridgeError(
+    "INVALID_STATE",
+    "the identifiers sent by the desktop shell have an unknown shape",
+  );
 }
 
 function requireSnapshot(value: unknown): Snapshot {

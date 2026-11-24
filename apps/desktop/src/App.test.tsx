@@ -1,295 +1,40 @@
 // 界面测试：注入替身桥接，在真实 DOM 里验证用户看到的与触发的操作。
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { act, type ReactElement } from "react";
-import { createRoot, type Root } from "react-dom/client";
+import { act } from "react";
 
 import { App } from "@/App";
-import { type Bridge, BridgeError, type UnlistenFn } from "@/lib/bridge";
-import type {
-  DeviceView,
-  LaunchState,
-  ServiceView,
-  Snapshot,
-  TransferView,
-} from "@/lib/types";
-
-const ACCOUNT = {
-  id: "account-1",
-  username: "example",
-  displayName: "Example",
-};
-
-/** 这台电脑自己。 */
-const DEVICE: DeviceView = {
-  id: "device-1",
-  name: "MacBook-Pro",
-  platform: "macos",
-  online: true,
-};
-
-/** 账户里的另一台电脑。 */
-const OTHER: DeviceView = {
-  id: "device-2",
-  name: "工作电脑",
-  platform: "windows",
-  online: false,
-};
-
-function service(overrides: Partial<ServiceView> = {}): ServiceView {
-  return { target: "production", reachable: true, stream: "off", ...overrides };
-}
-
-type Overrides = Partial<Omit<Snapshot, "session">> & {
-  phase?: Snapshot["session"]["phase"];
-};
-
-function signedIn(account: typeof ACCOUNT = ACCOUNT): Snapshot["session"] {
-  return { phase: "signedIn", account, device: { ...DEVICE } };
-}
-
-function snapshot(overrides: Overrides = {}): Snapshot {
-  const { phase, ...rest } = overrides;
-  const session: Snapshot["session"] =
-    phase === "signingIn"
-      ? { phase: "signingIn" }
-      : phase === "signedIn"
-        ? signedIn()
-        : { phase: "signedOut" };
-  return {
-    service: service(),
-    session,
-    // 没登录时 Rust 不会给出设备列表，也不会留着传输记录。
-    devices: phase === "signedIn" ? [{ ...DEVICE }] : [],
-    transfers: [],
-    receive: { customFolder: null },
-    launchAtLogin: "disabled",
-    notice: null,
-    ...rest,
-  };
-}
-
-/** 一条传输记录；不说明阶段时，是一个已经收好的文件。 */
-function transfer(overrides: Partial<TransferView> = {}): TransferView {
-  return {
-    id: "t1",
-    direction: "in",
-    peer: "工作电脑",
-    name: "合同.pdf",
-    size: 1536 * 1024,
-    phase: "complete",
-    progress: 1,
-    savedAs: null,
-    failure: null,
-    ...overrides,
-  };
-}
-
-/** 记录调用、可注入失败的替身桥接。 */
-class FakeBridge implements Bridge {
-  current: Snapshot;
-  calls: string[] = [];
-  failWith: BridgeError | null = null;
-  pending = false;
-  private listeners = new Set<(snapshot: Snapshot) => void>();
-
-  constructor(initial: Snapshot) {
-    this.current = initial;
-  }
-
-  private gate(): Promise<void> {
-    this.pending = true;
-    return new Promise((resolve) => {
-      // 让调用方有机会观察"进行中"的状态。
-      setTimeout(() => {
-        this.pending = false;
-        resolve();
-      }, 0);
-    });
-  }
-
-  private async answer<T>(name: string, result: T): Promise<T> {
-    this.calls.push(name);
-    if (this.failWith) throw this.failWith;
-    await this.gate();
-    return result;
-  }
-
-  snapshot() {
-    return Promise.resolve(this.current);
-  }
-
-  signIn() {
-    return this.answer("signIn", this.current);
-  }
-
-  cancelSignIn() {
-    return this.answer("cancelSignIn", undefined);
-  }
-
-  signOut() {
-    return this.answer("signOut", this.current);
-  }
-
-  renameDevice(deviceId: string, name: string) {
-    return this.answer(`renameDevice:${deviceId}:${name}`, this.current);
-  }
-
-  removeDevice(deviceId: string) {
-    return this.answer(`removeDevice:${deviceId}`, this.current);
-  }
-
-  dismissNotice() {
-    return this.answer("dismissNotice", this.current);
-  }
-
-  chooseReceiveFolder() {
-    return this.answer("chooseReceiveFolder", this.current);
-  }
-
-  resetReceiveFolder() {
-    return this.answer("resetReceiveFolder", this.current);
-  }
-
-  revealReceived(transferId: string) {
-    return this.answer(`revealReceived:${transferId}`, undefined);
-  }
-
-  launchAtLogin() {
-    return this.answer<LaunchState>(
-      "launchAtLogin",
-      this.current.launchAtLogin,
-    );
-  }
-
-  setLaunchAtLogin(enabled: boolean) {
-    this.calls.push(`setLaunchAtLogin:${enabled}`);
-    if (this.failWith) throw this.failWith;
-    return Promise.resolve(this.current.launchAtLogin);
-  }
-
-  async subscribe(listener: (snapshot: Snapshot) => void): Promise<UnlistenFn> {
-    this.listeners.add(listener);
-    return () => {
-      this.listeners.delete(listener);
-    };
-  }
-
-  get listenerCount() {
-    return this.listeners.size;
-  }
-
-  /** 模拟 Rust 推来新的状态。 */
-  push(next: Snapshot) {
-    this.current = next;
-    for (const listener of this.listeners) listener(next);
-  }
-}
-
-interface Rendered {
-  host: HTMLElement;
-  unmount: () => Promise<void>;
-}
-
-const mounted: { root: Root; host: HTMLElement }[] = [];
-
-async function render(ui: ReactElement): Promise<Rendered> {
-  const host = document.createElement("div");
-  document.body.append(host);
-  const root = createRoot(host);
-  mounted.push({ root, host });
-  await act(async () => {
-    root.render(ui);
-  });
-  return {
-    host,
-    unmount: async () => {
-      await act(async () => {
-        root.unmount();
-      });
-    },
-  };
-}
-
-async function settle() {
-  // 等待已排队的回调与零延时定时器跑完。
-  await act(async () => {
-    await new Promise((resolve) => setTimeout(resolve, 5));
-  });
-}
-
-function text(host: HTMLElement) {
-  return host.textContent ?? "";
-}
-
-function button(
-  host: HTMLElement,
-  name: string,
-): HTMLButtonElement | undefined {
-  return [...host.querySelectorAll("button")].find(
-    (candidate) => candidate.textContent?.trim() === name,
-  );
-}
-
-function buttons(host: HTMLElement, name: string): HTMLButtonElement[] {
-  return [...host.querySelectorAll("button")].filter(
-    (candidate) => candidate.textContent?.trim() === name,
-  );
-}
-
-function textField(host: HTMLElement): HTMLInputElement {
-  const found = host.querySelector<HTMLInputElement>(
-    "input:not([type=checkbox])",
-  );
-  if (!found) throw new Error("没有找到输入框");
-  return found;
-}
-
-/** 在输入框里打字：走浏览器自己的 value 设置器，React 才会看到变化。 */
-async function typeInto(host: HTMLElement, value: string) {
-  await act(async () => {
-    const input = textField(host);
-    const setter = Object.getOwnPropertyDescriptor(
-      HTMLInputElement.prototype,
-      "value",
-    )?.set;
-    setter?.call(input, value);
-    input.dispatchEvent(new Event("input", { bubbles: true }));
-  });
-}
-
-function launchSwitch(host: HTMLElement): HTMLButtonElement {
-  const found = host.querySelector<HTMLButtonElement>('[role="switch"]');
-  if (!found) throw new Error("没有找到开机启动开关");
-  return found;
-}
-
-/** 点击但不等待命令返回：用来观察"进行中"的状态。 */
-async function press(element: HTMLElement | undefined) {
-  if (!element) throw new Error("要点击的元素不存在");
-  await act(async () => {
-    element.click();
-  });
-}
-
-/** 点击并等命令返回、界面稳定。 */
-async function click(element: HTMLElement | undefined) {
-  await press(element);
-  await settle();
-}
+import { BridgeError } from "@/lib/bridge";
+import type { TransferView } from "@/lib/types";
+import {
+  button,
+  buttons,
+  cleanup,
+  click,
+  launchSwitch,
+  press,
+  render,
+  settle,
+  text,
+  textField,
+  typeInto,
+} from "@/test-support/dom";
+import {
+  ACCOUNT,
+  DEVICE,
+  FakeBridge,
+  OTHER,
+  service,
+  signedIn,
+  snapshot,
+  transfer,
+} from "@/test-support/fakes";
 
 beforeEach(() => {
   document.body.replaceChildren();
 });
 
-afterEach(async () => {
-  for (const { root, host } of mounted.splice(0)) {
-    await act(async () => {
-      root.unmount();
-    });
-    host.remove();
-  }
-});
+afterEach(cleanup);
 
 describe("连接状态", () => {
   test("探测出结果前显示正在检测，之后显示服务名", async () => {
@@ -578,7 +323,7 @@ describe("传输", () => {
       <App bridge={new FakeBridge(snapshot({ phase: "signedIn" }))} />,
     );
     await settle();
-    expect(text(view.host)).toContain("还没有收到过文件。");
+    expect(text(view.host)).toContain("还没有收发过文件。");
   });
 
   test("每条记录说清楚是谁发来的、多大的文件、现在怎么样", async () => {
@@ -713,6 +458,98 @@ describe("传输", () => {
     });
     expect(text(view.host)).toContain("已保存");
     expect(button(view.host, "在文件夹中显示")).toBeDefined();
+  });
+
+  test("发出的传输按方向措辞；能取消的给「取消」，能重发的才给「重发」", async () => {
+    const outgoing = (
+      id: string,
+      phase: TransferView["phase"],
+      extra: Partial<TransferView> = {},
+    ) => transfer({ id, direction: "out", phase, progress: 0, ...extra });
+    const source = new FakeBridge(
+      snapshot({
+        phase: "signedIn",
+        transfers: [
+          outgoing("t8", "queued"),
+          outgoing("t7", "inProgress", { progress: 0.3 }),
+          outgoing("t6", "waiting", { progress: 1 }),
+          outgoing("t5", "complete", { progress: 1 }),
+          outgoing("t4", "declined"),
+          outgoing("t3", "cancelled"),
+          outgoing("t2", "expired"),
+          outgoing("t1", "failed", {
+            failure: "deviceOffline",
+            retryable: true,
+          }),
+          outgoing("t0", "failed", { failure: "writeFailed" }),
+        ],
+      }),
+    );
+    const view = await render(<App bridge={source} />);
+    await settle();
+
+    const page = text(view.host);
+    expect(page).toContain("发给 工作电脑 · 1.5 MB");
+    expect(page).toContain("等待发送…");
+    expect(page).toContain("正在发送 30%");
+    expect(page).toContain("已发出，等对方接收");
+    expect(page).toContain("对方已收下");
+    expect(page).toContain("对方拒收了。");
+    expect(page).toContain("已撤回。");
+    expect(page).toContain("对方没有在时限内接收。");
+    expect(page).toContain("发送失败：那台设备刚刚下线了。");
+    expect(page).toContain("发送失败：对方设备没能把文件写下来。");
+    // 还没到头的三条可以取消；只有文件没到服务端的那次失败可以重发。
+    expect(buttons(view.host, "取消")).toHaveLength(3);
+    expect(buttons(view.host, "重发")).toHaveLength(1);
+    // 发出去的文件不在这台电脑上，没有"在文件夹中显示"。
+    expect(buttons(view.host, "在文件夹中显示")).toHaveLength(0);
+  });
+
+  test("取消与重发只交出传输的标识", async () => {
+    const source = new FakeBridge(
+      snapshot({
+        phase: "signedIn",
+        transfers: [
+          transfer({
+            id: "t2",
+            direction: "out",
+            phase: "waiting",
+            progress: 1,
+          }),
+          transfer({
+            id: "t1",
+            direction: "out",
+            phase: "failed",
+            failure: "deviceOffline",
+            retryable: true,
+          }),
+        ],
+      }),
+    );
+    const view = await render(<App bridge={source} />);
+    await settle();
+
+    // 两个按钮各属于各自的那条记录。
+    await click(button(view.host, "取消"));
+    await click(button(view.host, "重发"));
+    expect(source.calls).toEqual(["cancelTransfer:t2", "retryTransfer:t1"]);
+  });
+
+  test("点「发送文件…」交给系统选择器；挑的文件读不出来时说明原因", async () => {
+    const source = new FakeBridge(snapshot({ phase: "signedIn" }));
+    const view = await render(<App bridge={source} />);
+    await settle();
+
+    await click(button(view.host, "发送文件…"));
+    expect(source.calls).toEqual(["startSend"]);
+
+    source.failWith = new BridgeError("FILE_UNREADABLE", "open /x/y: EACCES");
+    await click(button(view.host, "发送文件…"));
+    expect(text(view.host)).toContain(
+      "有文件读不出来，可能已被移走或没有权限。",
+    );
+    expect(text(view.host)).not.toContain("EACCES");
   });
 });
 

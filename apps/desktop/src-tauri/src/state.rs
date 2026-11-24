@@ -1,8 +1,8 @@
-//! 应用状态：服务是否可达、会话处在哪个阶段、有哪些设备、有哪些传输，
-//! 以及这些状态如何交给界面。
+//! 应用状态：服务是否可达、会话处在哪个阶段、有哪些设备，
+//! 以及这些状态如何交给界面。收发的记录在 [`crate::registry`]。
 //!
 //! 界面只能看到这里定义的 [`Snapshot`]。凭据、路径与系统诊断都不在其中：
-//! 收到的文件存在本机的哪里，只记在 [`TransferRecord`] 里，界面拿到的是它的名字。
+//! 文件在本机的哪里，只记在 Rust 里，界面拿到的是它的名字。
 //!
 //! 状态的改动都经过 [`AppState::update`]：改完若与之前不同，就自动推送给界面。
 //! 这样既不会漏推，也不会为一次没有变化的改动惊动界面。
@@ -10,20 +10,23 @@
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicI32, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
-use assemble_client::Client;
-use assemble_device::Received;
+use assemble_client::{Client, OutgoingFile};
 use assemble_device::inbox::ReceiveFailure;
 use assemble_protocol::account::Account;
 use assemble_protocol::device::Device;
 use assemble_protocol::origin::ServerOrigin;
-use assemble_protocol::sends::{Direction, Send as SendRecord, SendState};
+use assemble_protocol::sends::{Direction, Send as SendRecord};
 use assemble_store::secret::{SecretKey, SecretStore, SecretString};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_autostart::ManagerExt;
 use tokio_util::sync::CancellationToken;
+
+use crate::registry::{
+    Cancellation, DraftView, Next, Outgoing, Registry, TransferFailure, TransferView, Updated,
+};
 
 /// 一次进行中的登录尝试。
 #[derive(Debug, Clone)]
@@ -215,75 +218,6 @@ impl ReceiveView {
     }
 }
 
-/// 一次传输走到了哪一步。收与发共用一套说法，界面按方向各自措辞。
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub enum TransferPhase {
-    /// 排着队还没开始，或者上一次没成功、等着再试。
-    Queued,
-    InProgress,
-    /// 收到的文件已经存好；发出去的文件对方已经收下。
-    Complete,
-    Failed,
-    /// 发送方撤回了。
-    Cancelled,
-    /// 过了时限还没送达。
-    Expired,
-}
-
-/// 传输为什么失败。与协议里报告给对端的原因一一对应，由下面的转换负责；
-/// 状态形状一律用驼峰拼写，所以这里的拼法与服务端那边的不同。
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub enum TransferFailure {
-    DiskFull,
-    WriteFailed,
-    VerificationFailed,
-    Cancelled,
-}
-
-impl From<ReceiveFailure> for TransferFailure {
-    fn from(failure: ReceiveFailure) -> Self {
-        match failure {
-            ReceiveFailure::DiskFull => Self::DiskFull,
-            ReceiveFailure::WriteFailed => Self::WriteFailed,
-            ReceiveFailure::VerificationFailed => Self::VerificationFailed,
-            ReceiveFailure::Cancelled => Self::Cancelled,
-        }
-    }
-}
-
-impl From<TransferFailure> for ReceiveFailure {
-    fn from(failure: TransferFailure) -> Self {
-        match failure {
-            TransferFailure::DiskFull => Self::DiskFull,
-            TransferFailure::WriteFailed => Self::WriteFailed,
-            TransferFailure::VerificationFailed => Self::VerificationFailed,
-            TransferFailure::Cancelled => Self::Cancelled,
-        }
-    }
-}
-
-/// 一次传输在界面上的样子。
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct TransferView {
-    /// 服务端那一次发送的标识。界面拿它引用这条传输，别的什么都传不了。
-    pub id: String,
-    /// `in` 是别的设备发来的，`out` 是这台设备发出去的。
-    pub direction: Direction,
-    /// 对端设备的名字，是传输当时的。
-    pub peer: String,
-    pub name: String,
-    pub size: u64,
-    pub phase: TransferPhase,
-    /// 0 到 1。只在 [`TransferPhase::InProgress`] 期间变化。
-    pub progress: f64,
-    /// 实际保存下来的文件名；与原名字不同时才有。
-    pub saved_as: Option<String>,
-    pub failure: Option<TransferFailure>,
-}
-
 /// 界面在任一时刻能看到的全部状态。
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -294,6 +228,8 @@ pub struct Snapshot {
     pub devices: Vec<DeviceView>,
     /// 最近的传输，新的在前。没登录时为空。
     pub transfers: Vec<TransferView>,
+    /// 用户挑好、还没决定发给谁的文件。没有草稿时为 `None`。
+    pub draft: Option<DraftView>,
     pub receive: ReceiveView,
     pub launch_at_login: LaunchState,
     pub notice: Option<Notice>,
@@ -312,133 +248,6 @@ pub trait Notifier: Send + Sync {
 pub struct Settings {
     /// 用户选的接收文件夹（规范路径）；`None` 表示默认位置。
     pub receive_directory: Option<PathBuf>,
-}
-
-/// 一条传输记录：界面看到的 [`TransferView`]，加上只有本机用得上的那部分。
-#[derive(Debug, Clone, PartialEq)]
-pub struct TransferRecord {
-    pub view: TransferView,
-    /// 服务端那次发送的记录：重新接收时要核对它的长度与摘要。
-    pub send: SendRecord,
-    /// 已经试了几次。只用来决定下一次隔多久再试。
-    pub attempts: u32,
-    /// 下一次可以动手的时间；`None` 表示随时可以。
-    pub not_before: Option<Instant>,
-    /// 服务端已经知道结局：回执确认过了，或者结局本来就是服务端说的。
-    pub settled: bool,
-    /// 文件在本机的位置，用来"在文件夹中显示"。不交给界面。
-    pub saved_path: Option<PathBuf>,
-    /// 通知的系统标识：点通知时据此找到要显示的文件。
-    pub handle: Option<i32>,
-}
-
-impl TransferRecord {
-    /// 为一次别的设备发来的文件排队。
-    fn queued(send: &SendRecord) -> Self {
-        Self {
-            view: TransferView {
-                id: send.id.clone(),
-                direction: send.direction,
-                peer: send.peer_device_name.clone(),
-                name: send.name.clone(),
-                size: send.size,
-                phase: TransferPhase::Queued,
-                progress: 0.0,
-                saved_as: None,
-                failure: None,
-            },
-            send: send.clone(),
-            attempts: 0,
-            not_before: None,
-            settled: false,
-            saved_path: None,
-            handle: None,
-        }
-    }
-
-    fn id(&self) -> &str {
-        &self.view.id
-    }
-}
-
-/// 接收任务该做的下一件事。
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Job {
-    /// 把一个排着队的文件收下来。
-    Receive { id: String },
-    /// 把本机已经有的结局告诉服务端：收下了，或者收不下来。
-    Settle { id: String },
-}
-
-/// 接收任务现在有没有事可做。
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Next {
-    Nothing,
-    /// 现在没有，但这么多时间之后会有。
-    Wait(Duration),
-    Work(Job),
-}
-
-/// 传输记录最多留这么多条；超了就丢掉最旧的已经结束的记录。
-const MAX_TRANSFERS: usize = 100;
-
-/// 回执最多补发这么多次。再多次服务端都不收，就只能等它自己过期。
-const SETTLE_ATTEMPTS: u32 = 8;
-
-/// 每多试一次等多久：2 秒、5 秒、15 秒、1 分钟，之后一直是 5 分钟。
-fn backoff(attempts: u32) -> Duration {
-    const STEPS: [Duration; 5] = [
-        Duration::from_secs(2),
-        Duration::from_secs(5),
-        Duration::from_secs(15),
-        Duration::from_secs(60),
-        Duration::from_secs(300),
-    ];
-    STEPS[usize::try_from(attempts.saturating_sub(1))
-        .unwrap_or(0)
-        .min(STEPS.len() - 1)]
-}
-
-/// 从一堆记录里挑出该做的下一件事。接收记录是新的在前，这里倒着看：先来后到。
-///
-/// 先收文件，再补回执：文件早点到用户手里比回执要紧。
-fn pick(records: &[TransferRecord], now: Instant) -> Next {
-    let wait_of = |record: &TransferRecord| {
-        record
-            .not_before
-            .map_or(Duration::ZERO, |time| time.saturating_duration_since(now))
-    };
-    let mut soonest = Duration::MAX;
-    for record in records.iter().rev() {
-        if record.view.phase == TransferPhase::Queued {
-            let wait = wait_of(record);
-            if wait.is_zero() {
-                return Next::Work(Job::Receive {
-                    id: record.view.id.clone(),
-                });
-            }
-            soonest = soonest.min(wait);
-        }
-    }
-    for record in records.iter().rev() {
-        let unfinished = matches!(
-            record.view.phase,
-            TransferPhase::Complete | TransferPhase::Failed
-        ) && !record.settled;
-        if unfinished {
-            let wait = wait_of(record);
-            if wait.is_zero() {
-                return Next::Work(Job::Settle {
-                    id: record.view.id.clone(),
-                });
-            }
-            soonest = soonest.min(wait);
-        }
-    }
-    match soonest {
-        Duration::MAX => Next::Nothing,
-        wait => Next::Wait(wait),
-    }
 }
 
 /// 读写已保存会话时的失败。
@@ -475,8 +284,8 @@ pub struct View {
     service: ServiceView,
     session: SessionView,
     devices: Vec<DeviceView>,
-    /// 最近的传输，新的在前。它同时是接收任务的队列。
-    transfers: Vec<TransferRecord>,
+    /// 收发的记录与待发送的草稿。它同时是后台任务的队列。
+    registry: Registry,
     receive: ReceiveView,
     notice: Option<Notice>,
 }
@@ -493,11 +302,8 @@ impl View {
             service: self.service.clone(),
             session: self.session.clone(),
             devices: self.devices.clone(),
-            transfers: self
-                .transfers
-                .iter()
-                .map(|record| record.view.clone())
-                .collect(),
+            transfers: self.registry.views(),
+            draft: self.registry.draft_view(),
             receive: self.receive.clone(),
             launch_at_login,
             notice: self.notice.clone(),
@@ -513,17 +319,12 @@ impl View {
             },
             session: SessionView::SignedOut,
             devices: Vec::new(),
-            transfers: Vec::new(),
+            registry: Registry::default(),
             receive: ReceiveView {
                 custom_folder: None,
             },
             notice: None,
         }
-    }
-
-    /// 找到一条传输记录。
-    fn record(&mut self, id: &str) -> Option<&mut TransferRecord> {
-        self.transfers.iter_mut().find(|record| record.id() == id)
     }
 }
 
@@ -612,8 +413,9 @@ impl<R: tauri::Runtime> AppState<R> {
     pub fn update(&self, change: impl FnOnce(&mut View)) {
         // 开机启动的状态要问系统，放到锁外面取：持锁期间不该等任何别的东西。
         let launch_at_login = launch_state(&self.app);
-        if let Some(snapshot) = revise(&self.view, change, || launch_at_login) {
-            // 没有窗口时什么都不做。
+        let ((), snapshot) = revise(&self.view, change, || launch_at_login);
+        // 没有窗口时什么都不做。
+        if let Some(snapshot) = snapshot {
             let _ = self.app.emit(SNAPSHOT_EVENT, snapshot);
         }
     }
@@ -642,6 +444,17 @@ impl<R: tauri::Runtime> AppState<R> {
 
     pub fn set_notice(&self, notice: Option<Notice>) {
         self.update(|view| view.notice = notice);
+    }
+
+    /// 账户里的一台设备。
+    pub fn device(&self, id: &str) -> Option<DeviceView> {
+        self.view
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .devices
+            .iter()
+            .find(|device| device.id == id)
+            .cloned()
     }
 
     /// 这台设备自己的标识；没登录时为 `None`。
@@ -726,22 +539,16 @@ impl<R: tauri::Runtime> AppState<R> {
             .send_modify(|epoch| *epoch = epoch.wrapping_add(1));
         // 传输记录属于那个账户：文件留在接收目录里，但名单不留给下一个登录的人。
         self.set_devices(Vec::new());
-        self.set_transfers(Vec::new());
+        self.registry(Registry::clear);
         self.set_stream(StreamState::Off);
     }
-
-    pub fn set_transfers(&self, transfers: Vec<TransferRecord>) {
-        self.update(|view| view.transfers = transfers);
-        self.transfers_changed.notify_one();
-    }
-
-    // ---- 接收位置 ----
 
     /// 系统的"下载"目录。默认的接收位置是它之下的 `Assemble`。
     pub fn downloads_dir(&self) -> &std::path::Path {
         &self.downloads
     }
 
+    /// 本机的设置。
     pub fn settings(&self) -> Settings {
         self.settings
             .lock()
@@ -758,77 +565,57 @@ impl<R: tauri::Runtime> AppState<R> {
         self.update(|view| view.receive = ReceiveView::for_folder(folder));
     }
 
+    /// 改动传输记录表；有变化才推送给界面。返回改动函数的结果。
+    fn registry<T>(&self, change: impl FnOnce(&mut Registry) -> T) -> T {
+        // 开机启动的状态要问系统，放到锁外面取：持锁期间不该等任何别的东西。
+        let launch_at_login = launch_state(&self.app);
+        let (result, snapshot) = revise(
+            &self.view,
+            |view| change(&mut view.registry),
+            || launch_at_login,
+        );
+        // 没有窗口时什么都不做。
+        if let Some(snapshot) = snapshot {
+            let _ = self.app.emit(SNAPSHOT_EVENT, snapshot);
+        }
+        result
+    }
+
     // ---- 传输 ----
 
     /// 别的设备发来了一个文件，或者服务端还在等这台设备处理它。
-    /// 按本机已经走到哪一步接上，不会把同一个文件收两遍。
     pub fn offer(&self, send: &SendRecord) {
-        // 只处理"发给我的、还在等着"的记录；别的情况由 [`AppState::updated`] 负责。
-        if send.state != SendState::Offered || send.direction != Direction::In {
-            return;
-        }
-        self.update(|view| {
-            if let Some(record) = view.record(&send.id) {
-                record.catch_up(send);
-            } else {
-                view.transfers.insert(0, TransferRecord::queued(send));
-                // 太多了就丢掉最旧的、已经结束的记录。
-                if view.transfers.len() > MAX_TRANSFERS
-                    && let Some(index) = view
-                        .transfers
-                        .iter()
-                        .rposition(|record| record.view.phase.is_finished())
-                {
-                    view.transfers.remove(index);
-                }
-            }
-        });
+        self.registry(|registry| registry.offer(send));
         self.transfers_changed.notify_one();
     }
 
-    /// 服务端说一次发送变了：对面撤回了、过期了，或者本机的回执被确认了。
-    pub fn updated(&self, send: &SendRecord) {
-        // 文件还在接收途中时对面撤回了：那一次接收到此为止。
+    /// 服务端说一次发送变了。返回 `true` 表示文件其实到了服务端，而本机已经放弃了：
+    /// 调用方要去服务端撤回。
+    pub fn updated(&self, send: &SendRecord) -> bool {
+        // 收到的文件还在接收途中时对面撤回了：那一次接收到此为止。
         if send.direction == Direction::In && send.state.is_terminal() {
-            self.stop_receive(&send.id);
+            self.stop_transfer(&send.id);
         }
-        self.update(|view| {
-            let Some(record) = view.record(&send.id) else {
-                return;
-            };
-            let withdrawn = matches!(send.state, SendState::Cancelled | SendState::Expired);
-            // 已经存到本机的文件以本机为准：对面这时候撤回，也撤不回已经落盘的文件。
-            let already_saved = matches!(
-                record.view.phase,
-                TransferPhase::Complete | TransferPhase::Failed
-            );
-            if withdrawn && !already_saved {
-                record.view.phase = if send.state == SendState::Cancelled {
-                    TransferPhase::Cancelled
-                } else {
-                    TransferPhase::Expired
-                };
-                record.view.progress = 0.0;
-                record.settled = true;
-                record.not_before = None;
-            } else if send.state == SendState::Delivered && send.direction == Direction::In {
-                // 收到的文件有了结局：只可能是本机的回执被确认了。
-                record.settled = true;
-                record.not_before = None;
-            }
-            // 其余的情况本机不用改：文件还在等着收，或者那是只有发出去的传输才会有的结局。
-        });
+        self.registry(|registry| registry.updated(send)) == Updated::Withdraw
+    }
+
+    /// 服务端还在等着交出去的这次发送，是不是本机已经放弃的那一个。
+    pub fn abandoned(&self, send: &SendRecord) -> bool {
+        self.view
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .registry
+            .abandoned(send)
     }
 
     /// 服务端已经不认这条记录了（列表里找不到）：本机也不必再留着它。
     pub fn forget_transfer(&self, id: &str) {
-        self.update(|view| view.transfers.retain(|record| record.id() != id));
+        self.registry(|registry| registry.forget(id));
     }
 
-    /// 接收任务该做的下一件事。
+    /// 后台任务该做的下一件事。
     pub fn next_job(&self) -> Next {
-        let view = self.view.lock().unwrap_or_else(PoisonError::into_inner);
-        pick(&view.transfers, Instant::now())
+        self.registry(|registry| registry.next_job(Instant::now()))
     }
 
     /// 等待传输记录发生变化。
@@ -836,37 +623,30 @@ impl<R: tauri::Runtime> AppState<R> {
         self.transfers_changed.notified().await;
     }
 
-    /// 领取一个排着队的文件：从这一刻起它算"正在接收"。
-    /// 记录已经不在了、或者已经不该接收时返回 `None`。
+    /// 领取一个排着队的文件去收。
     pub fn begin_receive(&self, id: &str) -> Option<SendRecord> {
-        let mut taken = None;
-        self.update(|view| {
-            if let Some(record) = view.record(id)
-                && record.view.phase == TransferPhase::Queued
-            {
-                record.view.phase = TransferPhase::InProgress;
-                record.view.progress = 0.0;
-                record.not_before = None;
-                taken = Some(record.send.clone());
-            }
-        });
-        taken
+        self.registry(|registry| registry.begin_receive(id))
     }
 
-    /// 这次接收可以被打断：对面撤回时按标识找到它。
-    pub fn track_receive(&self, id: &str, cancel: CancellationToken) -> TrackedReceive<'_, R> {
+    /// 领取一个排着队的文件去发。
+    pub fn begin_send(&self, id: &str) -> Option<Outgoing> {
+        self.registry(|registry| registry.begin_send(id))
+    }
+
+    /// 这一次传输可以被打断：取消时按标识找到它。
+    pub fn track_transfer(&self, id: &str, cancel: CancellationToken) -> TrackedTransfer<'_, R> {
         self.active
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .push((id.to_owned(), cancel.clone()));
-        TrackedReceive {
+        TrackedTransfer {
             state: self,
             id: id.to_owned(),
         }
     }
 
-    /// 停下正在进行的某一次接收。没在进行时什么都不做。
-    pub fn stop_receive(&self, id: &str) {
+    /// 停下正在进行的那一次传输。没在进行时什么都不做。
+    pub fn stop_transfer(&self, id: &str) {
         let mut active = self.active.lock().unwrap_or_else(PoisonError::into_inner);
         let (stopped, untouched): (Vec<_>, Vec<_>) = std::mem::take(&mut *active)
             .into_iter()
@@ -878,122 +658,54 @@ impl<R: tauri::Runtime> AppState<R> {
         }
     }
 
-    /// 接收进度。只在整个百分比变了的时候才算一次变化，不然每来一段数据都要惊动界面。
-    pub fn receive_progress(&self, id: &str, fraction: f64) {
-        self.update(|view| {
-            if let Some(record) = view.record(id)
-                && record.view.phase == TransferPhase::InProgress
-                // 整个百分点不同才算变化：两个整数相差至少 1，结果才不一样。
-                && (percent(record.view.progress) - percent(fraction)).abs() >= 1.0
-            {
-                record.view.progress = fraction.clamp(0.0, 1.0);
-            }
-        });
+    /// 传输进度。
+    pub fn transfer_progress(&self, id: &str, fraction: f64) {
+        self.registry(|registry| registry.progress(id, fraction));
     }
 
-    /// 文件已经存好，回执还没发。
-    pub fn receive_completed(&self, id: &str, received: &Received, handle: i32) {
-        self.update(|view| {
-            if let Some(record) = view.record(id)
-                && record.view.phase == TransferPhase::InProgress
-            {
-                record.view.phase = TransferPhase::Complete;
-                // 名字被改写或加了序号时，如实告诉用户文件实际叫什么。
-                record.view.saved_as =
-                    (received.name != record.view.name).then(|| received.name.clone());
-                record.view.progress = 1.0;
-                record.settled = false;
-                record.attempts = 0;
-                record.not_before = None;
-                record.saved_path = Some(received.path.clone());
-                record.handle = Some(handle);
-            }
-        });
+    /// 收到的文件已经存好，回执还没发。
+    pub fn receive_completed(&self, id: &str, name: &str, path: PathBuf, handle: i32) {
+        self.registry(|registry| registry.receive_completed(id, name, path, handle));
         self.transfers_changed.notify_one();
     }
 
     /// 收不下来。回执还没发。
     pub fn receive_failed(&self, id: &str, failure: ReceiveFailure) {
-        self.update(|view| {
-            if let Some(record) = view.record(id)
-                && record.view.phase == TransferPhase::InProgress
-            {
-                record.view.phase = TransferPhase::Failed;
-                record.view.failure = Some(failure.into());
-                record.view.progress = 0.0;
-                record.settled = false;
-                record.attempts = 0;
-                record.not_before = None;
-            }
-        });
+        self.registry(|registry| registry.receive_failed(id, failure));
         self.transfers_changed.notify_one();
     }
 
-    /// 这次没成，过一会儿再从头收一遍：多半是网络断了。
+    /// 这次没成，过一会儿再从头收一遍。
     pub fn retry_receive(&self, id: &str) {
-        let now = Instant::now();
-        self.update(|view| {
-            if let Some(record) = view.record(id)
-                && record.view.phase == TransferPhase::InProgress
-            {
-                record.view.phase = TransferPhase::Queued;
-                record.view.progress = 0.0;
-                record.attempts += 1;
-                record.not_before = Some(now + backoff(record.attempts));
-            }
-        });
+        self.registry(|registry| registry.retry_receive(id, Instant::now()));
     }
 
     /// 回执没发出去，过一会儿再补。
     pub fn retry_settle(&self, id: &str) {
-        let now = Instant::now();
-        self.update(|view| {
-            if let Some(record) = view.record(id)
-                && !record.settled
-                && record.view.phase.is_finished()
-            {
-                record.attempts += 1;
-                // 补不回去的次数用完就不再试：服务端到时间会自己把它标成过期。
-                record.settled = record.attempts >= SETTLE_ATTEMPTS;
-                record.not_before = Some(now + backoff(record.attempts));
-            }
-        });
+        self.registry(|registry| registry.retry_settle(id, Instant::now()));
     }
 
     /// 回执发出去了，或者服务端本来就知道结局。
     pub fn transfer_settled(&self, id: &str) {
-        self.update(|view| {
-            if let Some(record) = view.record(id) {
-                record.settled = true;
-                record.not_before = None;
-            }
-        });
+        self.registry(|registry| registry.settled(id));
     }
 
-    /// 需要补发回执的记录：它已知的结局，以及该报告什么。
+    /// 需要补发回执的记录。
     pub fn settlement_of(&self, id: &str) -> Option<(SendRecord, Option<ReceiveFailure>)> {
         self.view
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
-            .record(id)
-            .filter(|record| !record.settled && record.view.phase.is_finished())
-            .map(|record| {
-                let report = match record.view.phase {
-                    TransferPhase::Complete => None,
-                    _ => record.view.failure.map(ReceiveFailure::from),
-                };
-                (record.send.clone(), report)
-            })
+            .registry
+            .settlement_of(id)
     }
 
-    /// 一个已经收到的文件在本机的位置。没收到、或者记录已经不在了时为 `None`。
+    /// 一个已经收到的文件在本机的位置。
     pub fn saved_file(&self, id: &str) -> Option<PathBuf> {
         self.view
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
-            .record(id)
-            .filter(|record| record.view.phase == TransferPhase::Complete)
-            .and_then(|record| record.saved_path.clone())
+            .registry
+            .saved_file(id)
     }
 
     /// 用户点了某条通知：它说的那个文件在哪。
@@ -1001,10 +713,55 @@ impl<R: tauri::Runtime> AppState<R> {
         self.view
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
-            .transfers
-            .iter()
-            .find(|record| record.handle == Some(handle))
-            .and_then(|record| record.saved_path.clone())
+            .registry
+            .saved_file_for_handle(handle)
+    }
+
+    // ---- 发出的 ----
+
+    /// 用户挑好了要发的文件。
+    pub fn set_draft(&self, files: Vec<OutgoingFile>) {
+        self.registry(|registry| registry.set_draft(files));
+    }
+
+    /// 发送面板关掉了：挑好的文件不再留着。
+    pub fn drop_draft(&self) {
+        self.registry(Registry::drop_draft);
+    }
+
+    /// 把草稿里的文件发给一台设备。返回每一条记录的标识。
+    pub fn queue_draft(&self, target: &DeviceView) -> Vec<String> {
+        let ids = self.registry(|registry| registry.queue_draft(target));
+        self.transfers_changed.notify_one();
+        ids
+    }
+
+    /// 服务端收下了文件，正在等对方接收。返回 `true` 表示文件得去服务端撤回。
+    pub fn send_uploaded(&self, id: &str, send: &SendRecord) -> bool {
+        self.registry(|registry| registry.send_uploaded(id, send)) == Updated::Withdraw
+    }
+
+    pub fn send_failed(&self, id: &str, failure: TransferFailure) {
+        self.registry(|registry| registry.send_failed(id, failure));
+    }
+
+    /// 网络断了，过一会儿再从头发一遍。
+    pub fn retry_send(&self, id: &str) {
+        self.registry(|registry| registry.retry_send(id, Instant::now()));
+    }
+
+    /// 再发一次。只有"文件根本没到服务端"的失败才能重发。
+    pub fn retry_failed_send(&self, id: &str) -> bool {
+        let retried = self.registry(|registry| registry.retry_failed_send(id, Instant::now()));
+        self.transfers_changed.notify_one();
+        retried
+    }
+
+    /// 用户要取消一条传输。
+    pub fn cancel_transfer(&self, id: &str) -> Cancellation {
+        let outcome = self.registry(|registry| registry.cancel(id));
+        self.transfers_changed.notify_one();
+        outcome
     }
 
     /// 给下一条系统通知用的标识。用完就加一，不会与还在通知中心里的那条重复。
@@ -1068,39 +825,13 @@ impl<R: tauri::Runtime> AppState<R> {
     }
 }
 
-impl TransferPhase {
-    /// 不会再自己变了：收好了、失败了，或者对面撤回了。
-    pub fn is_finished(self) -> bool {
-        !matches!(self, Self::Queued | Self::InProgress)
-    }
-}
-
-impl TransferRecord {
-    /// 服务端还在等这个文件，而本机已经走到某一步：接着做，不从头再来。
-    fn catch_up(&mut self, send: &SendRecord) {
-        match self.view.phase {
-            // 还在排队或正在接收：它自己会走到头。
-            TransferPhase::Queued | TransferPhase::InProgress => {}
-            // 文件已经存好（或者已经收不下来），服务端却还在等：回执没送到，再发一次。
-            TransferPhase::Complete | TransferPhase::Failed => {
-                self.settled = false;
-                self.attempts = 0;
-                self.not_before = None;
-            }
-            // 本机以为对面撤回了，服务端却还在等：以服务端为准，重新收。
-            TransferPhase::Cancelled | TransferPhase::Expired => *self = Self::queued(send),
-        }
-        self.send = send.clone();
-    }
-}
-
-/// 一个正在接收的文件：离开作用域时就不再跟踪它。
-pub struct TrackedReceive<'a, R: tauri::Runtime> {
+/// 一个正在进行的传输：离开作用域时就不再跟踪它。
+pub struct TrackedTransfer<'a, R: tauri::Runtime> {
     state: &'a AppState<R>,
     id: String,
 }
 
-impl<R: tauri::Runtime> Drop for TrackedReceive<'_, R> {
+impl<R: tauri::Runtime> Drop for TrackedTransfer<'_, R> {
     fn drop(&mut self) {
         self.state
             .active
@@ -1110,25 +841,23 @@ impl<R: tauri::Runtime> Drop for TrackedReceive<'_, R> {
     }
 }
 
-/// 进度取整到个百分点。
-fn percent(fraction: f64) -> f64 {
-    (fraction.clamp(0.0, 1.0) * 100.0).floor()
-}
-
-/// 改动状态，返回改了什么；没有变化时为 `None`。
+/// 改动状态：返回改动函数的结果，以及改了什么；没有变化时后者为 `None`。
 ///
 /// 快照必须在锁内算好：这个函数返回时锁已经放开，之后再读状态就是另一次加锁了。
 /// 曾经在这里犯过一个错——持着锁去调一个会再次加锁的函数，线程把自己锁死，
 /// 而且永远占着这把锁。所以"比较"与"快照"都收在这一个函数里，不给出在锁内回调的机会。
-fn revise(
+fn revise<T>(
     view: &Mutex<View>,
-    change: impl FnOnce(&mut View),
+    change: impl FnOnce(&mut View) -> T,
     launch_at_login: impl FnOnce() -> LaunchState,
-) -> Option<Snapshot> {
+) -> (T, Option<Snapshot>) {
     let mut view = view.lock().unwrap_or_else(PoisonError::into_inner);
     let before = view.clone();
-    change(&mut view);
-    (*view != before).then(|| view.snapshot(launch_at_login()))
+    let result = change(&mut view);
+    (
+        result,
+        (*view != before).then(|| view.snapshot(launch_at_login())),
+    )
 }
 
 /// 开机启动在系统里的实际状态。
@@ -1150,7 +879,7 @@ pub fn launch_at_login_supported() -> bool {
 }
 
 /// 显示主窗口：还原、显示并聚焦。
-pub fn show_main(app: &AppHandle) {
+pub fn show_main<R: tauri::Runtime>(app: &AppHandle<R>) {
     let Some(window) = app.get_webview_window(MAIN_WINDOW) else {
         tracing::warn!("the main window is missing");
         return;
@@ -1163,35 +892,11 @@ pub fn show_main(app: &AppHandle) {
 #[cfg(test)]
 mod tests {
     use assemble_protocol::primitives::{Platform, Timestamp};
-    use assemble_protocol::sends::{Direction, SendState};
 
     use super::*;
-    use std::path::Path;
 
     /// 与 TypeScript 侧共用的状态样本：`apps/desktop/contract/snapshots.json`。
     const SAMPLES: &str = include_str!("../../contract/snapshots.json");
-
-    /// 别的设备发来的、还在等着接收的一个文件。
-    fn offered(id: &str) -> SendRecord {
-        SendRecord {
-            id: id.into(),
-            direction: Direction::In,
-            peer_device_id: "d2".into(),
-            peer_device_name: "工作电脑".into(),
-            name: "合同.pdf".into(),
-            size: 1024,
-            mime_type: None,
-            sha256: "a".repeat(64),
-            state: SendState::Offered,
-            failure: None,
-            created_at: Timestamp::now(),
-            updated_at: Timestamp::now(),
-        }
-    }
-
-    fn changed(record: &mut TransferRecord, change: impl FnOnce(&mut TransferRecord)) {
-        change(record);
-    }
 
     fn device(id: &str, name: &str, online: bool) -> DeviceView {
         DeviceView {
@@ -1263,16 +968,22 @@ mod tests {
         let launch = || LaunchState::Disabled;
 
         // 没有变化：不惊动界面。
-        assert!(revise(&view, |_| {}, launch).is_none());
-        assert!(revise(&view, |v| v.notice = None, launch).is_none());
+        assert!(revise(&view, |_| {}, launch).1.is_none());
+        assert!(revise(&view, |v| v.notice = None, launch).1.is_none());
 
-        let snapshot = revise(&view, |v| v.notice = Some(Notice::info("你好")), launch).unwrap();
+        // 改动函数的结果原样交回，快照在它之后。
+        let (devices, snapshot) = revise(&view, |v| v.devices.len(), launch);
+        assert_eq!(devices, 0);
+        assert!(snapshot.is_none());
+
+        let ((), snapshot) = revise(&view, |v| v.notice = Some(Notice::info("你好")), launch);
+        let snapshot = snapshot.unwrap();
         assert_eq!(snapshot.notice, Some(Notice::info("你好")));
         assert_eq!(snapshot.launch_at_login, LaunchState::Disabled);
         assert_eq!(snapshot.service.stream, StreamState::Off);
         // 改完之后锁是放开的：同一个线程马上还能再读、再改。
-        let snapshot = revise(&view, |v| v.devices.push(device("d1", "Mac", true)), launch)
-            .expect("the device list changed");
+        let ((), snapshot) = revise(&view, |v| v.devices.push(device("d1", "Mac", true)), launch);
+        let snapshot = snapshot.expect("the device list changed");
         assert_eq!(snapshot.devices.len(), 1);
         assert_eq!(
             view.lock()
@@ -1283,129 +994,13 @@ mod tests {
             1
         );
         // 换回原值也算一次变化：界面得看到它被撤回了。
-        assert!(revise(&view, |v| v.notice = None, launch).is_some());
-    }
-
-    #[test]
-    fn the_worker_takes_files_in_order_and_only_when_they_are_due() {
-        let now = Instant::now();
-        let first = TransferRecord::queued(&offered("a"));
-        let mut second = TransferRecord::queued(&offered("b"));
-        second.not_before = Some(now + Duration::from_secs(5));
-        // 记录是新的在前；倒着看才是先来后到。
-        assert_eq!(
-            pick(&[second.clone(), first.clone()], now),
-            Next::Work(Job::Receive { id: "a".into() })
-        );
-        assert_eq!(
-            pick(&[second.clone()], now),
-            Next::Wait(Duration::from_secs(5))
-        );
-        // 到点了就可以收。
-        let later = now + Duration::from_secs(5);
-        assert_eq!(
-            pick(&[second.clone()], later),
-            Next::Work(Job::Receive { id: "b".into() })
-        );
-        assert_eq!(pick(&[], now), Next::Nothing);
-
-        // 正在接收的不算待办。
-        let mut busy = first;
-        changed(&mut busy, |record| {
-            record.view.phase = TransferPhase::InProgress;
-        });
-        assert_eq!(pick(&[busy], now), Next::Nothing);
-    }
-
-    #[test]
-    fn receipts_go_out_after_the_files_and_stop_once_the_server_knows() {
-        let now = Instant::now();
-        let queued = TransferRecord::queued(&offered("a"));
-        let mut saved = TransferRecord::queued(&offered("b"));
-        changed(&mut saved, |record| {
-            record.view.phase = TransferPhase::Complete;
-        });
-        let mut failed = TransferRecord::queued(&offered("c"));
-        changed(&mut failed, |record| {
-            record.view.phase = TransferPhase::Failed;
-            record.view.failure = Some(TransferFailure::DiskFull);
-        });
-        // 先收文件，再补回执。
-        let all = vec![failed.clone(), saved.clone(), queued];
-        assert_eq!(pick(&all, now), Next::Work(Job::Receive { id: "a".into() }));
-        assert_eq!(
-            pick(&[failed.clone(), saved.clone()], now),
-            Next::Work(Job::Settle { id: "b".into() })
-        );
-        assert_eq!(
-            pick(&[failed], now),
-            Next::Work(Job::Settle { id: "c".into() })
-        );
-
-        // 服务端已经知道结局：不再补。
-        let mut known = saved;
-        changed(&mut known, |record| record.settled = true);
-        assert_eq!(pick(&[known], now), Next::Nothing);
-
-        // 撤回、过期的记录没有回执可补。
-        for phase in [TransferPhase::Cancelled, TransferPhase::Expired] {
-            let mut settled = TransferRecord::queued(&offered("d"));
-            changed(&mut settled, |record| {
-                record.view.phase = phase;
-                record.settled = true;
-            });
-            assert_eq!(pick(&[settled], now), Next::Nothing, "{phase:?}");
-        }
-    }
-
-    #[test]
-    fn a_file_the_server_still_waits_for_is_continued_rather_than_started_over() {
-        // 正在接收：接着收，进度不动。
-        let mut record = TransferRecord::queued(&offered("a"));
-        changed(&mut record, |record| {
-            record.view.phase = TransferPhase::InProgress;
-            record.view.progress = 0.4;
-        });
-        record.catch_up(&offered("a"));
-        assert_eq!(record.view.phase, TransferPhase::InProgress);
-        assert!((record.view.progress - 0.4).abs() < 1e-9);
-
-        // 文件存好了、服务端却还在等：说明回执没送到。清掉退避，再发一次。
-        let mut record = TransferRecord::queued(&offered("a"));
-        changed(&mut record, |record| {
-            record.view.phase = TransferPhase::Complete;
-            record.settled = true;
-            record.attempts = 3;
-            record.not_before = Some(Instant::now() + Duration::from_secs(60));
-        });
-        record.catch_up(&offered("a"));
-        assert_eq!(record.view.phase, TransferPhase::Complete);
-        assert!(!record.settled);
-        assert_eq!(record.attempts, 0);
-        assert!(record.not_before.is_none());
-
-        // 本机以为对面撤回了，服务端却还在等：以服务端为准，重新排队。
-        let mut record = TransferRecord::queued(&offered("a"));
-        changed(&mut record, |record| {
-            record.view.phase = TransferPhase::Cancelled;
-            record.settled = true;
-        });
-        record.catch_up(&offered("a"));
-        assert_eq!(record.view.phase, TransferPhase::Queued);
-        assert!(!record.settled);
-    }
-
-    #[test]
-    fn waiting_between_retries_gets_longer_up_to_five_minutes() {
-        assert_eq!(backoff(0), Duration::from_secs(2));
-        assert_eq!(backoff(1), Duration::from_secs(2));
-        assert_eq!(backoff(3), Duration::from_secs(15));
-        assert_eq!(backoff(4), Duration::from_secs(60));
-        assert_eq!(backoff(40), Duration::from_secs(5 * 60));
+        assert!(revise(&view, |v| v.notice = None, launch).1.is_some());
     }
 
     #[test]
     fn the_interface_only_learns_a_receive_folders_name() {
+        use std::path::Path;
+
         assert_eq!(ReceiveView::for_folder(None).custom_folder, None);
         assert_eq!(
             ReceiveView::for_folder(Some(Path::new("/Users/example/工作资料"))).custom_folder,
@@ -1416,45 +1011,6 @@ mod tests {
             ReceiveView::for_folder(Some(Path::new("/"))).custom_folder,
             None
         );
-    }
-
-    #[test]
-    fn where_a_file_was_saved_stays_out_of_the_snapshot() {
-        let mut view = View::initial(&ServerOrigin::development());
-        let mut record = TransferRecord::queued(&offered("a"));
-        changed(&mut record, |record| {
-            record.view.phase = TransferPhase::Complete;
-            record.view.progress = 1.0;
-            record.view.saved_as = Some("合同 (2).pdf".to_owned());
-            record.saved_path = Some(PathBuf::from(
-                "/Users/example/Downloads/Assemble/合同 (2).pdf",
-            ));
-            record.handle = Some(7);
-        });
-        view.transfers.push(record);
-
-        let snapshot = serde_json::to_value(view.snapshot(LaunchState::Disabled)).unwrap();
-        assert_eq!(snapshot["transfers"][0]["savedAs"], "合同 (2).pdf");
-        assert_eq!(snapshot["transfers"][0]["progress"], 1.0);
-        let text = snapshot.to_string();
-        for private in ["/Users/", "Downloads", "handle", "settled"] {
-            assert!(!text.contains(private), "{private} must stay in the shell");
-        }
-    }
-
-    #[test]
-    fn every_phase_ends_up_finished_or_still_running() {
-        for running in [TransferPhase::Queued, TransferPhase::InProgress] {
-            assert!(!running.is_finished());
-        }
-        for finished in [
-            TransferPhase::Complete,
-            TransferPhase::Failed,
-            TransferPhase::Cancelled,
-            TransferPhase::Expired,
-        ] {
-            assert!(finished.is_finished());
-        }
     }
 
     #[test]

@@ -40,21 +40,38 @@ export interface ReceiveView {
 /** 一次传输的方向：`in` 是别的设备发来的，`out` 是这台设备发出去的。 */
 export type TransferDirection = "in" | "out";
 
-/** 一次传输走到了哪一步。 */
+/** 一次传输走到了哪一步。收与发共用一套说法，文案按方向各自措辞。 */
 export type TransferPhase =
+  /** 排着队还没开始，或者上一次没成功、等着再试。 */
   | "queued"
+  /** 正在收，或者正在发。 */
   | "inProgress"
+  /** 发出去了，文件在服务端，等对方接收。只出现在发出去的传输上。 */
+  | "waiting"
+  /** 收到的文件已经存好；发出去的文件对方已经收下。 */
   | "complete"
   | "failed"
+  /** 对方拒收了。只出现在发出去的传输上。 */
+  | "declined"
+  /** 发送方撤回了。 */
   | "cancelled"
+  /** 过了时限还没送达。 */
   | "expired";
 
-/** 传输为什么失败。与服务端报告给对端的原因一一对应。 */
+/** 传输为什么失败。前四种与服务端报告给对端的原因一一对应，其余几种只出现在发出去的传输上。 */
 export type TransferFailure =
   | "diskFull"
   | "writeFailed"
   | "verificationFailed"
-  | "cancelled";
+  | "cancelled"
+  /** 点了发送之后对方下线了，文件没有发出去。 */
+  | "deviceOffline"
+  /** 超过单文件上限。 */
+  | "tooLarge"
+  /** 要发的文件读不出来了：被移走、被改动，或者没有权限。 */
+  | "fileUnreadable"
+  /** 服务端拒绝了这次发送。 */
+  | "rejected";
 
 /** 一次传输在界面上的样子。 */
 export interface TransferView {
@@ -71,6 +88,20 @@ export interface TransferView {
   /** 实际保存下来的文件名；与原名字不同时才有。 */
   savedAs: string | null;
   failure: TransferFailure | null;
+  /** 能不能再发一次。规则在 Rust 里，界面照着显示按钮。 */
+  retryable: boolean;
+}
+
+export interface DraftFile {
+  name: string;
+  size: number;
+}
+
+/** 用户挑好、还没决定发给谁的文件。文件在哪不经过界面。 */
+export interface DraftView {
+  /** 这份草稿的标识。换了一份草稿，它就变了。 */
+  id: string;
+  files: DraftFile[];
 }
 
 export interface Notice {
@@ -95,6 +126,8 @@ export interface Snapshot {
   devices: DeviceView[];
   /** 最近的传输，新的在前。没登录时为空。 */
   transfers: TransferView[];
+  /** 用户挑好、还没决定发给谁的文件。没有草稿时为 null。 */
+  draft: DraftView | null;
   receive: ReceiveView;
   launchAtLogin: LaunchState;
   notice: Notice | null;

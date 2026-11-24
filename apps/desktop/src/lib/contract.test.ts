@@ -73,21 +73,40 @@ describe("状态契约样本", () => {
     );
   });
 
-  test("覆盖了传输的每个阶段、几种失败原因与两种接收位置", () => {
+  test("覆盖了传输的每个阶段、每种失败原因、两个方向、有没有草稿", () => {
     const snapshots = checked();
     const transfers = snapshots.flatMap((snapshot) => snapshot.transfers);
-    expect(new Set(transfers.map((transfer) => transfer.phase))).toEqual(
+    expect(new Set(transfers.map((t) => t.phase))).toEqual(
       new Set([
         "queued",
         "inProgress",
+        "waiting",
         "complete",
         "failed",
+        "declined",
         "cancelled",
         "expired",
       ]),
     );
-    expect(new Set(transfers.map((transfer) => transfer.failure))).toEqual(
-      new Set([null, "diskFull", "writeFailed", "verificationFailed"]),
+    expect(new Set(transfers.map((t) => t.direction))).toEqual(
+      new Set(["in", "out"]),
+    );
+    expect(new Set(transfers.map((t) => t.failure))).toEqual(
+      new Set([
+        null,
+        "diskFull",
+        "writeFailed",
+        "verificationFailed",
+        "deviceOffline",
+        "tooLarge",
+        "fileUnreadable",
+      ]),
+    );
+    expect(new Set(transfers.map((t) => t.retryable))).toEqual(
+      new Set([true, false]),
+    );
+    expect(new Set(snapshots.map((s) => s.draft === null))).toEqual(
+      new Set([true, false]),
     );
     expect(
       new Set(
@@ -98,11 +117,28 @@ describe("状态契约样本", () => {
       new Set(transfers.map((transfer) => transfer.savedAs === null)),
     ).toEqual(new Set([true, false]));
 
-    // 只有失败的传输带失败原因；进度只在传输中才有意义，收好了就是 1。
+    // 只有失败的传输带失败原因；能重发的只有"文件没到服务端"的那几种失败。
+    const neverReachedTheServer = [
+      "deviceOffline",
+      "tooLarge",
+      "fileUnreadable",
+      "rejected",
+    ];
     for (const transfer of transfers) {
       expect(transfer.failure !== null).toBe(transfer.phase === "failed");
-      // 收好了进度就是 1，传输中在 0 与 1 之间，其余都是 0。
-      expect(transfer.progress === 1).toBe(transfer.phase === "complete");
+      expect(transfer.retryable).toBe(
+        transfer.phase === "failed" &&
+          transfer.direction === "out" &&
+          neverReachedTheServer.includes(transfer.failure ?? ""),
+      );
+      // 等对方接收、被拒收，只出现在发出去的传输上。
+      if (transfer.phase === "waiting" || transfer.phase === "declined") {
+        expect(transfer.direction).toBe("out");
+      }
+      // 收好了、发出去了进度就是 1；传输中在 0 与 1 之间；其余都是 0。
+      const done =
+        transfer.phase === "complete" || transfer.phase === "waiting";
+      expect(transfer.progress === 1).toBe(done);
       expect(transfer.progress > 0 && transfer.progress < 1).toBe(
         transfer.phase === "inProgress",
       );
@@ -110,12 +146,23 @@ describe("状态契约样本", () => {
       expect(transfer.savedAs !== null && transfer.phase !== "complete").toBe(
         false,
       );
+      if (transfer.savedAs !== null) {
+        expect(transfer.direction).toBe("in");
+      }
     }
-    // 没登录就没有传输记录。
+    // 草稿只跟着登录的会话出现；里面只有文件的名字与大小，没有位置。
+    for (const draft of snapshots.flatMap((s) => (s.draft ? [s.draft] : []))) {
+      expect(draft.files.length).toBeGreaterThan(0);
+      expect(JSON.stringify(draft)).not.toContain("/");
+    }
+    // 没登录就没有传输记录，也没有草稿。
     expect(
       snapshots
         .filter((snapshot) => snapshot.session.phase !== "signedIn")
-        .every((snapshot) => snapshot.transfers.length === 0),
+        .every(
+          (snapshot) =>
+            snapshot.transfers.length === 0 && snapshot.draft === null,
+        ),
     ).toBe(true);
   });
 

@@ -10,6 +10,7 @@
     },
     "devices": [],
     "transfers": [],
+    "draft": null,
     "receive": {
       "customFolder": null
     },
@@ -27,6 +28,7 @@
     },
     "devices": [],
     "transfers": [],
+    "draft": null,
     "receive": {
       "customFolder": null
     },
@@ -68,6 +70,7 @@
       }
     ],
     "transfers": [],
+    "draft": null,
     "receive": {
       "customFolder": null
     },
@@ -85,6 +88,7 @@
     },
     "devices": [],
     "transfers": [],
+    "draft": null,
     "receive": {
       "customFolder": null
     },
@@ -105,6 +109,7 @@
     },
     "devices": [],
     "transfers": [],
+    "draft": null,
     "receive": {
       "customFolder": null
     },
@@ -149,6 +154,7 @@
       }
     ],
     "transfers": [],
+    "draft": null,
     "receive": {
       "customFolder": null
     },
@@ -190,6 +196,7 @@
       }
     ],
     "transfers": [],
+    "draft": null,
     "receive": {
       "customFolder": null
     },
@@ -240,7 +247,8 @@
         "phase": "inProgress",
         "progress": 0.45,
         "savedAs": null,
-        "failure": null
+        "failure": null,
+        "retryable": false
       },
       {
         "id": "0f1e2d3c4b5a69788796a5b4c3d2e1f2",
@@ -251,7 +259,8 @@
         "phase": "queued",
         "progress": 0.0,
         "savedAs": null,
-        "failure": null
+        "failure": null,
+        "retryable": false
       },
       {
         "id": "1a2b3c4d5e6f708192a3b4c5d6e7f809",
@@ -262,7 +271,8 @@
         "phase": "complete",
         "progress": 1.0,
         "savedAs": "照片 (2).jpg",
-        "failure": null
+        "failure": null,
+        "retryable": false
       },
       {
         "id": "2b3c4d5e6f708192a3b4c5d6e7f8091a",
@@ -273,7 +283,8 @@
         "phase": "failed",
         "progress": 0.0,
         "savedAs": null,
-        "failure": "diskFull"
+        "failure": "diskFull",
+        "retryable": false
       },
       {
         "id": "3c4d5e6f708192a3b4c5d6e7f8091a2b",
@@ -284,7 +295,8 @@
         "phase": "cancelled",
         "progress": 0.0,
         "savedAs": null,
-        "failure": null
+        "failure": null,
+        "retryable": false
       },
       {
         "id": "4d5e6f708192a3b4c5d6e7f8091a2b3c",
@@ -295,9 +307,11 @@
         "phase": "expired",
         "progress": 0.0,
         "savedAs": null,
-        "failure": null
+        "failure": null,
+        "retryable": false
       }
     ],
+    "draft": null,
     "receive": {
       "customFolder": null
     },
@@ -348,9 +362,11 @@
         "phase": "failed",
         "progress": 0.0,
         "savedAs": null,
-        "failure": "verificationFailed"
+        "failure": "verificationFailed",
+        "retryable": false
       }
     ],
+    "draft": null,
     "receive": {
       "customFolder": "工作资料"
     },
@@ -401,13 +417,245 @@
         "phase": "failed",
         "progress": 0.0,
         "savedAs": null,
-        "failure": "writeFailed"
+        "failure": "writeFailed",
+        "retryable": false
       }
     ],
+    "draft": null,
     "receive": {
       "customFolder": null
     },
     "launchAtLogin": "enabled",
     "notice": null
+  },
+  {
+    "service": {
+      "target": "production",
+      "reachable": true,
+      "stream": "connected"
+    },
+    "session": {
+      "phase": "signedIn",
+      "account": {
+        "id": "3d1c0a5e-6cf4-4d3a-9a67-1f2f4c1f6f01",
+        "username": "example",
+        "displayName": "Example"
+      },
+      "device": {
+        "id": "9b2e7c4d1a5f4e3b8c6d0a1b2c3d4e5f",
+        "name": "MacBook-Pro",
+        "platform": "macos",
+        "online": true
+      }
+    },
+    "devices": [
+      {
+        "id": "9b2e7c4d1a5f4e3b8c6d0a1b2c3d4e5f",
+        "name": "MacBook-Pro",
+        "platform": "macos",
+        "online": true
+      },
+      {
+        "id": "c1d2e3f4a5b64c7d8e9f0a1b2c3d4e5f",
+        "name": "工作电脑",
+        "platform": "windows",
+        "online": true
+      }
+    ],
+    "transfers": [
+      {
+        "id": "out-4",
+        "direction": "out",
+        "peer": "工作电脑",
+        "name": "会议纪要.docx",
+        "size": 204800,
+        "phase": "failed",
+        "progress": 0.0,
+        "savedAs": null,
+        "failure": "deviceOffline",
+        "retryable": true
+      },
+      {
+        "id": "out-3",
+        "direction": "out",
+        "peer": "工作电脑",
+        "name": "设计稿.sketch",
+        "size": 7340032,
+        "phase": "declined",
+        "progress": 0.0,
+        "savedAs": null,
+        "failure": null,
+        "retryable": false
+      },
+      {
+        "id": "out-2",
+        "direction": "out",
+        "peer": "工作电脑",
+        "name": "合同.pdf",
+        "size": 1048576,
+        "phase": "waiting",
+        "progress": 1.0,
+        "savedAs": null,
+        "failure": null,
+        "retryable": false
+      },
+      {
+        "id": "out-1",
+        "direction": "out",
+        "peer": "工作电脑",
+        "name": "照片.jpg",
+        "size": 2048000,
+        "phase": "complete",
+        "progress": 1.0,
+        "savedAs": null,
+        "failure": null,
+        "retryable": false
+      }
+    ],
+    "draft": {
+      "id": "draft-1",
+      "files": [
+        {
+          "name": "季度报表.xlsx",
+          "size": 524288
+        },
+        {
+          "name": "说明.txt",
+          "size": 2048
+        }
+      ]
+    },
+    "receive": {
+      "customFolder": null
+    },
+    "launchAtLogin": "enabled",
+    "notice": null
+  },
+  {
+    "service": {
+      "target": "production",
+      "reachable": true,
+      "stream": "connected"
+    },
+    "session": {
+      "phase": "signedIn",
+      "account": {
+        "id": "3d1c0a5e-6cf4-4d3a-9a67-1f2f4c1f6f01",
+        "username": "example",
+        "displayName": "Example"
+      },
+      "device": {
+        "id": "9b2e7c4d1a5f4e3b8c6d0a1b2c3d4e5f",
+        "name": "MacBook-Pro",
+        "platform": "macos",
+        "online": true
+      }
+    },
+    "receive": {
+      "customFolder": null
+    },
+    "launchAtLogin": "enabled",
+    "notice": null,
+    "devices": [
+      {
+        "id": "9b2e7c4d1a5f4e3b8c6d0a1b2c3d4e5f",
+        "name": "MacBook-Pro",
+        "platform": "macos",
+        "online": true
+      },
+      {
+        "id": "c1d2e3f4a5b64c7d8e9f0a1b2c3d4e5f",
+        "name": "工作电脑",
+        "platform": "windows",
+        "online": false
+      }
+    ],
+    "transfers": [
+      {
+        "id": "out-6",
+        "direction": "out",
+        "peer": "工作电脑",
+        "name": "视频.mp4",
+        "size": 104857600,
+        "phase": "failed",
+        "progress": 0.0,
+        "savedAs": null,
+        "failure": "tooLarge",
+        "retryable": true
+      },
+      {
+        "id": "out-5",
+        "direction": "out",
+        "peer": "工作电脑",
+        "name": "笔记.md",
+        "size": 4096,
+        "phase": "failed",
+        "progress": 0.0,
+        "savedAs": null,
+        "failure": "writeFailed",
+        "retryable": false
+      },
+      {
+        "id": "out-7",
+        "direction": "out",
+        "peer": "工作电脑",
+        "name": "草稿.pdf",
+        "size": 81920,
+        "phase": "expired",
+        "progress": 0.0,
+        "savedAs": null,
+        "failure": null,
+        "retryable": false
+      },
+      {
+        "id": "out-8",
+        "direction": "out",
+        "peer": "工作电脑",
+        "name": "临时文件.bin",
+        "size": 1024,
+        "phase": "cancelled",
+        "progress": 0.0,
+        "savedAs": null,
+        "failure": null,
+        "retryable": false
+      },
+      {
+        "id": "out-9",
+        "direction": "out",
+        "peer": "工作电脑",
+        "name": "演示.key",
+        "size": 15728640,
+        "phase": "inProgress",
+        "progress": 0.3,
+        "savedAs": null,
+        "failure": null,
+        "retryable": false
+      },
+      {
+        "id": "out-10",
+        "direction": "out",
+        "peer": "工作电脑",
+        "name": "字体.zip",
+        "size": 3145728,
+        "phase": "queued",
+        "progress": 0.0,
+        "savedAs": null,
+        "failure": null,
+        "retryable": false
+      },
+      {
+        "id": "out-11",
+        "direction": "out",
+        "peer": "工作电脑",
+        "name": "字体.zip",
+        "size": 3145728,
+        "phase": "failed",
+        "progress": 0.0,
+        "savedAs": null,
+        "failure": "fileUnreadable",
+        "retryable": true
+      }
+    ],
+    "draft": null
   }
 ]

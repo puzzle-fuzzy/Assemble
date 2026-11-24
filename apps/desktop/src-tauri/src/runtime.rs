@@ -5,7 +5,7 @@
 //! - [`watch_health`]：隔一段时间探一次服务，让界面上的"是否可达"不过期；
 //! - [`follow_events`]：登录期间维持一条事件流，把设备列表与待接收的文件同步到状态里。
 //!   流断了由客户端自动重连；登录失效时收摊，并请用户重新登录；
-//! - [`receive::run`]：把别的设备发来的文件一个一个收到本机。
+//! - [`transfers::run`]：把别的设备发来的文件一个一个收到本机，把排队的文件发出去。
 //!
 //! 事件流不补送断线期间的变化，所以每次连上（收到 `hello`）都重新拉一遍设备列表、
 //! 问一遍还有哪些文件在等我；连着的时候也隔一段时间问一次。
@@ -20,9 +20,9 @@ use futures_util::StreamExt;
 use tauri::{AppHandle, Manager};
 use tokio_util::sync::CancellationToken;
 
-use crate::receive;
 use crate::session;
 use crate::state::{AppState, DeviceView, StreamState};
+use crate::transfers;
 
 /// 探活的间隔。
 const HEALTH_INTERVAL: Duration = Duration::from_secs(30);
@@ -37,7 +37,7 @@ pub fn start(app: &AppHandle) {
     let events = app.clone();
     tauri::async_runtime::spawn(async move { follow_events(events).await });
     let receiver = app.clone();
-    tauri::async_runtime::spawn(async move { receive::run(receiver).await });
+    tauri::async_runtime::spawn(async move { transfers::run(receiver).await });
 }
 
 /// 隔一段时间探一次服务。界面据此决定能不能发起登录。
@@ -127,7 +127,7 @@ async fn follow_events(app: AppHandle) {
         let own_device = state.device_id();
         state.set_stream(StreamState::Connecting);
         let mut stream = state.client.clone().events(cancel.child_token());
-        let mut resync = tokio::time::interval(receive::RESYNC_INTERVAL);
+        let mut resync = tokio::time::interval(transfers::RESYNC_INTERVAL);
         // 第一次对账跟着 `hello` 走，不要一上来就多发一次。
         resync.tick().await;
         loop {
@@ -158,7 +158,17 @@ async fn follow_events(app: AppHandle) {
                     }
                     Next::Devices(devices) => state.set_devices(devices),
                     Next::Offered(send) => state.offer(&send),
-                    Next::Updated(send) => state.updated(&send),
+                    Next::Updated(send) => {
+                        // 本机已经放弃了这次发送，文件却到了服务端：去撤回，别让对面收到。
+                        if state.updated(&send) {
+                            let app = state.app().clone();
+                            let send_id = send.id.clone();
+                            tauri::async_runtime::spawn(async move {
+                                let state = app.state::<AppState>();
+                                transfers::withdraw(&state, &send_id, &state.lifetime).await;
+                            });
+                        }
+                    }
                     Next::Reconnecting => state.set_stream(StreamState::Reconnecting),
                     // 流自己断了：登录失效，或者被取消。哪一种都由下面来分辨。
                     Next::Rejected | Next::Finished => break,
@@ -183,7 +193,7 @@ async fn follow_events(app: AppHandle) {
 
 /// 问一遍还有哪些文件在等我。返回 `true` 表示服务端不再认这台设备的登录。
 async fn catch_up(state: &AppState, cancel: &CancellationToken) -> bool {
-    match receive::resync(state, cancel).await {
+    match transfers::resync(state, cancel).await {
         Ok(()) => false,
         Err(error) => {
             tracing::debug!(%error, "the pending files could not be listed yet");

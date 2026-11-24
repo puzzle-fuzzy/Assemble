@@ -13,6 +13,7 @@ const VALID: Snapshot = {
   session: { phase: "signedOut" },
   devices: [],
   transfers: [],
+  draft: null,
   receive: { customFolder: null },
   launchAtLogin: "disabled",
   notice: null,
@@ -29,6 +30,7 @@ const TRANSFER: TransferView = {
   progress: 1,
   savedAs: null,
   failure: null,
+  retryable: false,
 };
 
 function transfer(overrides: Partial<TransferView>): TransferView {

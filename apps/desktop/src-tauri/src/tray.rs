@@ -7,9 +7,11 @@ use tauri::{
 };
 
 use crate::commands;
+use crate::send_panel;
 use crate::state::{self, AppState, LaunchState};
 
 pub const OPEN_ID: &str = "open";
+pub const SEND_ID: &str = "send-files";
 pub const LAUNCH_ID: &str = "launch-at-login";
 pub const QUIT_ID: &str = "quit";
 
@@ -20,6 +22,7 @@ pub struct TrayMenu {
 /// 创建托盘图标与菜单。
 pub fn build(app: &AppHandle) -> tauri::Result<()> {
     let open = MenuItem::with_id(app, OPEN_ID, "打开 Assemble", true, None::<&str>)?;
+    let send = MenuItem::with_id(app, SEND_ID, "发送文件…", true, None::<&str>)?;
     let quit = MenuItem::with_id(app, QUIT_ID, "退出 Assemble", true, None::<&str>)?;
 
     // 开机启动只在打包后的运行里提供；开发运行不写系统登录项。
@@ -27,8 +30,8 @@ pub fn build(app: &AppHandle) -> tauri::Result<()> {
         .then(|| CheckMenuItem::with_id(app, LAUNCH_ID, "开机启动", true, false, None::<&str>))
         .transpose()?;
     let menu = match &launch {
-        Some(launch) => Menu::with_items(app, &[&open, launch, &quit])?,
-        None => Menu::with_items(app, &[&open, &quit])?,
+        Some(launch) => Menu::with_items(app, &[&open, &send, launch, &quit])?,
+        None => Menu::with_items(app, &[&open, &send, &quit])?,
     };
 
     let mut builder = TrayIconBuilder::with_id("main")
@@ -40,6 +43,16 @@ pub fn build(app: &AppHandle) -> tauri::Result<()> {
         .show_menu_on_left_click(false)
         .on_menu_event(|app, event| match event.id().as_ref() {
             OPEN_ID => state::show_main(app),
+            // 选文件与算摘要都要等一会儿，放到后台；出错了把主窗口叫到前面说明原因。
+            SEND_ID => {
+                let handle = app.clone();
+                tauri::async_runtime::spawn(async move {
+                    if let Err(error) = send_panel::start(&handle).await {
+                        send_panel::report(&handle, &error);
+                        state::show_main(&handle);
+                    }
+                });
+            }
             // 托盘里的开关只能由用户点击改变，这里直接切换。
             LAUNCH_ID => toggle_launch(app),
             QUIT_ID => app.exit(0),

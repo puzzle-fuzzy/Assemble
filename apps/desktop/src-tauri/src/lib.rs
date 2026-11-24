@@ -13,10 +13,12 @@
 
 mod commands;
 mod notify;
-mod receive;
+mod registry;
 mod runtime;
+mod send_panel;
 mod session;
 mod state;
+mod transfers;
 mod tray;
 
 use std::sync::Arc;
@@ -74,6 +76,12 @@ pub fn run() -> Result<(), StartupError> {
             commands::choose_receive_folder,
             commands::reset_receive_folder,
             commands::reveal_received,
+            commands::start_send,
+            commands::send_to_device,
+            commands::close_send_panel,
+            commands::cancel_transfer,
+            commands::retry_transfer,
+            commands::open_main,
             commands::dismiss_notice,
         ])
         .setup(move |app| {
@@ -83,14 +91,14 @@ pub fn run() -> Result<(), StartupError> {
             let secrets: Option<Arc<dyn SecretStore>> =
                 assemble_store::secret::system_secret_store()
                     .map(|store| Arc::new(store) as Arc<dyn SecretStore>);
-            let settings = receive::load_settings(&handle);
+            let settings = transfers::load_settings(&handle);
             let notifier = Arc::new(notify::SystemNotifier::new(handle.clone()));
             handle.manage(AppState::new(
                 handle.clone(),
                 client,
                 secrets,
                 settings,
-                receive::system_downloads_dir(&handle),
+                transfers::system_downloads_dir(&handle),
                 notifier,
             ));
 
@@ -108,12 +116,17 @@ pub fn run() -> Result<(), StartupError> {
             Ok(())
         })
         .on_window_event(|window, event| {
-            if window.label() == MAIN_WINDOW
-                && let WindowEvent::CloseRequested { api, .. } = event
-            {
-                // 关窗口只是收起；真正退出走托盘菜单。
-                api.prevent_close();
-                let _ = window.hide();
+            if let WindowEvent::CloseRequested { api, .. } = event {
+                match window.label() {
+                    // 关窗口只是收起；真正退出走托盘菜单。
+                    MAIN_WINDOW => {
+                        api.prevent_close();
+                        let _ = window.hide();
+                    }
+                    // 发送面板关了就真的关掉；挑好却没发的文件不再留着。
+                    send_panel::SEND_WINDOW => send_panel::closed(window.app_handle()),
+                    _ => {}
+                }
             }
         })
         .build(tauri::generate_context!())

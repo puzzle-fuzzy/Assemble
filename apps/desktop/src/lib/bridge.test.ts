@@ -12,6 +12,7 @@ const STATE: Snapshot = {
   session: { phase: "signedOut" },
   devices: [],
   transfers: [],
+  draft: null,
   receive: { customFolder: null },
   launchAtLogin: "disabled",
   notice: null,
@@ -68,6 +69,15 @@ describe("桥接", () => {
     await bridge.chooseReceiveFolder();
     await bridge.resetReceiveFolder();
     await bridge.revealReceived("transfer-1");
+    await bridge.startSend();
+    // 发起发送的命令交回的是一组标识，不是状态。
+    respondWith = ["transfer-1"];
+    await bridge.sendToDevice("device-2");
+    respondWith = STATE;
+    await bridge.closeSendPanel();
+    await bridge.openMain();
+    await bridge.cancelTransfer("transfer-1");
+    await bridge.retryTransfer("transfer-1");
     await bridge.dismissNotice();
 
     expect(calls).toEqual([
@@ -85,6 +95,12 @@ describe("桥接", () => {
       { command: "choose_receive_folder", args: {} },
       { command: "reset_receive_folder", args: {} },
       { command: "reveal_received", args: { transferId: "transfer-1" } },
+      { command: "start_send", args: {} },
+      { command: "send_to_device", args: { deviceId: "device-2" } },
+      { command: "close_send_panel", args: {} },
+      { command: "open_main", args: {} },
+      { command: "cancel_transfer", args: { transferId: "transfer-1" } },
+      { command: "retry_transfer", args: { transferId: "transfer-1" } },
       { command: "dismiss_notice", args: {} },
     ]);
   });
@@ -117,6 +133,20 @@ describe("桥接", () => {
       listeners.get(SNAPSHOT_EVENT)?.({ payload: { phase: "weird" } }),
     ).toThrow(BridgeError);
     expect(received).toEqual([]);
+  });
+
+  test("标识列表形状不对时在交界处被拦下", async () => {
+    respondWith = { id: "transfer-1" };
+    const failure = await bridge
+      .sendToDevice("device-2")
+      .catch((error: unknown) => error);
+    expect(failure).toBeInstanceOf(BridgeError);
+    expect((failure as BridgeErrorType).code).toBe("INVALID_STATE");
+
+    respondWith = ["transfer-1", 7];
+    await expect(bridge.sendToDevice("device-2")).rejects.toBeInstanceOf(
+      BridgeError,
+    );
   });
 
   test("Rust 的拒绝被收敛成带稳定错误码的错误", () => {

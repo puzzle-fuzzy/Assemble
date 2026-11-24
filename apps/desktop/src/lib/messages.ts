@@ -18,6 +18,12 @@ const MESSAGES: Record<string, string> = {
   INVALID_RESPONSE: "服务端的回答看不懂，请稍后重试。",
   INVALID_RECEIVE_FOLDER: "这个文件夹不能用来保存收到的文件，请换一个。",
   NOT_SAVED: "这个文件还没有保存到这台电脑上。",
+  FILE_TOO_LARGE: "有文件超过 100 MB，发不出去。",
+  FILE_UNREADABLE: "有文件读不出来，可能已被移走或没有权限。",
+  PANEL_UNAVAILABLE: "发送面板没能打开，请重试。",
+  DEVICE_OFFLINE: "那台设备刚刚下线了，没法发送。",
+  NO_DRAFT: "没有待发送的文件，请重新选择。",
+  NOT_RETRYABLE: "这一次没法重发，请重新选择文件。",
 };
 
 const GENERIC = "操作没有完成，请稍后重试。";

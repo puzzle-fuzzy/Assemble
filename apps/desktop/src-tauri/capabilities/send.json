@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "send",
+  "description": "发送面板只允许接收来自 Rust 的状态事件。其余一切经由具名命令，面板拿不到凭据与文件位置，也碰不到别的窗口。",
+  "windows": ["send"],
+  "permissions": ["core:event:allow-listen", "core:event:allow-unlisten"]
+}

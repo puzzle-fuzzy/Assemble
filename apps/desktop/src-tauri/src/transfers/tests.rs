@@ -25,10 +25,8 @@ use tauri::Manager;
 use tokio_util::sync::CancellationToken;
 
 use super::*;
-use crate::state::{
-    AccountView, AppState, DeviceView, Notifier, SessionView, Settings, TransferFailure,
-    TransferPhase,
-};
+use crate::registry::{Cancellation, Next, TransferFailure, TransferPhase, TransferView};
+use crate::state::{AccountView, AppState, DeviceView, Notifier, SessionView, Settings};
 
 /// 等一件事发生的上限。本机回环上的一切都是毫秒级的，超过它就是卡住了。
 const PATIENCE: Duration = Duration::from_secs(15);
@@ -556,7 +554,7 @@ async fn withdrawing_stops_the_receive_that_is_under_way() {
         );
 
         let under_way = CancellationToken::new();
-        let tracked = state.track_receive("s1", under_way.clone());
+        let tracked = state.track_transfer("s1", under_way.clone());
         assert!(!under_way.is_cancelled());
         // 服务端只是又描述了一次这个文件：不算撤回。
         state.updated(&with_state("s1", SendState::Offered));
@@ -572,8 +570,8 @@ async fn withdrawing_stops_the_receive_that_is_under_way() {
 
         // 已经不在接收了：再停一次什么都不做；别的接收不受影响。
         let other = CancellationToken::new();
-        let _tracked = state.track_receive("s2", other.clone());
-        state.stop_receive("s1");
+        let _tracked = state.track_transfer("s2", other.clone());
+        state.stop_transfer("s1");
         assert!(!other.is_cancelled());
     }
     f.finish().await;
@@ -874,5 +872,397 @@ async fn the_local_record_and_the_server_record_agree_at_every_step() {
         .await
         .expect_err("the content is gone once it is delivered");
     assert_eq!(error.status(), Some(409));
+    f.finish().await;
+}
+
+// ---- 发出的 ----
+//
+// 这台设备发、对面那台收。对面由测试自己扮演：收下，或者干脆不在线。
+
+fn payload(length: usize) -> Vec<u8> {
+    (0..length)
+        .map(|index| u8::try_from(index % 251).expect("below 251"))
+        .collect()
+}
+
+/// 一个可以发出去的文件：写进磁盘、算好摘要。
+async fn pick(dir: &tempfile::TempDir, name: &str, bytes: &[u8]) -> OutgoingFile {
+    let path = dir.path().join("outgoing").join(name);
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    std::fs::write(&path, bytes).unwrap();
+    OutgoingFile::open(&path, &CancellationToken::new())
+        .await
+        .unwrap()
+}
+
+/// "工作电脑"这台设备在界面上看的样子。
+async fn work_pc(f: &Fixture) -> DeviceView {
+    f.sender
+        .devices(&RequestOptions::new(&f.hold))
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|device| device.name == "工作电脑")
+        .map(|device| DeviceView::from(&device))
+        .expect("the other device is registered")
+}
+
+/// 让"工作电脑"上线：把它的 event 流开着。返回这个流，调用方要一直持有它。
+fn bring_online(f: &Fixture) -> EventStream {
+    f.sender.clone().events(f.hold.child_token())
+}
+
+/// 等到 `id` 这台设备在服务端眼里是在线的。
+async fn wait_until_online(f: &Fixture, id: &str) {
+    let deadline = Instant::now() + PATIENCE;
+    while !is_online_for(f, id).await {
+        assert!(
+            Instant::now() < deadline,
+            "the other device never came online"
+        );
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+}
+
+async fn is_online_for(f: &Fixture, id: &str) -> bool {
+    f.sender
+        .devices(&RequestOptions::new(&f.hold))
+        .await
+        .unwrap()
+        .iter()
+        .any(|device| device.id == id && device.online)
+}
+
+/// 对面的事件流上，下一条与文件有关的事件。
+async fn next_send_on(stream: &mut EventStream) -> SendRecord {
+    for _ in 0..20 {
+        if let Some(Ok(Event::SendOffered { send } | Event::SendUpdated { send })) =
+            stream.next().await
+        {
+            return send;
+        }
+    }
+    panic!("no event about a file reached the other device");
+}
+
+fn view_of(f: &Fixture, id: &str) -> TransferView {
+    f.state()
+        .snapshot()
+        .transfers
+        .into_iter()
+        .find(|view| view.id == id)
+        .unwrap_or_else(|| panic!("{id} is not listed"))
+}
+
+/// 对面（收件方）眼里收到的记录。
+async fn as_seen_by_the_receiver(f: &Fixture, id: &str) -> SendRecord {
+    let cancel = CancellationToken::new();
+    let listed = f
+        .sender
+        .sends(
+            &SendQuery {
+                direction: Direction::In,
+                state: None,
+                limit: SEND_PAGE_MAX,
+            },
+            &RequestOptions::new(&cancel),
+        )
+        .await
+        .unwrap();
+    listed
+        .into_iter()
+        .find(|send| send.id == id)
+        .expect("the receiver still lists this send")
+}
+
+async fn received_by_the_receiver(f: &Fixture, id: &str) -> Vec<u8> {
+    use tokio::io::AsyncReadExt;
+
+    let cancel = CancellationToken::new();
+    let download = f
+        .sender
+        .send_content(id, TransferOptions::new(&cancel), None)
+        .await
+        .unwrap();
+    let mut bytes = Vec::new();
+    download
+        .into_reader()
+        .read_to_end(&mut bytes)
+        .await
+        .unwrap();
+    bytes
+}
+
+#[tokio::test]
+async fn a_file_picked_here_reaches_the_other_device_and_is_complete_once_it_is_accepted() {
+    let mut f = fixture().await;
+    // 对面那台设备连上了事件流，所以是在线的。
+    let mut receiver = bring_online(&f);
+    let target = work_pc(&f).await;
+    wait_until_online(&f, &target.id).await;
+    f.start_receiving();
+
+    let bytes = payload(200_000);
+    let file = pick(&f.dir, "季度报表.xlsx", &bytes).await;
+    f.state().set_draft(vec![file.clone()]);
+    // 面板看得到名字与大小，看不到位置。
+    let draft = f.state().snapshot().draft.expect("the draft is shown");
+    assert_eq!(draft.files.len(), 1);
+    assert_eq!(draft.files[0].name, "季度报表.xlsx");
+    assert_eq!(draft.files[0].size, bytes.len() as u64);
+    let shown = serde_json::to_string(&draft).unwrap();
+    assert!(!shown.contains("outgoing"), "{shown}");
+
+    // 用户在面板里点了那台设备。
+    let ids = f.state().queue_draft(&target);
+    assert_eq!(ids.len(), 1);
+    assert!(f.state().snapshot().draft.is_none(), "the draft is used up");
+
+    // 对面收到"有人给你发了文件"，内容一字不差。
+    let offered = next_send_on(&mut receiver).await;
+    assert_eq!(offered.peer_device_name, "Mac");
+    assert_eq!(received_by_the_receiver(&f, &offered.id).await, bytes);
+    // 这台设备这边：文件已经发出去了，在等对方接收。
+    until("the file to be uploaded", || {
+        view_of(&f, &ids[0]).phase == TransferPhase::Waiting
+    })
+    .await;
+
+    // 对面收下了。这台设备的事件流上出现"对方已收下"，事件循环把它交给状态。
+    let cancel = CancellationToken::new();
+    f.sender
+        .send_accept(&offered.id, &RequestOptions::new(&cancel))
+        .await
+        .unwrap();
+    let update = f.next_send_event().await;
+    assert_eq!(update.state, SendState::Delivered);
+    assert!(!f.state().updated(&update), "nothing to withdraw");
+
+    let view = view_of(&f, &ids[0]);
+    assert_eq!(view.direction, Direction::Out);
+    assert_eq!(view.peer, "工作电脑");
+    assert_eq!(view.name, "季度报表.xlsx");
+    assert_eq!(view.size, bytes.len() as u64);
+    assert_eq!(view.phase, TransferPhase::Complete);
+    assert!(!view.retryable);
+    assert_eq!(view.saved_as, None);
+    f.finish().await;
+}
+
+#[tokio::test]
+async fn a_device_that_is_offline_by_the_time_the_upload_lands_means_the_file_was_never_sent() {
+    let f = fixture().await;
+    // "工作电脑"没有连着事件流：它是离线的。
+    let target = work_pc(&f).await;
+    f.start_receiving();
+
+    let file = pick(&f.dir, "合同.pdf", &payload(50_000)).await;
+    f.state().set_draft(vec![file.clone()]);
+    let ids = f.state().queue_draft(&target);
+
+    until("the refusal to be recorded", || {
+        view_of(&f, &ids[0]).phase == TransferPhase::Failed
+    })
+    .await;
+    let view = view_of(&f, &ids[0]);
+    assert_eq!(view.failure, Some(TransferFailure::DeviceOffline));
+    // 文件没到服务端：可以再发一次。
+    assert!(view.retryable);
+    // 服务端什么都没留下，对面什么都收不到。
+    let cancel = CancellationToken::new();
+    let listed = f
+        .sender
+        .sends(
+            &SendQuery {
+                direction: Direction::In,
+                state: None,
+                limit: SEND_PAGE_MAX,
+            },
+            &RequestOptions::new(&cancel),
+        )
+        .await
+        .unwrap();
+    assert!(listed.is_empty());
+    f.finish().await;
+}
+
+#[tokio::test]
+async fn cancelling_a_sent_file_withdraws_it_before_the_other_device_looks() {
+    let f = fixture().await;
+    let mut receiver = bring_online(&f);
+    let target = work_pc(&f).await;
+    wait_until_online(&f, &target.id).await;
+    f.start_receiving();
+
+    let file = pick(&f.dir, "合同.pdf", &payload(10_000)).await;
+    f.state().set_draft(vec![file.clone()]);
+    let ids = f.state().queue_draft(&target);
+    let offered = next_send_on(&mut receiver).await;
+    until("the file to be uploaded", || {
+        view_of(&f, &ids[0]).phase == TransferPhase::Waiting
+    })
+    .await;
+
+    // 用户在传输列表里点了"取消"：文件已经在服务端，得去撤回。
+    assert_eq!(
+        cancel(&f.state(), &ids[0]).await,
+        Cancellation::OnServer(offered.id.clone())
+    );
+    assert_eq!(view_of(&f, &ids[0]).phase, TransferPhase::Cancelled);
+    // 对面收到"已撤回"，内容也取不到了。
+    let update = next_send_on(&mut receiver).await;
+    assert_eq!(update.state, SendState::Cancelled);
+    let cancel_token = CancellationToken::new();
+    let error = f
+        .sender
+        .send_content(&offered.id, TransferOptions::new(&cancel_token), None)
+        .await
+        .expect_err("a withdrawn send has no content");
+    assert_eq!(error.status(), Some(409));
+    // 到头了：再取消什么都不做。
+    assert_eq!(cancel(&f.state(), &ids[0]).await, Cancellation::Nothing);
+    f.finish().await;
+}
+
+#[tokio::test]
+async fn an_upload_abandoned_halfway_is_withdrawn_once_it_turns_out_to_have_arrived() {
+    let f = fixture().await;
+    let _receiver = bring_online(&f);
+    let target = work_pc(&f).await;
+    wait_until_online(&f, &target.id).await;
+
+    let file = pick(&f.dir, "合同.pdf", &payload(10_000)).await;
+    f.state().set_draft(vec![file.clone()]);
+    let ids = f.state().queue_draft(&target);
+    // 接收任务没在跑：模拟"正在上传"。
+    assert!(f.state().begin_send(&ids[0]).is_some());
+    assert_eq!(f.state().cancel_transfer(&ids[0]), Cancellation::Local);
+    assert_eq!(view_of(&f, &ids[0]).phase, TransferPhase::Cancelled);
+
+    // 上传其实已经到了服务端，只是回执回来晚了一步。
+    let cancel = CancellationToken::new();
+    let sent = f
+        .state()
+        .client
+        .send_to_device(&target.id, &file, TransferOptions::new(&cancel), None)
+        .await
+        .unwrap();
+    assert!(
+        f.state().send_uploaded(&ids[0], &sent),
+        "the file must be withdrawn on the server"
+    );
+    // 记录没有改回"等对方接收"。
+    assert_eq!(view_of(&f, &ids[0]).phase, TransferPhase::Cancelled);
+    withdraw(&f.state(), &sent.id, &cancel).await;
+    assert_eq!(
+        as_seen_by_the_receiver(&f, &sent.id).await.state,
+        SendState::Cancelled
+    );
+    f.finish().await;
+}
+
+#[tokio::test]
+async fn an_abandoned_upload_that_arrived_unnoticed_is_withdrawn_at_the_next_check() {
+    let f = fixture().await;
+    let mut receiver = bring_online(&f);
+    let target = work_pc(&f).await;
+    wait_until_online(&f, &target.id).await;
+
+    let file = pick(&f.dir, "合同.pdf", &payload(10_000)).await;
+    f.state().set_draft(vec![file.clone()]);
+    let ids = f.state().queue_draft(&target);
+    assert!(f.state().begin_send(&ids[0]).is_some());
+    assert_eq!(f.state().cancel_transfer(&ids[0]), Cancellation::Local);
+
+    // 这一回回执彻底丢了：本机不知道服务端给了它哪个标识。
+    let cancel = CancellationToken::new();
+    let sent = f
+        .state()
+        .client
+        .send_to_device(&target.id, &file, TransferOptions::new(&cancel), None)
+        .await
+        .unwrap();
+    assert!(f.state().abandoned(&sent));
+
+    // 对账的时候认出来并撤回。
+    resync(&f.state(), &cancel).await.unwrap();
+    assert_eq!(
+        as_seen_by_the_receiver(&f, &sent.id).await.state,
+        SendState::Cancelled
+    );
+    // 对面的事件流上先到的是当初那条"有人给你发了文件"，然后才是"已撤回"。
+    let first = next_send_on(&mut receiver).await;
+    assert_eq!(first.state, SendState::Offered);
+    let update = next_send_on(&mut receiver).await;
+    assert_eq!(update.state, SendState::Cancelled);
+    assert_eq!(view_of(&f, &ids[0]).phase, TransferPhase::Cancelled);
+    f.finish().await;
+}
+
+#[tokio::test]
+async fn a_file_that_vanishes_before_it_is_sent_can_be_sent_again_once_it_is_back() {
+    let f = fixture().await;
+    let _receiver = bring_online(&f);
+    let target = work_pc(&f).await;
+    wait_until_online(&f, &target.id).await;
+
+    let bytes = payload(10_000);
+    let path = f.dir.path().join("outgoing").join("临时.bin");
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    std::fs::write(&path, &bytes).unwrap();
+    let file = OutgoingFile::open(&path, &CancellationToken::new())
+        .await
+        .unwrap();
+    f.state().set_draft(vec![file.clone()]);
+    let ids = f.state().queue_draft(&target);
+    // 还没开始发，文件就被移走了。
+    std::fs::remove_file(&path).unwrap();
+    f.start_receiving();
+
+    until("the failure to be recorded", || {
+        view_of(&f, &ids[0]).phase == TransferPhase::Failed
+    })
+    .await;
+    let view = view_of(&f, &ids[0]);
+    assert_eq!(view.failure, Some(TransferFailure::FileUnreadable));
+    assert!(view.retryable);
+    // 失败之后不会自己重试：得用户点"重发"。
+    assert_eq!(f.state().next_job(), Next::Nothing);
+
+    // 文件回来了：再发一次，这回发到了服务端。
+    std::fs::write(&path, &bytes).unwrap();
+    assert!(retry_send(&f.state(), &ids[0]));
+    until("the file to be uploaded", || {
+        view_of(&f, &ids[0]).phase == TransferPhase::Waiting
+    })
+    .await;
+    // 已经在服务端了：不能再发一次。
+    assert!(!retry_send(&f.state(), &ids[0]));
+    f.finish().await;
+}
+
+#[tokio::test]
+async fn cancelling_a_receive_tells_the_sender_why_the_file_stopped() {
+    let mut f = fixture().await;
+    let sent = f.send("合同.pdf", b"a file the user does not want").await;
+    let offered = f.next_send_event().await;
+    f.state().offer(&offered);
+
+    // 排着队还没开始收，用户点了"取消"。
+    assert_eq!(cancel(&f.state(), &sent.id).await, Cancellation::Local);
+    let view = view_of(&f, &sent.id);
+    assert_eq!(view.phase, TransferPhase::Failed);
+    assert_eq!(view.failure, Some(TransferFailure::Cancelled));
+
+    // 原因报告给了发送方；磁盘上什么都没有。
+    f.start_receiving();
+    until("the cancellation to be reported", || {
+        acknowledged(&f.state(), &sent.id)
+    })
+    .await;
+    let seen = f.as_seen_by_the_sender(&sent.id).await;
+    assert_eq!(seen.state, SendState::Failed);
+    assert_eq!(seen.failure, Some(FailReason::Cancelled));
+    assert!(!f.inbox().exists());
     f.finish().await;
 }

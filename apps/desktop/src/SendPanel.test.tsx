@@ -1,0 +1,214 @@
+// 发送面板的测试：挑好的文件、账户里的设备、发出去之后的进度与结果。
+
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { act } from "react";
+import { BridgeError } from "@/lib/bridge";
+import type { Snapshot } from "@/lib/types";
+import { SendPanel } from "@/SendPanel";
+import {
+  button,
+  cleanup,
+  click,
+  render,
+  settle,
+  text,
+  wait,
+} from "@/test-support/dom";
+import {
+  DEVICE,
+  FakeBridge,
+  OTHER,
+  snapshot,
+  transfer,
+} from "@/test-support/fakes";
+
+/** 面板里"发往设备"的那几个按钮。 */
+function destinations(host: HTMLElement): HTMLButtonElement[] {
+  return [
+    ...host.querySelectorAll<HTMLButtonElement>("ul[aria-label] > li > button"),
+  ];
+}
+
+/** 模拟 Rust 推来新的状态。 */
+async function push(source: FakeBridge, next: Snapshot) {
+  await act(async () => {
+    source.push(next);
+  });
+}
+
+beforeEach(() => {
+  document.body.replaceChildren();
+});
+
+afterEach(cleanup);
+
+describe("发送面板", () => {
+  test("没登录时请用户先去主窗口登录", async () => {
+    const source = new FakeBridge(snapshot());
+    const view = await render(<SendPanel bridge={source} />);
+    await settle();
+
+    expect(text(view.host)).toContain(
+      "请先在 Assemble 主窗口登录，再发送文件。",
+    );
+    await click(button(view.host, "打开 Assemble"));
+    expect(source.calls).toEqual(["openMain"]);
+  });
+
+  test("没有挑文件时如实说，并能重新选择或关闭", async () => {
+    const source = new FakeBridge(snapshot({ phase: "signedIn" }));
+    const view = await render(<SendPanel bridge={source} />);
+    await settle();
+
+    expect(text(view.host)).toContain("没有要发送的文件。");
+    await click(button(view.host, "重新选择"));
+    await click(button(view.host, "关闭"));
+    expect(source.calls).toEqual(["startSend", "closeSendPanel"]);
+  });
+
+  test("列出挑好的文件与账户里的别的设备，离线的不能选", async () => {
+    const source = new FakeBridge(
+      snapshot({
+        phase: "signedIn",
+        draft: {
+          id: "draft-1",
+          files: [
+            { name: "季度报表.xlsx", size: 524288 },
+            { name: "说明.txt", size: 2048 },
+          ],
+        },
+        devices: [
+          { ...DEVICE },
+          { ...OTHER, online: true },
+          {
+            id: "device-3",
+            name: "家里的台式机",
+            platform: "linux",
+            online: false,
+          },
+        ],
+      }),
+    );
+    const view = await render(<SendPanel bridge={source} />);
+    await settle();
+
+    const page = text(view.host);
+    expect(page).toContain("季度报表.xlsx");
+    expect(page).toContain("512 KB");
+    expect(page).toContain("说明.txt");
+    expect(page).toContain("2.0 KB");
+    // 本机不在名单里。
+    const choices = destinations(view.host);
+    expect(choices.map((choice) => choice.textContent)).toEqual([
+      "工作电脑Windows · 在线",
+      "家里的台式机Linux · 离线",
+    ]);
+    expect(choices[0].disabled).toBe(false);
+    expect(choices[1].disabled).toBe(true);
+    expect(page).not.toContain("MacBook-Pro");
+  });
+
+  test("点一台在线设备就发过去，传完后自动收起", async () => {
+    const source = new FakeBridge(
+      snapshot({
+        phase: "signedIn",
+        draft: {
+          id: "draft-1",
+          files: [{ name: "季度报表.xlsx", size: 524288 }],
+        },
+        devices: [{ ...DEVICE }, { ...OTHER, online: true }],
+      }),
+    );
+    source.sentAs = ["t1"];
+    const view = await render(<SendPanel bridge={source} />);
+    await settle();
+
+    await click(destinations(view.host)[0]);
+    expect(source.calls).toEqual(["sendToDevice:device-2"]);
+
+    // Rust 那边开始上传了。
+    const sent = transfer({
+      id: "t1",
+      direction: "out",
+      phase: "inProgress",
+      progress: 0.4,
+    });
+    await push(source, {
+      ...snapshot({ phase: "signedIn" }),
+      transfers: [sent],
+    });
+    expect(text(view.host)).toContain("正在发送 40%");
+    expect(text(view.host)).toContain("传完之后会自动关闭。");
+    expect(source.calls).not.toContain("closeSendPanel");
+
+    // 文件到了服务端：停一会儿，然后收起。
+    await push(source, {
+      ...snapshot({ phase: "signedIn" }),
+      transfers: [{ ...sent, phase: "waiting", progress: 1 }],
+    });
+    expect(text(view.host)).toContain("已发出，等对方接收");
+    expect(text(view.host)).toContain("已发送");
+    await wait(1700);
+    expect(source.calls).toContain("closeSendPanel");
+  });
+
+  test("没发出去的留着让用户决定：可以重发，也可以关掉", async () => {
+    const source = new FakeBridge(
+      snapshot({
+        phase: "signedIn",
+        draft: {
+          id: "draft-1",
+          files: [{ name: "季度报表.xlsx", size: 524288 }],
+        },
+        devices: [{ ...DEVICE }, { ...OTHER, online: true }],
+      }),
+    );
+    source.sentAs = ["t1"];
+    const view = await render(<SendPanel bridge={source} />);
+    await settle();
+    await click(destinations(view.host)[0]);
+    await push(source, {
+      ...snapshot({ phase: "signedIn" }),
+      transfers: [
+        transfer({
+          id: "t1",
+          direction: "out",
+          phase: "failed",
+          failure: "deviceOffline",
+          retryable: true,
+        }),
+      ],
+    });
+
+    expect(text(view.host)).toContain("没有全部发出去");
+    expect(text(view.host)).toContain("发送失败：那台设备刚刚下线了。");
+    expect(button(view.host, "重发没发出去的")).toBeDefined();
+    await wait(1700);
+    expect(source.calls).not.toContain("closeSendPanel");
+
+    await click(button(view.host, "重发没发出去的"));
+    expect(source.calls).toContain("retryTransfer:t1");
+    await click(button(view.host, "关闭"));
+    expect(source.calls).toContain("closeSendPanel");
+  });
+
+  test("点下去才发现那台设备下线了：说明原因，仍停在设备名单上", async () => {
+    const source = new FakeBridge(
+      snapshot({
+        phase: "signedIn",
+        draft: {
+          id: "draft-1",
+          files: [{ name: "季度报表.xlsx", size: 524288 }],
+        },
+        devices: [{ ...DEVICE }, { ...OTHER, online: true }],
+      }),
+    );
+    source.failWith = new BridgeError("DEVICE_OFFLINE", "target is offline");
+    const view = await render(<SendPanel bridge={source} />);
+    await settle();
+
+    await click(destinations(view.host)[0]);
+    expect(text(view.host)).toContain("那台设备刚刚下线了，没法发送。");
+    expect(destinations(view.host)).toHaveLength(1);
+  });
+});

@@ -216,7 +216,7 @@ pub async fn choose_receive_folder(app: AppHandle) -> Result<crate::state::Snaps
     let settings = crate::state::Settings {
         receive_directory: Some(validated),
     };
-    if let Err(error) = crate::receive::save_settings(&app, &settings) {
+    if let Err(error) = crate::transfers::save_settings(&app, &settings) {
         tracing::warn!(%error, "the receive folder could not be saved");
         return Err(CommandError::local("SYSTEM_REJECTED", error.to_string()));
     }
@@ -231,7 +231,7 @@ pub async fn reset_receive_folder(app: AppHandle) -> Result<crate::state::Snapsh
     let settings = crate::state::Settings {
         receive_directory: None,
     };
-    if let Err(error) = crate::receive::save_settings(&app, &settings) {
+    if let Err(error) = crate::transfers::save_settings(&app, &settings) {
         tracing::warn!(%error, "the receive folder could not be saved");
         return Err(CommandError::local("SYSTEM_REJECTED", error.to_string()));
     }
@@ -251,6 +251,101 @@ pub fn reveal_received(app: AppHandle, transfer_id: String) -> Result<(), Comman
     };
     crate::notify::reveal(&app, path);
     Ok(())
+}
+
+/// 挑要发送的文件，然后打开发送面板。文件的位置由系统选择器直接交给 Rust，不经过界面。
+#[tauri::command]
+pub async fn start_send(app: AppHandle) -> Result<crate::state::Snapshot, CommandError> {
+    match crate::send_panel::start(&app).await {
+        Ok(()) => Ok(app.state::<AppState>().snapshot()),
+        Err(error) => {
+            // 面板没打开时界面还在主窗口里：把原因作为错误码交给它去显示。
+            let code = match &error {
+                crate::send_panel::StartError::TooLarge(_) => "FILE_TOO_LARGE",
+                crate::send_panel::StartError::Unreadable(_) => "FILE_UNREADABLE",
+                crate::send_panel::StartError::Window(cause) => {
+                    tracing::warn!(%cause, "the send panel could not be opened");
+                    "PANEL_UNAVAILABLE"
+                }
+            };
+            Err(CommandError::local(code, error_to_string(&error)))
+        }
+    }
+}
+
+/// 一句话的说明，只进日志。
+fn error_to_string(error: &crate::send_panel::StartError) -> String {
+    match error {
+        crate::send_panel::StartError::TooLarge(_) => "a chosen file is too large".to_owned(),
+        crate::send_panel::StartError::Unreadable(_) => {
+            "a chosen file could not be read".to_owned()
+        }
+        crate::send_panel::StartError::Window(cause) => cause.to_string(),
+    }
+}
+
+/// 把挑好的文件发给一台设备。返回每一条传输的标识，面板据此盯着进度。
+#[tauri::command]
+pub fn send_to_device(app: AppHandle, device_id: String) -> Result<Vec<String>, CommandError> {
+    let state = app.state::<AppState>();
+    if state.device_id().as_deref() == Some(device_id.as_str()) {
+        return Err(CommandError::local(
+            "IS_THIS_DEVICE",
+            "a device cannot send files to itself",
+        ));
+    }
+    let Some(device) = state.device(&device_id) else {
+        return Err(CommandError::local(
+            "NOT_FOUND",
+            "this device is not in the account",
+        ));
+    };
+    // 只能发给在线设备。面板里离线的本来选不了；这是它刚好下线时的兜底。
+    if !device.online {
+        return Err(CommandError::local(
+            "DEVICE_OFFLINE",
+            "the target device is offline",
+        ));
+    }
+    let ids = state.queue_draft(&device);
+    if ids.is_empty() {
+        return Err(CommandError::local(
+            "NO_DRAFT",
+            "there are no files waiting to be sent",
+        ));
+    }
+    Ok(ids)
+}
+
+/// 关掉发送面板。挑好却没发的文件不再留着。
+#[tauri::command]
+pub fn close_send_panel(app: AppHandle) {
+    crate::send_panel::close(&app);
+}
+
+/// 把主窗口叫到前面。发送面板里"请先登录"时用。
+#[tauri::command]
+pub fn open_main(app: AppHandle) {
+    crate::state::show_main(&app);
+}
+
+/// 取消一条传输：还没发完的不发了，已经发到服务端的撤回。
+#[tauri::command]
+pub async fn cancel_transfer(app: AppHandle, transfer_id: String) {
+    crate::transfers::cancel(&app.state::<AppState>(), &transfer_id).await;
+}
+
+/// 再发一次。只对"文件根本没到服务端"的失败有用。
+#[tauri::command]
+pub fn retry_transfer(app: AppHandle, transfer_id: String) -> Result<(), CommandError> {
+    if crate::transfers::retry_send(&app.state::<AppState>(), &transfer_id) {
+        Ok(())
+    } else {
+        Err(CommandError::local(
+            "NOT_RETRYABLE",
+            "only a send that never reached the server can be retried",
+        ))
+    }
 }
 
 /// 提示看过了，收起来。

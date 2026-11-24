@@ -1,9 +1,15 @@
-//! 接收：别的设备发来的文件落到本机。
+//! 收发：别的设备发来的文件落到本机；本机挑好的文件发到别的设备。
 //!
-//! 一个任务按先后处理排队的文件，每个文件走同一条路：
+//! 一个任务按先后处理排队的文件。收到的文件走这条路：
 //!
 //! ```text
 //! 取内容 ─▶ 边写暂存边核对长度与摘要 ─▶ 再确认接收目录 ─▶ 发布 ─▶ 通知用户 ─▶ 回执"已收下"
+//! ```
+//!
+//! 发出去的文件走那条路：
+//!
+//! ```text
+//! 算摘要 ─▶ 上传并报进度 ─▶ 服务端收下 ─▶ 等对方接收 ─▶ 对面收下、拒收，或者过期
 //! ```
 //!
 //! 几条规则决定了它的形状：
@@ -12,11 +18,13 @@
 //!   真的存好之后说。回执没发出去不算完：之后每次与服务端对账都会发现它还在等，再补一次。
 //! - **收到的内容不信任。** 长度或摘要对不上就不发布，并如实告诉发送方"校验没通过"，
 //!   而不是说对方的电脑出了问题。
-//! - **网络断了不算失败。** 隔一会儿从头再收。同一个文件永远只有一份记录，
-//!   排队、重试、补回执都由它驱动，不会把同一个文件收两遍。
+//! - **网络断了不算失败。** 隔一会儿从头再来。同一个文件永远只有一份记录，
+//!   排队、重试、补回执都由它驱动，不会把同一个文件收两遍、发两遍。
+//! - **取消要取消到底。** 上传途中按了取消，文件其实可能已经到了服务端；对账时会把
+//!   这样的发送撤回，不让对面收到一个本机已经放弃的文件。
 //!
 //! 事件流不补送断线期间的事件，所以每次连上、以及之后每隔一段时间，
-//! 都向服务端问一遍"还有哪些文件在等我"。
+//! 都向服务端问一遍"还有哪些文件在等我"和"哪些发出去的还悬着"。
 
 use std::path::PathBuf;
 use std::time::Duration;
@@ -25,6 +33,7 @@ use assemble_client::{ClientError, RequestOptions, TransferOptions, TransferProg
 use assemble_device::Received;
 use assemble_device::inbox::{ReceiveFailure, accept, is_source_failure, resolve, sweep_staging};
 use assemble_device::receive::default_directory;
+use assemble_protocol::error::codes;
 use assemble_protocol::primitives::MAX_FILE_SIZE;
 use assemble_protocol::sends::{
     Direction, FailInput, FailReason, SEND_PAGE_MAX, Send as SendRecord, SendQuery, SendState,
@@ -35,8 +44,9 @@ use assemble_transfer::download::SaveOptions;
 use tauri::Manager;
 use tokio_util::sync::CancellationToken;
 
+use crate::registry::{Cancellation, Job, Next, TransferFailure};
 use crate::session;
-use crate::state::{AppState, Job, Next, Notice, Settings};
+use crate::state::{AppState, Notice, Settings};
 
 /// 设置文件的名字，在应用数据目录里。
 const SETTINGS_FILE: &str = "settings.json";
@@ -102,6 +112,7 @@ pub async fn run<R: tauri::Runtime>(app: tauri::AppHandle<R>) {
         };
         match job {
             Job::Receive { id } => receive(&state, &id).await,
+            Job::Send { id } => send(&state, &id).await,
             Job::Settle { id } => settle(&state, &id).await,
         }
     }
@@ -146,29 +157,40 @@ async fn sweep<R: tauri::Runtime>(state: &AppState<R>) {
     }
 }
 
-/// 向服务端问一遍"还有哪些文件在等我"，与本机的记录对账。
+/// 与服务端对账：问一遍"还有哪些文件在等我"，把没接上的接上；
+/// 再看一遍发出去还悬着的，把本机已经放弃的撤回。
 ///
 /// 断线期间送不到的 `send_offered`、没送到的回执，都靠它补上。
 pub async fn resync<R: tauri::Runtime>(
     state: &AppState<R>,
     cancel: &CancellationToken,
 ) -> Result<(), ClientError> {
-    let offered = state
-        .client
-        .sends(
-            &SendQuery {
-                direction: Direction::In,
-                state: Some(SendState::Offered),
-                limit: SEND_PAGE_MAX,
-            },
-            &RequestOptions {
-                cancel,
-                timeout: Some(SHORT_TIMEOUT),
-            },
-        )
-        .await?;
-    for send in &offered {
+    let options = RequestOptions {
+        cancel,
+        timeout: Some(SHORT_TIMEOUT),
+    };
+    let waiting = SendQuery {
+        direction: Direction::In,
+        state: Some(SendState::Offered),
+        limit: SEND_PAGE_MAX,
+    };
+    for send in &state.client.sends(&waiting, &options).await? {
         state.offer(send);
+    }
+    let offered = SendQuery {
+        direction: Direction::Out,
+        state: Some(SendState::Offered),
+        limit: SEND_PAGE_MAX,
+    };
+    for send in &state.client.sends(&offered, &options).await? {
+        if state.abandoned(send) {
+            // 撤回失败不影响这一轮的其余部分：下一次对账还会看到它。
+            let _ = state
+                .client
+                .send_cancel(&send.id, &options)
+                .await
+                .map(|send| state.updated(&send));
+        }
     }
     Ok(())
 }
@@ -199,7 +221,7 @@ async fn receive<R: tauri::Runtime>(state: &AppState<R>, id: &str) {
         return;
     };
     let cancel = login.child_token();
-    let _tracked = state.track_receive(id, cancel.clone());
+    let _tracked = state.track_transfer(id, cancel.clone());
 
     match pull(state, &send, &cancel).await {
         Outcome::Saved {
@@ -208,7 +230,7 @@ async fn receive<R: tauri::Runtime>(state: &AppState<R>, id: &str) {
         } => {
             // 文件已经在磁盘上了。先登记，再通知，最后才告诉服务端"已收下"。
             let handle = state.fresh_handle();
-            state.receive_completed(id, &received, handle);
+            state.receive_completed(id, &received.name, received.path.clone(), handle);
             state.notify_received(handle, &send.peer_device_name, &received.name, fell_back);
             if fell_back {
                 state.set_notice(Some(Notice::info(
@@ -252,7 +274,7 @@ async fn pull<R: tauri::Runtime>(
 
     for attempt in 0..2 {
         let mut report = |progress: TransferProgress| {
-            state.receive_progress(&send.id, progress.fraction());
+            state.transfer_progress(&send.id, progress.fraction());
         };
         let download = match state
             .client
@@ -376,7 +398,9 @@ async fn refresh<R: tauri::Runtime>(state: &AppState<R>, id: &str) {
         Ok(items) => match items.iter().find(|send| send.id == id) {
             // 还是"等着接收"：刚才那一下只是一时的，过会儿再试。
             Some(send) if send.state == SendState::Offered => state.retry_receive(id),
-            Some(send) => state.updated(send),
+            Some(send) => {
+                state.updated(send);
+            }
             None => state.forget_transfer(id),
         },
         Err(error) if error.is_unauthorized() => session::revoked(state),
@@ -392,6 +416,110 @@ fn reported(failure: ReceiveFailure) -> FailReason {
         ReceiveFailure::VerificationFailed => FailReason::VerificationFailed,
         ReceiveFailure::Cancelled => FailReason::Cancelled,
     }
+}
+
+// ---- 发出的 ----
+
+/// 把一个排着队的文件发出去。
+async fn send<R: tauri::Runtime>(state: &AppState<R>, id: &str) {
+    // 先记下这一次登录：领取之后登录可能就换了，那时不该再发上一个账户的文件。
+    let login = state.session_cancel();
+    let Some(outgoing) = state.begin_send(id) else {
+        return;
+    };
+    let cancel = login.child_token();
+    let _tracked = state.track_transfer(id, cancel.clone());
+
+    let mut report = |progress: TransferProgress| state.transfer_progress(id, progress.fraction());
+    let uploaded = state
+        .client
+        .send_to_device(
+            &outgoing.target.id,
+            &outgoing.file,
+            TransferOptions::new(&cancel),
+            Some(&mut report),
+        )
+        .await;
+    let uploaded = match uploaded {
+        Ok(send) => send,
+        // 用户取消了：记录已经标好了。文件其实到没到服务端，由对账去确认。
+        Err(ClientError::Cancelled) => return,
+        Err(error) if error.is_unauthorized() => return session::revoked(state),
+        Err(error) => {
+            match refusal(&error) {
+                Some(failure) => state.send_failed(id, failure),
+                // 网络的事：过一会儿从头再发一遍。等不及可以取消。
+                None => state.retry_send(id),
+            }
+            return;
+        }
+    };
+    // 文件到了服务端。用户在上传途中按了取消的话，它其实还是到了：去撤回。
+    if state.send_uploaded(id, &uploaded) {
+        withdraw(state, &uploaded.id, &state.lifetime).await;
+    }
+}
+
+/// 没发出去，而且原因说得清楚：重试也不会变。
+/// 返回 `None` 表示说不准是谁的问题（网络、服务端暂时不可用），值得再试。
+fn refusal(error: &ClientError) -> Option<TransferFailure> {
+    match error {
+        ClientError::TooLarge | ClientError::Http { status: 413, .. } => {
+            Some(TransferFailure::TooLarge)
+        }
+        ClientError::LocalSource => Some(TransferFailure::FileUnreadable),
+        ClientError::Http {
+            status: 409,
+            remote_code,
+        } if remote_code.as_deref() == Some(codes::DEVICE_OFFLINE) => {
+            Some(TransferFailure::DeviceOffline)
+        }
+        // 服务端明确拒绝：名字不合规、文件在挑选之后变了、发给自己。重试也不会变。
+        ClientError::Http {
+            status: 400..=499, ..
+        }
+        | ClientError::InvalidRequest => Some(TransferFailure::Rejected),
+        ClientError::Cancelled
+        | ClientError::InvalidResponse
+        | ClientError::Network
+        | ClientError::Timeout
+        | ClientError::Http { .. } => None,
+    }
+}
+
+/// 文件已经在服务端等对方接收，本机却不想发了：去服务端撤回。
+pub async fn withdraw<R: tauri::Runtime>(
+    state: &AppState<R>,
+    send_id: &str,
+    cancel: &CancellationToken,
+) {
+    let options = RequestOptions {
+        cancel,
+        timeout: Some(SHORT_TIMEOUT),
+    };
+    match state.client.send_cancel(send_id, &options).await {
+        Ok(send) => {
+            state.updated(&send);
+        }
+        Err(error) if error.is_unauthorized() => session::revoked(state),
+        // 没撤成：记录停在"等对方接收"，之后对账时还会再试。
+        Err(error) => tracing::debug!(%error, "a send could not be withdrawn yet"),
+    }
+}
+
+/// 用户要取消一条传输。
+pub async fn cancel<R: tauri::Runtime>(state: &AppState<R>, id: &str) -> Cancellation {
+    let outcome = state.cancel_transfer(id);
+    if let Cancellation::OnServer(send_id) = &outcome {
+        let cancel = state.session_cancel();
+        withdraw(state, send_id, &cancel).await;
+    }
+    outcome
+}
+
+/// 再发一次只对"文件根本没到服务端"的失败有用。
+pub fn retry_send<R: tauri::Runtime>(state: &AppState<R>, id: &str) -> bool {
+    state.retry_failed_send(id)
 }
 
 #[cfg(test)]
