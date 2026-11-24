@@ -49,21 +49,27 @@ pub async fn open(data_dir: &Path) -> Result<SqlitePool, DbError> {
 
 /// 把目录权限收成"仅本人"。
 ///
-/// 只在启动时做一次，用的是同步接口。写成异步的话，`await` 全都在 Unix 那一段里，
-/// 到了 Windows 上函数体里一个都不剩，静态检查会报"没有 await 的异步函数"。
+/// 只在启动时做一次，用的是同步接口。读与写这两步在哪个平台上都可能失败，所以返回值
+/// 在哪个平台上都有意义：把它们整个藏进 `#[cfg(unix)]` 里的话，Windows 上它就成了
+/// 一个永远不失败的 `Result`，静态检查会报"不必要的返回值"（写成异步的话，又会报
+/// "没有 await 的异步函数"）。按平台不同的只有"什么叫仅本人"。
 fn restrict_to_owner(data_dir: &Path) -> Result<(), std::io::Error> {
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-
-        let mut permissions = std::fs::metadata(data_dir)?.permissions();
-        permissions.set_mode(0o700);
-        std::fs::set_permissions(data_dir, permissions)?;
-    }
-    #[cfg(not(unix))]
-    let _ = data_dir;
-    Ok(())
+    let mut permissions = std::fs::metadata(data_dir)?.permissions();
+    keep_to_owner(&mut permissions);
+    std::fs::set_permissions(data_dir, permissions)
 }
+
+/// 类 Unix 上只留本人的读、写、进入。
+#[cfg(unix)]
+fn keep_to_owner(permissions: &mut std::fs::Permissions) {
+    use std::os::unix::fs::PermissionsExt;
+
+    permissions.set_mode(0o700);
+}
+
+/// Windows 上没有对应的权限位可设：原样写回去，什么都不改。
+#[cfg(not(unix))]
+fn keep_to_owner(_permissions: &mut std::fs::Permissions) {}
 
 #[cfg(test)]
 mod tests {
