@@ -120,13 +120,38 @@ export class FakeBridge implements Bridge {
   /** `sendToDevice` 交回的传输标识：面板拿它盯进度。 */
   sentAs: string[] = [];
   private listeners = new Set<(snapshot: Snapshot) => void>();
+  /** 调用过 `hold()` 之后，命令一直不返回，直到 `release()`。 */
+  private held = false;
+  private waiting: (() => void)[] = [];
 
   constructor(initial: Snapshot) {
     this.current = initial;
   }
 
+  /**
+   * 让之后的命令一直挂着，直到 `release()`。
+   * 要确定地观察"进行中"的状态时用它：不要靠零延时定时器和界面的重渲染赛跑，
+   * 那个先后顺序在 macOS 与 Windows 上不一样。
+   */
+  hold() {
+    this.held = true;
+  }
+
+  release() {
+    this.held = false;
+    for (const wake of this.waiting.splice(0)) wake();
+  }
+
   private gate(): Promise<void> {
     this.pending = true;
+    if (this.held) {
+      return new Promise((resolve) => {
+        this.waiting.push(() => {
+          this.pending = false;
+          resolve();
+        });
+      });
+    }
     return new Promise((resolve) => {
       // 让调用方有机会观察"进行中"的状态。
       setTimeout(() => {

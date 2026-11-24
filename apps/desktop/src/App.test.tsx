@@ -123,10 +123,14 @@ describe("账户", () => {
 
     const signIn = button(view.host, "使用浏览器登录");
     if (!signIn) throw new Error("没有找到登录按钮");
+    // 让登录命令一直挂着，断言完再放行：不靠零延时定时器和界面的重渲染赛跑。
+    source.hold();
     await press(signIn);
+    await settle();
     expect(source.calls).toEqual(["signIn"]);
     // 命令还没返回：不再显示可重复点击的按钮。
     expect(button(view.host, "使用浏览器登录")).toBeUndefined();
+    source.release();
     await settle();
     expect(button(view.host, "使用浏览器登录")).toBeDefined();
     // 整个过程只触发了一次登录。
