@@ -1,22 +1,50 @@
-# Assemble 服务端的反向代理。放进 nginx 的 conf.d（或者 sites-available 里做软链），
-# 把三处 assemble.example.com 换成你的域名，证书路径按实际改，然后：
+# Assemble 服务端的反向代理。放进 nginx 的 conf.d，把 assemble.example.com 换成你的域名、
+# 把 /var/www/assemble-acme 换成你准备的证书验证目录，然后：
 #
 #   nginx -t && systemctl reload nginx
 #
-# 服务端本身在 compose 里只监听本机的 8787；TLS 在这里结束。
+# 这和 2026-11-24 部署在正式服务器上的那一份只差域名（docs/runbooks/deploy.md）。
+# 第一次部署时分两步走：先只放最下面那个 HTTP 的 server，用它通过 Certbot 的验证
+# （certbot certonly --webroot -w /var/www/assemble-acme -d <域名>），拿到证书再把 HTTPS
+# 的那一段加上去。服务端本身在 compose 里只监听本机的 8787；TLS 在这里结束。
 
 upstream assemble {
     server 127.0.0.1:8787;
 }
 
 server {
+    listen 80;
+    listen [::]:80;
+    server_name assemble.example.com;
+
+    location ^~ /.well-known/acme-challenge/ {
+        root /var/www/assemble-acme;
+        try_files $uri =404;
+    }
+
+    location / {
+        return 301 https://$host$request_uri;
+    }
+}
+
+server {
     listen 443 ssl;
     listen [::]:443 ssl;
+    http2 on;
     server_name assemble.example.com;
 
     ssl_certificate     /etc/letsencrypt/live/assemble.example.com/fullchain.pem;
     ssl_certificate_key /etc/letsencrypt/live/assemble.example.com/privkey.pem;
     ssl_protocols       TLSv1.2 TLSv1.3;
+    ssl_ciphers         ECDHE+AESGCM:ECDHE+CHACHA20;
+    ssl_prefer_server_ciphers off;
+
+    # 只接受 HTTPS；内容类型的嗅探关掉。CSP 与 Referrer-Policy 由服务端自己发，这里不重复。
+    add_header X-Content-Type-Options nosniff always;
+    add_header Strict-Transport-Security "max-age=31536000" always;
+
+    access_log /var/log/nginx/assemble.access.log;
+    error_log  /var/log/nginx/assemble.error.log warn;
 
     # 上传的是整个文件，单文件上限 100 MB；多留一点给请求头。
     client_max_body_size 110m;
@@ -25,10 +53,11 @@ server {
         proxy_pass http://assemble;
         proxy_http_version 1.1;
         proxy_set_header Host $host;
-        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
 
-        # 边收边转，不在 nginx 的磁盘上再存一份（服务器的磁盘很紧）。
+        # 边收边转，不在 nginx 的磁盘上再存一份。
         # 服务端会提前拒绝超限或不合法的上传，并等发送方把话说完，所以这里不会截断它。
         proxy_request_buffering off;
         # 上传与下载都可能持续很久。
@@ -41,24 +70,16 @@ server {
         proxy_pass http://assemble;
         proxy_http_version 1.1;
         proxy_set_header Host $host;
-        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
         proxy_buffering off;
         proxy_cache off;
         proxy_read_timeout 1h;
     }
-}
 
-server {
-    listen 80;
-    listen [::]:80;
-    server_name assemble.example.com;
-
-    # 除了续证书时的验证，一律转去 HTTPS。
-    location /.well-known/acme-challenge/ {
-        root /var/www/certbot;
-    }
-    location / {
-        return 301 https://$host$request_uri;
+    location = /healthz {
+        access_log off;
+        proxy_pass http://assemble;
     }
 }
