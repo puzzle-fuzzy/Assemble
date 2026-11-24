@@ -19,20 +19,6 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: 编译测试程序（不运行）
         run: cargo test -p assemble-desktop --lib --no-run
-      - name: 直接运行一次，看系统日志里怎么说
-        shell: pwsh
-        run: |
-          $exe = Get-ChildItem target\debug -Recurse -Filter assemble_desktop_lib-*.exe | Select-Object -First 1
-          Write-Host "程序：$($exe.Name)"
-          $p = Start-Process -FilePath $exe.FullName -ArgumentList '--list' -PassThru -Wait -ErrorAction SilentlyContinue
-          Write-Host "退出码：0x{0:X8}" -f $p.ExitCode
-          Start-Sleep -Seconds 2
-          Write-Host "--- 系统日志里最近 10 分钟的弹窗记录"
-          Get-WinEvent -LogName System -FilterHashtable @{Id=26; StartTime=(Get-Date).AddMinutes(-10)} -ErrorAction SilentlyContinue |
-            ForEach-Object { Write-Host $_.Message }
-          Write-Host "--- 应用程序日志里最近的错误"
-          Get-WinEvent -LogName Application -FilterHashtable @{Level=2; StartTime=(Get-Date).AddMinutes(-10)} -ErrorAction SilentlyContinue |
-            Select-Object -First 5 | ForEach-Object { Write-Host $_.Message }
       - name: 逐个核对导入的函数在不在
         shell: pwsh
         run: |
