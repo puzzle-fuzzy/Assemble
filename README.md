@@ -48,7 +48,14 @@ bun run dev          # 桌面端的开发运行：Vite 热更新 + 调试构建�
 | `bun run dev`（调试） | 本地开发服务 `http://127.0.0.1:8787` | 不用指定；设了 `ASSEMBLE_SERVER_ORIGIN` 就连它             |
 | 发布构建              | 构建时给定的地址                     | `ASSEMBLE_SERVER_ORIGIN=https://…`；没给就拒绝启动，不去猜 |
 
-`bun run verify` 依次执行 Biome、类型检查、界面测试、前端构建、Rust 格式、Rust 静态检查与全部 Rust 测试（含服务端），任一步失败即停止。装了 Windows 的 Rust 目标时，它还会给能在本机上检查的五个基础库做一次针对 Windows 目标的静态检查；客户端与服务端带着 TLS 与 SQLite 的本机依赖，要到 Windows 环境里才能检查。
+`bun run verify` 依次执行 Biome、类型检查、界面与工具脚本的测试、前端构建、Rust 格式、Rust 静态检查与全部 Rust 测试（含服务端），任一步失败即停止。装了 Windows 的 Rust 目标时，它还会给能在本机上检查的五个基础库做一次针对 Windows 目标的静态检查；客户端与服务端带着 TLS 与 SQLite 的本机依赖，要到 Windows 环境里才能检查。
+
+### 持续集成与安装包
+
+配置在 `.github/workflows/`。远程仓库建好并推上去之后才生效；**现在还没有远程，所以这两个流程一次都没有跑过**。
+
+- **验证**（`verify.yml`）：每次推送到 `main` 和每个合并请求，在 macOS（arm64）与 Windows（x64）上各跑一遍 `bun run verify`。这是服务端、客户端与桌面端唯一会在 Windows 上编译和测试的地方。
+- **安装包**（`release.yml`）：推送 `v` 开头的标签时，产出 macOS 与 Windows 的桌面端安装包，挂在发布页上；也可以手动触发，临时打一个测试包。桌面端连哪个服务在构建时定下，所以要先给仓库设变量 `ASSEMBLE_SERVER_ORIGIN`（手动触发时可以填别的）。产出没有签名、没有公证，是给人验收用的。
 
 ## 目录
 

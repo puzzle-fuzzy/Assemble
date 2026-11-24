@@ -1,0 +1,2 @@
+# 文本文件一律用 LF：格式检查（Biome）按 LF 对齐，在 Windows 上检出时也不转换成 CRLF。
+* text=auto eol=lf

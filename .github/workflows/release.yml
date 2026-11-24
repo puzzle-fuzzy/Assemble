@@ -1,0 +1,87 @@
+# 打标签（v 开头）时产出两个平台的桌面端安装包，挂在 GitHub 的发布页上；
+# 也可以手动触发，临时打一个测试包（比如给某台 Windows 电脑做真机验收）。
+#
+# 桌面端连接哪个服务在构建时定下，所以这里必须知道服务地址：读仓库变量
+# ASSEMBLE_SERVER_ORIGIN（没设置就失败，不去猜）；手动触发时可以直接填一个别的。
+#
+# 产出没有签名、没有公证，是给人验收用的，不是对外分发：macOS 上第一次打开要在
+# "隐私与安全性"里点"仍要打开"；用浏览器下载的 Windows 安装包会有 SmartScreen 的提醒。
+#
+# 服务端的可执行文件不在这里出：它跟着部署用的镜像一起构建（deploy/）。
+
+name: 安装包
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      server_origin:
+        description: 桌面端要连接的服务地址（https://…）。不填就用仓库变量 ASSEMBLE_SERVER_ORIGIN。
+        type: string
+
+permissions:
+  contents: read
+
+env:
+  ASSEMBLE_SERVER_ORIGIN: ${{ inputs.server_origin || vars.ASSEMBLE_SERVER_ORIGIN }}
+
+jobs:
+  desktop:
+    name: 桌面端 ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macOS（arm64）
+            os: macos-15
+            artifact: macos-arm64
+          - name: Windows（x64）
+            os: windows-2025
+            artifact: windows-x64
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: oven-sh/setup-bun@v2
+      - run: bun install --frozen-lockfile
+      - name: 服务地址
+        shell: bash
+        run: |
+          if [ -z "$ASSEMBLE_SERVER_ORIGIN" ]; then
+            echo "::error::没有设置桌面端要连接的服务地址：给仓库加上变量 ASSEMBLE_SERVER_ORIGIN，或者手动触发时填上。"
+            exit 1
+          fi
+          echo "桌面端将连接 $ASSEMBLE_SERVER_ORIGIN"
+      - name: 构建
+        working-directory: apps/desktop
+        run: bun x tauri build
+      - name: 留下安装包
+        uses: actions/upload-artifact@v7
+        with:
+          name: assemble-${{ matrix.artifact }}
+          path: |
+            target/release/bundle/dmg/*.dmg
+            target/release/bundle/nsis/*.exe
+            target/release/bundle/msi/*.msi
+          if-no-files-found: error
+
+  # 两个平台各自往发布页上挂文件会互相打架，所以等它们都构建完，由一个任务一次挂上去。
+  release:
+    name: 挂到发布页
+    if: github.ref_type == 'tag'
+    needs: desktop
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          path: installers
+          merge-multiple: true
+      - uses: softprops/action-gh-release@v3
+        with:
+          files: installers/*
+          generate_release_notes: true

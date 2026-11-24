@@ -161,11 +161,26 @@ rm -f data/local/*.json      # 替身设备的令牌，仅本人可读
 
 真实登录过的应用会在系统钥匙串里留一条 `assemble.device-session:http://127.0.0.1:8787`。在应用里"退出登录"会删掉它。
 
+## 安装包从哪来
+
+真机验收用的安装包由持续集成产出（`.github/workflows/release.yml`）：推送 `v` 开头的标签，或者在 GitHub 上手动运行"安装包"这个流程。产物在那一次运行的页面底下，分 `assemble-macos-arm64` 与 `assemble-windows-x64` 两份；打标签的话还会挂在发布页上。
+
+```sh
+gh run list --workflow release.yml
+gh run download <运行编号> -n assemble-windows-x64
+```
+
+- 桌面端连哪个服务在构建时定下：流程读仓库变量 `ASSEMBLE_SERVER_ORIGIN`；手动触发时可以填一个别的地址，临时打一个指向测试服务的包。仓库里还没设这个变量时，打标签的构建直接失败并说明原因，不去猜。
+- 产出没有签名、没有公证。macOS 上第一次打开要在"系统设置 → 隐私与安全性"里点"仍要打开"；用浏览器下载的 Windows 安装包会有 SmartScreen 的提醒（`gh run download` 下来的没有这个标记）。
+- 手边就有一台开发机时也可以本地打：`bun run build`，产物在 `target/release/bundle/`。在 macOS 上打出的是 macOS 的安装包，在 Windows 上打出的是 Windows 的。
+
+这些流程在远程仓库建好之前一次都没有跑过。上面的命令与产物名是按配置写的，不是按实际运行写的。
+
 ## Windows 真机验收清单
 
 Windows 上没法在这台 Mac 上自动验证。下面每一条都对应一段只做过类型检查的代码，请在 Windows 上逐条走：
 
-1. **安装并启动。** `bun run build` 打出安装包，装好后启动：窗口出现，托盘里有图标，"本机"卡片里有"右键菜单"一项，默认开着。
+1. **安装并启动。** 装上持续集成产出的 Windows 安装包（见"安装包从哪来"；装了开发环境的 Windows 上也可以 `bun run build` 自己打）。装好后启动：窗口出现，托盘里有图标，"本机"卡片里有"右键菜单"一项，默认开着。
 2. **右键菜单。** 在资源管理器里对任意一个文件点右键 →"显示更多选项"：有"用 Assemble 发送"。点它：发送面板打开，里面是这个文件。
 3. **单实例。** 应用已经在运行时再点一次右键菜单：面板被叫到前面，任务管理器里进程仍然只有一个。
 4. **开关。** 在"本机"卡片里关掉"右键菜单"：右键菜单里那一项消失。重新打开：它回来。想直接看注册表：`reg query "HKCU\Software\Classes\*\shell\AssembleSend" /s`。

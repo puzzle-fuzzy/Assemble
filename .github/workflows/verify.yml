@@ -1,0 +1,46 @@
+# 每次推送与合并请求，在 macOS 与 Windows 上各跑一遍完整验证。
+#
+# 界面与 Rust 的测试本来就该与平台无关，但 Windows 专用的代码只有 Windows 能编译、能运行；
+# 客户端（TLS）与服务端（SQLite）带着本机依赖，它们的 Windows 目标也只有 Windows 自己能检查。
+# 哪一边失败就是那一边的问题，所以一边失败不叫停另一边（fail-fast 关掉）。
+
+name: 验证
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# 同一个分支上来了新的推送，旧的那一次就不必跑完。
+concurrency:
+  group: verify-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macOS（arm64）
+            os: macos-15
+          - name: Windows（x64）
+            os: windows-2025
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      # macOS 上顺便给不依赖窗口的五个基础库做针对 Windows 目标的静态检查：
+      # `bun run verify` 里有这一步，装了那个目标才会跑。
+      - run: rustup target add x86_64-pc-windows-msvc
+        if: runner.os == 'macOS'
+      - uses: Swatinem/rust-cache@v2
+      # 版本取根目录 package.json 的 packageManager 字段。
+      - uses: oven-sh/setup-bun@v2
+      - run: bun install --frozen-lockfile
+      - run: bun run verify
