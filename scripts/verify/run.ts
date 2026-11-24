@@ -39,7 +39,10 @@ async function windowsTargetInstalled(): Promise<boolean> {
 const STEPS: Step[] = [
   { name: "Biome：lint 与格式", command: ["bun", "run", "lint"] },
   { name: "类型检查：界面与工具脚本", command: ["bun", "run", "typecheck"] },
-  { name: "界面测试", command: ["bun", "run", "test"] },
+  {
+    name: "界面与工具脚本的测试",
+    command: ["bun", "run", "test"],
+  },
   {
     name: "前端构建",
     command: ["bun", "run", "--filter", "@assemble/desktop", "build:frontend"],

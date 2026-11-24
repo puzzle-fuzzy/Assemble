@@ -33,12 +33,13 @@ Assemble 是一个全新的、自带服务端的项目，用来完全替换 jarv
 
 ```sh
 bun install --frozen-lockfile
-bun run server:dev   # 本地开发用的服务端：数据在 data/local/server，地址 http://127.0.0.1:8787
-bun run dev          # 桌面端的开发运行：Vite 热更新 + 调试构建，连本地开发服务
 bun run verify       # 一键验证，提交前运行
+bun run acceptance   # 在 macOS 上真实验收：起好本机环境，等你登录，自动核对收发（约 15 分钟）
+bun run server:dev   # 只要本地开发用的服务端：数据在 data/local/server，地址 http://127.0.0.1:8787
+bun run dev          # 桌面端的开发运行：Vite 热更新 + 调试构建，连本地开发服务
 ```
 
-怎么建账户、登记一台没有界面的测试设备、构建发布版桌面端并真的跑起来，见[运行手册](docs/runbooks/verify-macos-launch.md)。
+`bun run acceptance` 第一次运行时让你给本机账户 `dev` 设一个密码，然后启动桌面应用；要你亲手做的只有三件：在应用里登录、往回发一个文件、从菜单栏退出。其余的——起服务端、让一台叫"工作电脑"的替身设备发文件、核对落盘的摘要与回执——都由它做。用完 `bun run acceptance stop` 收摊。只起其中一样、或者主流程之外的不顺利情况怎么试，见[运行手册](docs/runbooks/verify-macos-launch.md)。
 
 连接哪一套服务由构建决定，不从界面输入，也不从用户配置读取。正式服务只接受 HTTPS；HTTP 只允许用在回环地址上。
 
@@ -68,6 +69,7 @@ crates/
   assemble-schedule     日程出现规则（还没有接入）
 scripts/
   verify/run.ts         一键验证
+  acceptance/           macOS 上的真实验收：起环境、等登录、自动核对
   release/              生成图标
 docs/                   架构、决策、路线图、运行手册
 ```

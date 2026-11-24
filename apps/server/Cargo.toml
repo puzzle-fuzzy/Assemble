@@ -49,6 +49,8 @@ url.workspace = true
 
 [dev-dependencies]
 assemble-client.workspace = true
+# 只有示例 `fake_device` 用到：替身收文件时走与桌面端相同的落盘规则。
+assemble-device.workspace = true
 futures-util.workspace = true
 reqwest = { workspace = true, features = ["cookies", "form"] }
 tempfile.workspace = true

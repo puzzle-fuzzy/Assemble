@@ -138,6 +138,13 @@ pub async fn find_by_id(pool: &SqlitePool, id: &str) -> Result<Option<AccountRow
         .await
 }
 
+/// 全部账户的用户名，按建立的先后。只有用户名：密码散列没有理由离开这个模块。
+pub async fn list_usernames(pool: &SqlitePool) -> Result<Vec<String>, sqlx::Error> {
+    sqlx::query_scalar("SELECT username FROM accounts ORDER BY rowid")
+        .fetch_all(pool)
+        .await
+}
+
 impl AccountRow {
     /// 交给接口的公开信息。
     pub fn public(&self) -> assemble_protocol::account::Account {
@@ -232,6 +239,9 @@ mod tests {
             account.id
         );
         assert!(find_by_id(&pool, "missing").await.unwrap().is_none());
+
+        // 清单按建立的先后，一个账户一行。
+        assert_eq!(list_usernames(&pool).await.unwrap(), ["alex", "sam"]);
     }
 
     #[tokio::test]

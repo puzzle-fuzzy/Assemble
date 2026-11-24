@@ -8,25 +8,44 @@
 //!
 //! ```text
 //! fake-device --token a.json register --data-dir <服务端的数据目录> --account <用户名> --name 替身A
-//! fake-device --token a.json online   --origin http://127.0.0.1:8787
+//! fake-device --token a.json online   --origin http://127.0.0.1:8787 [--receive-dir 某个目录]
+//! fake-device --token a.json wait     --origin http://127.0.0.1:8787 --until peer-online
 //! fake-device --token a.json devices  --origin http://127.0.0.1:8787
-//! fake-device --token a.json send     --origin http://127.0.0.1:8787 --to 替身B --file 合同.pdf
+//! fake-device --token a.json send     --origin http://127.0.0.1:8787 --to 替身B --file 合同.pdf --wait
 //! fake-device --token a.json sends    --origin http://127.0.0.1:8787
 //! fake-device --token a.json forget   --origin http://127.0.0.1:8787
 //! ```
+//!
+//! `online --receive-dir` 让它像桌面端一样把发来的文件收下：流式下载、核对长度与摘要、
+//! 先落盘再回执；断线期间错过的事件，每次连上时向服务端补问一遍。
+//!
+//! `wait` 与带了 `--wait` 的 `send` 是给脚本用的：等到要等的事才以 0 退出，到时没等到以 3 退出，
+//! 别的失败是 1。给脚本读的结果各占一行，行首是固定的英文标记（`online`、`peer-online`、
+//! `peer-offline`、`received`、`send-settled`），后面用制表符分开；
+//! 其余的输出是给人看的，措辞随时会改。
+//!
+//! 令牌只对登记时的那个账户有效：`register` 发现令牌文件属于别的账户，会重新登记一台。
 
 // 开发工具，不是产品代码：以好读为先。
 #![allow(clippy::pedantic, reason = "本机验证用的开发工具")]
 
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
-use std::time::Duration;
+use std::process::ExitCode;
+use std::time::{Duration, Instant};
 
 use assemble_client::{Client, OutgoingFile, RequestOptions, TransferOptions};
+use assemble_device::inbox::{ReceiveFailure, accept, is_source_failure, sweep_staging};
+use assemble_device::validate_directory;
 use assemble_protocol::device::NewDevice;
 use assemble_protocol::events::Event;
-use assemble_protocol::primitives::Platform;
-use assemble_protocol::sends::{Direction, FailReason, SendQuery, SendState};
+use assemble_protocol::primitives::{MAX_FILE_SIZE, Platform};
+use assemble_protocol::sends::{
+    Direction, FailInput, FailReason, SEND_PAGE_MAX, Send as SendRecord, SendQuery, SendState,
+};
 use assemble_store::secret::SecretString;
+use assemble_transfer::TransferError;
+use assemble_transfer::download::SaveOptions;
 use clap::{Parser, Subcommand, ValueEnum};
 use futures_util::StreamExt;
 use tokio_util::sync::CancellationToken;
@@ -62,6 +81,19 @@ enum Command {
         /// 多少秒之后自己下线；不填就一直在线。
         #[arg(long)]
         seconds: Option<u64>,
+        /// 收到文件就自己收下，存进这个目录；落盘的规则与真正的桌面端一样。不填就只是看着。
+        #[arg(long)]
+        receive_dir: Option<PathBuf>,
+    },
+    /// 等到某件事发生才退出：等到了退出码是 0，到时没等到是 3。给脚本用的。
+    Wait {
+        #[arg(long)]
+        origin: String,
+        #[arg(long)]
+        until: Until,
+        /// 最多等多少秒。
+        #[arg(long, default_value_t = 600)]
+        timeout: u64,
     },
     /// 列出账户里的设备与在线状态。
     Devices {
@@ -77,6 +109,12 @@ enum Command {
         to: String,
         #[arg(long)]
         file: PathBuf,
+        /// 发出之后不退出，等到对方收下或者别的结局。
+        #[arg(long)]
+        wait: bool,
+        /// 配合 `--wait`：最多等多少秒。
+        #[arg(long, default_value_t = 120)]
+        timeout: u64,
     },
     /// 列出这台替身发出去的与收到的记录。
     Sends {
@@ -107,11 +145,39 @@ impl From<Kind> for Platform {
     }
 }
 
+/// `wait --until`：等的是什么。
+#[derive(Debug, Clone, Copy, ValueEnum)]
+enum Until {
+    /// 账户里出现了别的在线设备。
+    PeerOnline,
+    /// 账户里别的设备都下线了。
+    PeerOffline,
+}
+
+/// 命令没走完的原因。没等到要等的事时退出码是 3，别的失败是 1：脚本靠它分清"没等到"和"出错了"。
+struct Problem {
+    message: String,
+    code: i32,
+}
+
+impl From<String> for Problem {
+    fn from(message: String) -> Self {
+        Self { message, code: 1 }
+    }
+}
+
+fn not_in_time(message: String) -> Problem {
+    Problem { message, code: 3 }
+}
+
 /// 令牌文件的内容。
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
 struct Identity {
     token: String,
     device_id: String,
+    /// 这台替身属于哪个账户（用户名的小写形式）。早先的令牌文件里没有这一项，按"不属于任何账户"处理。
+    #[serde(default)]
+    account: String,
 }
 
 fn read_identity(file: &Path) -> Result<Identity, String> {
@@ -145,14 +211,17 @@ fn client(origin: &str, identity: &Identity) -> Result<Client, String> {
 }
 
 #[tokio::main]
-async fn main() {
-    if let Err(message) = run().await {
-        eprintln!("{message}");
-        std::process::exit(1);
+async fn main() -> ExitCode {
+    match run().await {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(problem) => {
+            eprintln!("{}", problem.message);
+            ExitCode::from(u8::try_from(problem.code).unwrap_or(1))
+        }
     }
 }
 
-async fn run() -> Result<(), String> {
+async fn run() -> Result<(), Problem> {
     let cli = Cli::parse();
     let token_file = &cli.token;
     match cli.command {
@@ -162,43 +231,57 @@ async fn run() -> Result<(), String> {
             name,
             platform,
         } => {
+            let username = assemble_server::accounts::normalize_username(&account)
+                .map_err(|reason| format!("用户名不合法：{reason}"))?;
             let pool = assemble_server::db::open(&data_dir)
                 .await
                 .map_err(|error| error.to_string())?;
-            let account = assemble_server::accounts::find_by_username(&pool, &account)
+            let account = assemble_server::accounts::find_by_username(&pool, &username)
                 .await
                 .map_err(|error| error.to_string())?
-                .ok_or_else(|| format!("没有叫 {account} 的账户；先用 create-account 建一个"))?;
-            // 已经登记过就沿用，免得每次验证都往账户里塞一台新设备。
-            match read_identity(token_file) {
-                Ok(_) => println!("已经登记过这台替身设备，沿用。"),
-                Err(_) => {
-                    let secret = assemble_server::secrets::random_token()
-                        .map_err(|error| error.to_string())?;
-                    let device = assemble_server::devices::register(
-                        &pool,
-                        &account.id,
-                        &NewDevice {
-                            name,
-                            platform: platform.into(),
-                        },
-                        &assemble_server::secrets::token_digest(secret.expose()),
-                    )
-                    .await
-                    .map_err(|error| error.to_string())?;
-                    let identity = Identity {
-                        token: secret.expose().to_owned(),
-                        device_id: device.id,
-                    };
-                    write_identity(token_file, &identity)?;
-                    println!("已登记替身设备 {}。", identity.device_id);
+                .ok_or_else(|| format!("没有叫 {username} 的账户；先用 create-account 建一个"))?;
+            let existing = read_identity(token_file);
+            // 给同一个账户登记过就沿用，免得每次验证都往账户里塞一台新设备。
+            // 换了账户就得重新登记：令牌只对登记时的那个账户有效。
+            if existing
+                .as_ref()
+                .is_ok_and(|identity| identity.account == username)
+            {
+                println!("已经登记过这台替身设备，沿用。");
+            } else {
+                if existing.is_ok() {
+                    println!("这个令牌文件原先属于别的账户，为 {username} 重新登记一台。");
                 }
+                let secret =
+                    assemble_server::secrets::random_token().map_err(|error| error.to_string())?;
+                let device = assemble_server::devices::register(
+                    &pool,
+                    &account.id,
+                    &NewDevice {
+                        name,
+                        platform: platform.into(),
+                    },
+                    &assemble_server::secrets::token_digest(secret.expose()),
+                )
+                .await
+                .map_err(|error| error.to_string())?;
+                let identity = Identity {
+                    token: secret.expose().to_owned(),
+                    device_id: device.id,
+                    account: username,
+                };
+                write_identity(token_file, &identity)?;
+                println!("已登记替身设备 {}。", identity.device_id);
             }
             pool.close().await;
             println!("令牌在 {}（仅本人可读）。", token_file.display());
             Ok(())
         }
-        Command::Online { origin, seconds } => {
+        Command::Online {
+            origin,
+            seconds,
+            receive_dir,
+        } => {
             let identity = read_identity(token_file)?;
             let client = client(&origin, &identity)?;
             let cancel = CancellationToken::new();
@@ -209,18 +292,35 @@ async fn run() -> Result<(), String> {
                     trigger.cancel();
                 });
             }
+            let mut inbox = match receive_dir {
+                Some(directory) => Some(ReceiveBox::open(&directory).await?),
+                None => None,
+            };
             let mut stream = client.clone().events(cancel.clone());
-            println!(
-                "替身设备 {} 已连上，等待事件……（Ctrl+C 下线）",
-                identity.device_id
-            );
+            println!("替身设备 {} 正在连接……（Ctrl+C 下线）", identity.device_id);
             loop {
                 let event = tokio::select! {
                     () = cancel.cancelled() => break,
                     event = stream.next() => event,
                 };
                 match event {
-                    Some(Ok(event)) => print_event(&event),
+                    Some(Ok(event)) => {
+                        print_event(&event);
+                        // 连接是在读到第一个事件时才建立的：服务端的问候到了才算上线。
+                        if let Event::Hello { device_id } = &event {
+                            println!("online\t{device_id}");
+                        }
+                        if let Some(inbox) = inbox.as_mut() {
+                            match &event {
+                                // 事件流不补送断线期间的事件，所以每次连上都补问一遍。
+                                Event::Hello { .. } => catch_up(inbox, &client, &cancel).await,
+                                Event::SendOffered { send } => {
+                                    inbox.receive(&client, send, &cancel).await;
+                                }
+                                _ => {}
+                            }
+                        }
+                    }
                     Some(Err(error)) => println!("[连接出了问题，正在重连] {error}"),
                     None => break,
                 }
@@ -228,6 +328,64 @@ async fn run() -> Result<(), String> {
             drop(stream);
             println!("替身设备已下线。");
             Ok(())
+        }
+        Command::Wait {
+            origin,
+            until,
+            timeout,
+        } => {
+            let identity = read_identity(token_file)?;
+            let client = client(&origin, &identity)?;
+            let deadline = Instant::now() + Duration::from_secs(timeout);
+            let mut complained = false;
+            loop {
+                let cancel = CancellationToken::new();
+                match client.devices(&RequestOptions::new(&cancel)).await {
+                    Ok(devices) => {
+                        complained = false;
+                        let peers: Vec<_> = devices
+                            .iter()
+                            .filter(|device| device.id != identity.device_id)
+                            .collect();
+                        let met = match until {
+                            Until::PeerOnline => match peers.iter().find(|device| device.online) {
+                                Some(device) => {
+                                    println!("peer-online\t{}\t{}", device.id, device.name);
+                                    true
+                                }
+                                None => false,
+                            },
+                            Until::PeerOffline => {
+                                let online = peers.iter().filter(|device| device.online).count();
+                                if online == 0 {
+                                    println!("peer-offline");
+                                }
+                                online == 0
+                            }
+                        };
+                        if met {
+                            return Ok(());
+                        }
+                    }
+                    // 服务端还没起来或者刚重启：还在时限之内就接着等，不急着判失败。
+                    Err(error) => {
+                        if !complained {
+                            println!("[暂时问不到设备列表，接着等] {error}");
+                            complained = true;
+                        }
+                    }
+                }
+                if Instant::now() >= deadline {
+                    return Err(not_in_time(format!(
+                        "等了 {timeout} 秒：{}。",
+                        match until {
+                            Until::PeerOnline => "没有别的设备上线",
+                            Until::PeerOffline => "别的设备还没有都下线",
+                        }
+                    )));
+                }
+                tokio::time::sleep(Duration::from_secs(1)).await;
+            }
         }
         Command::Devices { origin } => {
             let identity = read_identity(token_file)?;
@@ -254,7 +412,13 @@ async fn run() -> Result<(), String> {
             println!("（* 是这台替身设备）");
             Ok(())
         }
-        Command::Send { origin, to, file } => {
+        Command::Send {
+            origin,
+            to,
+            file,
+            wait,
+            timeout,
+        } => {
             let identity = read_identity(token_file)?;
             let client = client(&origin, &identity)?;
             let cancel = CancellationToken::new();
@@ -271,7 +435,7 @@ async fn run() -> Result<(), String> {
             let outgoing = OutgoingFile::open(&file, &cancel)
                 .await
                 .map_err(|error| format!("这个文件发不出去：{error}"))?;
-            let started = std::time::Instant::now();
+            let started = Instant::now();
             let send = client
                 .send_to_device(&target.id, &outgoing, TransferOptions::new(&cancel), None)
                 .await
@@ -288,8 +452,51 @@ async fn run() -> Result<(), String> {
                 if target.online { "在线" } else { "离线" },
             );
             println!("服务端记录 {}，状态 {}。", send.id, state_word(send.state));
-            // 上传完成只说明文件到了服务端；对方收下了没有，看 `sends` 或事件流。
-            Ok(())
+            // 上传完成只说明文件到了服务端；对方收下了没有，要看结局。
+            if !wait {
+                return Ok(());
+            }
+            let deadline = Instant::now() + Duration::from_secs(timeout);
+            loop {
+                let sends = client
+                    .sends(
+                        &SendQuery {
+                            direction: Direction::Out,
+                            state: None,
+                            limit: 20,
+                        },
+                        &RequestOptions::new(&cancel),
+                    )
+                    .await
+                    .map_err(|error| error.to_string())?;
+                let settled = sends
+                    .iter()
+                    .find(|record| record.id == send.id)
+                    .filter(|record| record.state.is_terminal());
+                if let Some(record) = settled {
+                    let state = serde_json::to_string(&record.state)
+                        .unwrap_or_default()
+                        .trim_matches('"')
+                        .to_owned();
+                    println!("send-settled\t{state}\t{}", record.name);
+                    println!("结局：{}。", state_word(record.state));
+                    return if record.state == SendState::Delivered {
+                        Ok(())
+                    } else {
+                        Err(not_in_time(format!(
+                            "对方没有收下：{}。",
+                            state_word(record.state)
+                        )))
+                    };
+                }
+                if Instant::now() >= deadline {
+                    return Err(not_in_time(format!(
+                        "发出去了，但等了 {timeout} 秒对方还没有收下：{}。",
+                        state_word(SendState::Offered)
+                    )));
+                }
+                tokio::time::sleep(Duration::from_millis(500)).await;
+            }
         }
         Command::Sends { origin } => {
             let identity = read_identity(token_file)?;
@@ -340,6 +547,170 @@ async fn run() -> Result<(), String> {
             println!("已从账户里删除这台替身设备。");
             Ok(())
         }
+    }
+}
+
+/// 替身的接收目录，连同它对回执的记忆。
+struct ReceiveBox {
+    /// 规范路径：`accept` 只认这种。
+    directory: PathBuf,
+    /// 已经存到磁盘、但回执还没送到的发送。之后只补回执，不再下载一遍。
+    pending_receipts: HashSet<String>,
+    /// 已经有了结局的发送（回执送达，或者已经报告失败）。同一个不处理第二次。
+    settled: HashSet<String>,
+}
+
+impl ReceiveBox {
+    async fn open(raw: &Path) -> Result<Self, String> {
+        std::fs::create_dir_all(raw)
+            .map_err(|error| format!("建不出接收目录 {}：{error}", raw.display()))?;
+        let directory = validate_directory(raw)
+            .await
+            .map_err(|error| format!("接收目录 {} 不能用：{error}", raw.display()))?;
+        sweep_staging(&directory)
+            .await
+            .map_err(|error| format!("清不掉 {} 里的暂存文件：{error}", directory.display()))?;
+        println!("收到的文件存进 {}。", directory.display());
+        Ok(Self {
+            directory,
+            pending_receipts: HashSet::new(),
+            settled: HashSet::new(),
+        })
+    }
+
+    /// 像桌面端那样收下一个文件：流式下载、核对长度与摘要、先落盘再回执。
+    async fn receive(&mut self, client: &Client, send: &SendRecord, cancel: &CancellationToken) {
+        if self.settled.contains(&send.id) {
+            return;
+        }
+        if self.pending_receipts.contains(&send.id) {
+            if self.receipt(client, send, cancel).await {
+                self.pending_receipts.remove(&send.id);
+            }
+            return;
+        }
+        println!(
+            "[收文件] 「{}」（{} 字节），来自「{}」",
+            send.name, send.size, send.peer_device_name
+        );
+        let fetched = client
+            .send_content(&send.id, TransferOptions::new(cancel), None)
+            .await;
+        let mut reader = match fetched {
+            Ok(download) => download.into_reader(),
+            Err(error) => {
+                println!("[收文件] 没取到内容，不回执；下次对账再试：{error}");
+                return;
+            }
+        };
+        let saved = accept(
+            &self.directory,
+            &send.name,
+            &mut reader,
+            SaveOptions {
+                expected_sha256: Some(&send.sha256),
+                content_length: Some(send.size),
+                max_bytes: Some(MAX_FILE_SIZE),
+                ..SaveOptions::new(cancel)
+            },
+        )
+        .await;
+        match saved {
+            Ok(received) => {
+                println!(
+                    "received\t{}\t{}\t{}\t{}",
+                    send.name,
+                    received.size,
+                    send.sha256,
+                    received.path.display()
+                );
+                self.settled.insert(send.id.clone());
+                if !self.receipt(client, send, cancel).await {
+                    self.pending_receipts.insert(send.id.clone());
+                }
+            }
+            // 读不到内容是网络的事：不怪谁的磁盘，也不报告失败，等下次对账从头再收。
+            Err(error) if is_source_failure(&error) => {
+                println!("[收文件] 内容没读完整，不回执；下次对账再试：{error}");
+            }
+            Err(TransferError::Cancelled) => println!("[收文件] 已取消。"),
+            Err(error) => {
+                let failure = ReceiveFailure::from(&error);
+                let reported = client
+                    .send_failed(
+                        &send.id,
+                        FailInput {
+                            reason: reported(failure),
+                        },
+                        &RequestOptions::new(cancel),
+                    )
+                    .await;
+                self.settled.insert(send.id.clone());
+                match reported {
+                    Ok(_) => println!(
+                        "[收文件] 这里存不下来（{}），已告诉发送方。",
+                        failure.as_str()
+                    ),
+                    Err(error) => println!("[收文件] 想告诉发送方存不下来，但没送到：{error}"),
+                }
+            }
+        }
+    }
+
+    /// 把"已收下"送给服务端。送不到时由调用方记着，下次对账再补。
+    async fn receipt(
+        &self,
+        client: &Client,
+        send: &SendRecord,
+        cancel: &CancellationToken,
+    ) -> bool {
+        match client
+            .send_accept(&send.id, &RequestOptions::new(cancel))
+            .await
+        {
+            Ok(_) => {
+                println!("[收文件] 已回执：「{}」。", send.name);
+                true
+            }
+            Err(error) => {
+                println!("[收文件] 回执没送到，下次对账再补：{error}");
+                false
+            }
+        }
+    }
+}
+
+/// 向服务端问一遍"还有哪些文件在等我"，把它们收下。事件流不补送断线期间的事件。
+async fn catch_up(inbox: &mut ReceiveBox, client: &Client, cancel: &CancellationToken) {
+    let waiting = client
+        .sends(
+            &SendQuery {
+                direction: Direction::In,
+                state: Some(SendState::Offered),
+                limit: SEND_PAGE_MAX,
+            },
+            &RequestOptions::new(cancel),
+        )
+        .await;
+    let waiting = match waiting {
+        Ok(waiting) => waiting,
+        Err(error) => {
+            println!("[对账] 没问到还有哪些文件在等我：{error}");
+            return;
+        }
+    };
+    for send in waiting.iter().filter(|send| send.content_available()) {
+        inbox.receive(client, send, cancel).await;
+    }
+}
+
+/// 接收失败的原因，换成报告给发送方的那种。
+fn reported(failure: ReceiveFailure) -> FailReason {
+    match failure {
+        ReceiveFailure::DiskFull => FailReason::DiskFull,
+        ReceiveFailure::WriteFailed => FailReason::WriteFailed,
+        ReceiveFailure::VerificationFailed => FailReason::VerificationFailed,
+        ReceiveFailure::Cancelled => FailReason::Cancelled,
     }
 }
 

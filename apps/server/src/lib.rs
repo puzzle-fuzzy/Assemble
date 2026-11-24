@@ -136,6 +136,16 @@ pub async fn check_config() -> Result<String, StartupError> {
     ))
 }
 
+/// `list-accounts`：列出全部账户的用户名，每行一个。不开放注册，账户有哪些只能从这里看。
+pub async fn list_accounts() -> Result<Vec<String>, StartupError> {
+    let (_config, pool) = load().await?;
+    let usernames = accounts::list_usernames(&pool)
+        .await
+        .map_err(db::DbError::from)?;
+    pool.close().await;
+    Ok(usernames)
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum CreateAccountError {
     #[error(transparent)]

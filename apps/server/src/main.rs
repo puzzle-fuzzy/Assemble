@@ -35,6 +35,8 @@ enum Command {
         #[arg(long)]
         display_name: Option<String>,
     },
+    /// 列出全部账户的用户名，每行一个。
+    ListAccounts,
 }
 
 fn init_logging() {
@@ -137,6 +139,18 @@ fn main() -> ExitCode {
         Command::CheckConfig => match runtime.block_on(assemble_server::check_config()) {
             Ok(report) => {
                 println!("{report}");
+                ExitCode::SUCCESS
+            }
+            Err(error) => {
+                report(error);
+                ExitCode::FAILURE
+            }
+        },
+        Command::ListAccounts => match runtime.block_on(assemble_server::list_accounts()) {
+            Ok(usernames) => {
+                for username in usernames {
+                    println!("{username}");
+                }
                 ExitCode::SUCCESS
             }
             Err(error) => {
