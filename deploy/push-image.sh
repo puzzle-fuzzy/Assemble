@@ -16,7 +16,7 @@ image="ghcr.io/puzzle-fuzzy/assemble-server:$tag"
 # ~/.ssh/config 里的主机别名。
 server=${ASSEMBLE_SERVER_HOST:-yxswy.com}
 
-echo "拉取 $image（linux/amd64）"
+echo "拉取 ${image}（linux/amd64）"
 docker pull --platform linux/amd64 "$image"
 echo "传给 $server"
 docker save "$image" | gzip -1 | ssh "$server" 'gunzip | docker load'

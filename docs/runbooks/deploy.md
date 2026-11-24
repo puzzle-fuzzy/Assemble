@@ -98,11 +98,27 @@ docker compose exec -T assemble assemble-server list-accounts
 ```sh
 # 开发机上：把新的镜像送到服务器
 deploy/push-image.sh <新的标记>
-# 服务器上：换掉 .env 里的 ASSEMBLE_IMAGE，先备份（见下），再重新起来
-cd /opt/assemble && docker compose up -d && docker compose ps
+# 服务器上：先备份（见下），再换掉 .env 里的 ASSEMBLE_IMAGE，重新起来
+cd /opt/assemble && cp -p .env .env.before-<新的标记> \
+  && sed -i 's|^ASSEMBLE_IMAGE=.*|ASSEMBLE_IMAGE=ghcr.io/puzzle-fuzzy/assemble-server:<新的标记>|' .env \
+  && docker compose up -d && docker compose ps
+docker compose logs --since 5m          # 启动日志里不该有迁移报错
 ```
 
-数据库结构在启动时自动迁移。迁移只向前，所以升级之前先备份一份；要退回旧版本，得同时恢复那份备份，并把 `ASSEMBLE_IMAGE` 换回原来的标记。
+**升级之前先核对一件事：正式库里记着的迁移校验和，和要上的那一版脚本对不对得上。** 对不上，新版本一启动就会拒绝运行（见下面"做过的"里 2026-11-25 那一段的来由）。服务器上没有 `sqlite3` 命令，用系统自带的 Python 以只读方式看一眼，不碰服务：
+
+```sh
+python3 - <<'SCRIPT'
+import sqlite3
+con = sqlite3.connect("file:/var/lib/assemble/assemble.sqlite3?mode=ro", uri=True)
+for version, checksum, success in con.execute("select version, checksum, success from _sqlx_migrations order by version"):
+    print(version, checksum.hex() if isinstance(checksum, bytes) else checksum, success)
+SCRIPT
+```
+
+开发机上算出每个脚本应有的值来比：`python3 -c "import hashlib;print(hashlib.sha384(open('apps/server/migrations/0001_initial.sql','rb').read()).hexdigest())"`。已经记录在库里的那几个版本，必须逐一相符；新的脚本还不在这张表里，是启动时才加进去的。
+
+数据库结构在启动时自动迁移。迁移只向前，所以升级之前先备份一份；要退回旧版本，得同时恢复那份备份，并把 `ASSEMBLE_IMAGE` 换回原来的标记（换 `.env` 之前留的那份副本还在）。
 
 ### 备份与恢复
 
@@ -118,7 +134,7 @@ docker compose start
 
 备份里有：账户（密码的散列，没有明文）、设备令牌的摘要、发送记录、云盘与未送达的文件。令牌的摘要不能拿去登录，但云盘里的文件本身是想给谁看就给谁看的东西，备份要当敏感数据保管。
 
-恢复是反过来：停服务，把归档解进数据目录（属主要是 10001），再启动。**这套备份与恢复还没有演练过。**
+恢复是反过来：停服务，把归档解进数据目录（属主要是 10001），再启动。备份在 2026-11-25 真的做过一次（停机 1 秒）；**恢复还没有演练过**。
 
 ## 反向代理要注意的
 
@@ -141,11 +157,20 @@ docker compose start
 - **证书与反向代理。** 证书申请成功、自动续期已安排；nginx 的配置 `nginx -t` 通过，重载之后新站点应答、抽查的两个老站点不受影响。
 - **从外网核对。** `/healthz` 应答；登录页 200 且证书有效；HTTP 入口 301 跳到 HTTPS；没带凭据的接口与事件流都是 401。
 
+## 做过的（2026-11-25）：第一次升级
+
+- **先核对，再动手。** 以只读方式看了正式库的 `_sqlx_migrations`：迁移 1 的校验和与仓库里的脚本相符。这一步是当天在本机撞出来的教训：本机的开发库是迁移 1 的第一版建的，那个脚本提交后二十分钟被原地改过，于是那个库再也打不开了——服务端一启动就报 `migration 1 was previously applied but has been modified`。正式库是用改完之后的那一版建的，不受影响。
+- **送镜像的脚本第一次真跑就倒了。** `$image（linux/amd64）` 在 `/bin/sh` 里把全角括号的前几个字节当成了变量名的一部分，报 `unbound variable`。改成 `${image}` 之后，linux/amd64 的镜像经 SSH 传入成功（上一次部署是手工送的，这个脚本写完之后一直没跑过）。
+- **备份。** 按上面的步骤停服务、打包、再启动：停机 1 秒，归档在 `/var/backups/assemble/`（当时库里还没有账户，只有 3 KB）。
+- **换版本。** 留下 `.env` 的副本，换成新的标记，`docker compose up -d`。容器重建后 9 秒内健康；启动日志只有"监听"两行，没有迁移报错；库里多了迁移 2 和四张新表；仍然以专用账户（uid 10001）运行。
+- **从外网核对。** `/healthz`、`/readyz` 应答；登录页 200；没带凭据的 `/v1/planner` 与事件流是 401；HTTP 入口 301 跳到 HTTPS。共用的 nginx 没有动，`nginx -t` 仍然通过。
+- 核对时临时写的一段等待脚本写错了（bash 里没有 `${$(…)#…}` 这种写法）：容器已经起来了，检查却没跑完，重写之后才核对完。上面的步骤里不放这种东西：`docker compose ps` 看到 `(healthy)` 就行。
+
 ## 还没有验证过的
 
 - **建第一个账户之后的每一步**：在应用里登录、两台设备收发、云盘。
 - **经反向代理的大文件上传与事件流的长连接**。配置是按服务端的行为写的，没有对着真实设备跑过。
-- **升级。** 步骤写了，没有做过一次。
-- **备份与恢复**没有演练过。
+- **带着真实数据升级与恢复。** 2026-11-25 那次升级与备份是在一个还没有账户的库上做的；有了账户、设备和文件之后再做一次，才算数。恢复没有演练过。
+- **退回旧版本。** 步骤写了（恢复备份、换回标记），没有做过。
 - **停止时在真实服务器上的表现**：本机实测 0.18 秒退出，服务器上没有量。
 - **续期钩子**没有真的触发过（证书 2027-02 到期）。
