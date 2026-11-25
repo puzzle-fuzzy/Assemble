@@ -72,6 +72,18 @@ impl AuthorizationRequest {
             && is_proof(&self.state)
             && self.device.is_valid()
     }
+
+    /// 回调地址所在的来源：`http://127.0.0.1:<端口>`，也就是这一次登录正在监听的地方。
+    ///
+    /// 服务端的授权页要把它写进自己的内容安全策略：浏览器只有在"表单提交之后的跳转目标
+    /// 也落在 `form-action` 允许之列"时才会跟着跳回去。只有回调地址的形状合法才给得出
+    /// 来源——它会被原样放进一个响应头。
+    pub fn callback_origin(&self) -> Option<&str> {
+        if !is_desktop_redirect_uri(&self.redirect_uri) {
+            return None;
+        }
+        self.redirect_uri.strip_suffix(CALLBACK_PATH)
+    }
 }
 
 /// 用授权码换取设备令牌时提交的内容。
@@ -212,6 +224,35 @@ mod tests {
             }
             .is_valid()
         );
+    }
+
+    #[test]
+    fn the_callback_origin_is_the_loopback_address_the_login_listens_on() {
+        let request = AuthorizationRequest {
+            redirect_uri: "http://127.0.0.1:61159/callback".into(),
+            code_challenge: PROOF.into(),
+            state: PROOF.into(),
+            device: macbook(),
+        };
+        assert_eq!(request.callback_origin(), Some("http://127.0.0.1:61159"));
+        // 形状不合法的回调地址给不出来源：它会被原样放进响应头，不能带着别的东西出来。
+        for rejected in [
+            "https://127.0.0.1:61159/callback",
+            "http://127.0.0.1:61159/elsewhere",
+            "http://127.0.0.1:61159/callback/x",
+            "http://evil.example/callback",
+            "http://127.0.0.1:0/callback",
+        ] {
+            assert!(
+                AuthorizationRequest {
+                    redirect_uri: rejected.into(),
+                    ..request.clone()
+                }
+                .callback_origin()
+                .is_none(),
+                "{rejected}"
+            );
+        }
     }
 
     #[test]

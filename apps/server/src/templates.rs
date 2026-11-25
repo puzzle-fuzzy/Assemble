@@ -26,16 +26,34 @@ button{margin:1.25rem .6rem 0 0;padding:.55rem 1.1rem;border:0;border-radius:8px
 button.secondary{background:light-dark(#e8e8ec,#2c2c33);color:inherit}
 a{color:light-dark(#1f5fd0,#5b8ff5)}"#;
 
-/// 内容安全策略。样式只认这一段的哈希，表单只能提交到本站。
-static POLICY: LazyLock<String> = LazyLock::new(|| {
+/// 一份内容安全策略：什么都不加载，样式只认上面那一段的哈希，不许嵌进别的页面；
+/// 表单能去哪里由 `form_action` 决定。
+fn policy(form_action: &str) -> String {
     let digest = BASE64.encode(Sha256::digest(STYLE.as_bytes()));
     format!(
-        "default-src 'none'; style-src 'sha256-{digest}'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'"
+        "default-src 'none'; style-src 'sha256-{digest}'; {form_action}; base-uri 'none'; frame-ancestors 'none'"
     )
-});
+}
+
+/// 多数页面的那一份：表单只能提交到本站。
+static POLICY: LazyLock<String> = LazyLock::new(|| policy("form-action 'self'"));
 
 pub fn content_security_policy() -> &'static str {
     &POLICY
+}
+
+/// 授权确认页的那一份：表单除了提交到本站，提交之后还要能被送回 `callback_origin`
+/// （`http://127.0.0.1:<端口>`，这一次登录正在监听的回环来源）。
+///
+/// 浏览器对 `form-action` 的规矩是"提交之后的跳转目标也要落在允许之列"。确认之后服务端
+/// 回的是"跳到回调地址"；按只认本站的那一份，这次跳转被悄悄拦掉，页面原地不动，用户看到
+/// 的就是点了没反应——2026-11-25 正式服务上第一次真人登录正是这样。放行的是这一个端口，
+/// 不是整个回环地址。
+///
+/// `callback_origin` 取自 [`assemble_protocol::login::AuthorizationRequest::callback_origin`]：
+/// 那里已经保证它只有 `http://127.0.0.1:` 和数字，才能原样放进策略里。
+pub fn authorize_content_security_policy(callback_origin: &str) -> String {
+    policy(&format!("form-action 'self' {callback_origin}"))
 }
 
 /// 页面的来源策略：地址只随同站请求发回，不发给任何别的站点。
@@ -370,6 +388,29 @@ mod tests {
             BASE64.encode(Sha256::digest(style.as_bytes()))
         );
         assert!(policy.contains(&expected));
+    }
+
+    #[test]
+    fn the_authorize_page_lets_its_form_be_sent_back_to_the_loopback_address() {
+        let policy = authorize_content_security_policy("http://127.0.0.1:61159");
+        assert!(
+            policy.contains("form-action 'self' http://127.0.0.1:61159;"),
+            "{policy}"
+        );
+        // 只放行这一个端口，不是整个回环地址；回环来源在整份策略里只出现这一次。
+        assert!(!policy.contains("http://127.0.0.1:*"), "{policy}");
+        assert_eq!(policy.matches("http://").count(), 1, "{policy}");
+        // 其余几条和别的页面一样严。
+        for kept in [
+            "default-src 'none'",
+            "style-src 'sha256-",
+            "base-uri 'none'",
+            "frame-ancestors 'none'",
+        ] {
+            assert!(policy.contains(kept), "{policy}");
+        }
+        assert!(!policy.contains("unsafe-inline"), "{policy}");
+        assert!(!policy.contains("script-src"), "{policy}");
     }
 
     #[test]

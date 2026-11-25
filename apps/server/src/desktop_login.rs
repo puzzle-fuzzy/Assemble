@@ -19,7 +19,7 @@ use axum::Json;
 use axum::body::Bytes;
 use axum::extract::Form;
 use axum::extract::State;
-use axum::http::{HeaderMap, StatusCode, Uri};
+use axum::http::{HeaderMap, HeaderValue, StatusCode, Uri, header::CONTENT_SECURITY_POLICY};
 use axum::response::{IntoResponse, Redirect, Response};
 use axum_extra::extract::CookieJar;
 use base64::Engine as _;
@@ -106,7 +106,10 @@ pub async fn authorize_form(State(state): State<Shared>, jar: CookieJar, uri: Ur
         // 还没登录：先去登录，登录完回到这里。
         return to_login(Some(&authorize_path(&request)));
     };
-    page(
+    let Some(callback_origin) = request.callback_origin() else {
+        return bad_request("请求不合法");
+    };
+    let mut response = page(
         StatusCode::OK,
         templates::authorize_page(
             &encoded,
@@ -115,7 +118,19 @@ pub async fn authorize_form(State(state): State<Shared>, jar: CookieJar, uri: Ur
             platform_label(request.device.platform),
             &session.csrf_token,
         ),
-    )
+    );
+    // 换上这一页自己的策略。确认之后浏览器要被送回回调地址；所有页面共用的那一份只认本站，
+    // 浏览器会在提交之后把这次跳转悄悄拦掉，页面原地不动（2026-11-25 正式服务上第一次真人
+    // 登录就这样卡住了）。测试里的"浏览器"是 HTTP 客户端，不看内容安全策略，所以另有一条
+    // 测试替它看：这一页声明的 form-action 必须放行确认之后的跳转目标。
+    let policy = HeaderValue::from_str(&templates::authorize_content_security_policy(
+        callback_origin,
+    ))
+    .expect("a loopback origin makes a valid header value");
+    response
+        .headers_mut()
+        .insert(CONTENT_SECURITY_POLICY, policy);
+    response
 }
 
 #[derive(Debug, Deserialize)]

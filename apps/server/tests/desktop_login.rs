@@ -347,6 +347,64 @@ async fn the_authorize_page_needs_a_login_and_names_the_device() {
     assert_eq!(shown, path.split_once("request=").unwrap().1);
 }
 
+/// 按浏览器对 `form-action` 的规矩看一份策略：`target`（一个来源，`http://主机:端口`，
+/// 或者 `'self'`）在不在它列出的来源里。
+fn form_action_allows(policy: &str, target: &str) -> bool {
+    policy
+        .split(';')
+        .map(str::trim)
+        .find(|directive| directive.starts_with("form-action "))
+        .and_then(|directive| directive.strip_prefix("form-action "))
+        .is_some_and(|sources| sources.split_whitespace().any(|source| source == target))
+}
+
+#[tokio::test]
+async fn confirming_sends_the_browser_back_to_an_address_the_page_allows() {
+    let fixture = fixture().await;
+    let (request, _verifier) = desktop_request('a', "MacBook", Platform::Macos);
+    log_in(&fixture.browser).await;
+
+    // 浏览器的规矩：表单提交**之后**被送到的地址，也要落在这个页面自己声明的内容安全策略
+    // 允许的来源里，不然这次跳转被悄悄拦掉、页面原地不动。2026-11-25 正式服务上第一次真人
+    // 登录就卡在这里：页面只认本站，而确认之后要跳回 http://127.0.0.1:<端口>/callback。
+    // 测试里的"浏览器"是 HTTP 客户端，不看内容安全策略，所以这里替它看一眼。
+    let page = send(
+        fixture
+            .browser
+            .get(&assemble_server::desktop_login::authorize_path(&request)),
+    )
+    .await;
+    let declared = page
+        .headers
+        .get("content-security-policy")
+        .unwrap()
+        .to_str()
+        .unwrap();
+    assert!(form_action_allows(declared, "'self'"), "{declared}");
+    assert!(
+        form_action_allows(declared, request.callback_origin().unwrap()),
+        "the page must let its form be sent back to where the desktop is listening: {declared}"
+    );
+    // 确认之后浏览器被送去的正是那个来源；取消也是送回同一个地方，同样走得通。
+    let confirmed = authorize(&fixture.browser, &request, "allow").await;
+    let location = confirmed.location().unwrap();
+    let (sent_to, _) = location.split_once("/callback").unwrap();
+    assert!(
+        form_action_allows(declared, sent_to),
+        "{sent_to} is not allowed by {declared}"
+    );
+    let declined = authorize(&fixture.browser, &request, "deny").await;
+    let location = declined.location().unwrap();
+    let (sent_to, _) = location.split_once("/callback").unwrap();
+    assert!(form_action_allows(declared, sent_to), "{declared}");
+
+    // 只放行这一次登录的端口：同一台机器上的别的端口不在允许之列。
+    assert!(
+        !form_action_allows(declared, "http://127.0.0.1:54322"),
+        "{declared}"
+    );
+}
+
 #[tokio::test]
 async fn declining_sends_the_desktop_an_error_with_the_original_state() {
     let fixture = fixture().await;
