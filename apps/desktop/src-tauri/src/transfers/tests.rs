@@ -228,6 +228,8 @@ async fn fixture_with_quota(quota: Option<u64>) -> Fixture {
                 id: account.id.clone(),
                 username: account.username.clone(),
                 display_name: account.display_name.clone(),
+                email: account.email.clone(),
+                avatar_url: account.avatar_url.clone(),
             },
             device: DeviceView {
                 id: desktop.id.clone(),
@@ -789,6 +791,8 @@ fn desktop_pointed_at(
             id: "a1".into(),
             username: "alex".into(),
             display_name: "Alex".into(),
+            email: None,
+            avatar_url: None,
         },
         device: DeviceView {
             id: "d1".into(),

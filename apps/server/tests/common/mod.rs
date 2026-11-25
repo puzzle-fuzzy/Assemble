@@ -24,6 +24,7 @@ use std::time::Duration;
 use tokio_util::sync::CancellationToken;
 
 pub const USERNAME: &str = "alex";
+pub const EMAIL: &str = "alex@example.test";
 pub const PASSWORD: &str = "correct horse battery staple";
 
 // ---- 替身与工具 ----
@@ -131,6 +132,7 @@ pub async fn fixture() -> Fixture {
     )
     .await
     .unwrap();
+    sqlx::query("UPDATE accounts SET email = 'alex@example.test', email_verified_at = 1 WHERE username = 'alex'").execute(&server.state.pool).await.unwrap();
     let browser = Browser::new(server.origin.as_str());
     Fixture {
         dir,
@@ -150,10 +152,15 @@ pub async fn submit_login(
     next: &str,
     csrf: &str,
 ) -> Page {
+    let email = if username.contains('@') {
+        username.to_owned()
+    } else {
+        format!("{username}@example.test")
+    };
     send(browser.post_form(
         "/web/login",
         &[
-            ("username", username),
+            ("email", email.as_str()),
             ("password", password),
             ("next", next),
             ("csrf", csrf),

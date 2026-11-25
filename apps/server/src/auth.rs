@@ -86,6 +86,7 @@ pub struct WebSession {
     pub account_id: String,
     pub username: String,
     pub display_name: String,
+    pub email: Option<String>,
     /// 写操作表单里必须原样带回的防伪值。
     pub csrf_token: String,
 }
@@ -94,8 +95,8 @@ pub struct WebSession {
 pub async fn web_session(pool: &SqlitePool, jar: &CookieJar) -> Option<WebSession> {
     let token = jar.get(WEB_COOKIE)?.value();
     let now = assemble_protocol::primitives::Timestamp::now().as_millis();
-    let row = sqlx::query_as::<_, (String, String, String, String, String)>(
-        "SELECT sessions.id, sessions.account_id, sessions.csrf_token, accounts.username, accounts.display_name \
+    let row = sqlx::query_as::<_, (String, String, String, String, String, Option<String>)>(
+        "SELECT sessions.id, sessions.account_id, sessions.csrf_token, accounts.username, accounts.display_name, CASE WHEN accounts.email_verified_at IS NOT NULL THEN accounts.email ELSE NULL END \
          FROM web_sessions sessions \
          JOIN accounts ON accounts.id = sessions.account_id \
          WHERE sessions.token_hash = ? AND sessions.expires_at > ?",
@@ -105,12 +106,13 @@ pub async fn web_session(pool: &SqlitePool, jar: &CookieJar) -> Option<WebSessio
     .fetch_optional(pool)
     .await
     .ok()??;
-    let (id, account_id, csrf_token, username, display_name) = row;
+    let (id, account_id, csrf_token, username, display_name, email) = row;
     Some(WebSession {
         id,
         account_id,
         username,
         display_name,
+        email,
         csrf_token,
     })
 }

@@ -16,9 +16,14 @@ pub mod db;
 pub mod desktop_login;
 pub mod devices;
 pub mod drive;
+pub mod email_identity;
 pub mod error;
 pub mod events;
+pub mod github;
 pub mod http;
+pub mod identity_templates;
+pub mod identity_web;
+pub mod mail;
 pub mod maintenance;
 pub mod planner;
 pub mod presence;
@@ -131,13 +136,19 @@ pub async fn check_config() -> Result<String, StartupError> {
         .await
         .map_err(db::DbError::from)?;
     pool.close().await;
-    let registration = if config.registration_open() {
-        "开放（要邀请码）"
+    let registration = "公开（须验证邮箱）";
+    let smtp = if config.smtp.is_some() {
+        "已配置"
     } else {
-        "关闭（没有配邀请码）"
+        "未配置，无法发送验证邮件"
+    };
+    let github = if config.github.is_some() {
+        "已配置"
+    } else {
+        "未配置，入口隐藏"
     };
     Ok(format!(
-        "配置可用。\n  监听地址：{}\n  数据目录：{}\n  对外地址：{}\n  云盘上限：{} 字节\n  账户数：{}\n  网页注册：{registration}",
+        "配置可用。\n  监听地址：{}\n  数据目录：{}\n  对外地址：{}\n  云盘上限：{} 字节\n  账户数：{}\n  网页注册：{registration}\n  SMTP：{smtp}\n  GitHub：{github}",
         config.addr,
         config.data_dir.display(),
         config.public_origin,

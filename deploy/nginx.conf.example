@@ -49,6 +49,15 @@ server {
     # 上传的是整个文件，单文件上限 100 MB；多留一点给请求头。
     client_max_body_size 110m;
 
+    # OAuth 提供商在查询串中带回单次 code；不要写进访问或错误日志。
+    location = /web/github/callback {
+        access_log off;
+        error_log /dev/null crit;
+        proxy_pass http://assemble;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+    }
+
     location / {
         proxy_pass http://assemble;
         proxy_http_version 1.1;

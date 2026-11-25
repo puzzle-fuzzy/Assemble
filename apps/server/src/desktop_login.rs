@@ -80,10 +80,11 @@ fn pkce_matches(challenge: &str, verifier: &str) -> bool {
 }
 
 pub(crate) fn account_label(session: &WebSession) -> String {
-    if session.display_name == session.username {
-        session.username.clone()
+    let identity = session.email.as_deref().unwrap_or(&session.username);
+    if session.display_name == identity {
+        identity.to_owned()
     } else {
-        format!("{}（{}）", session.display_name, session.username)
+        format!("{}（{}）", session.display_name, identity)
     }
 }
 
@@ -106,6 +107,13 @@ pub async fn authorize_form(State(state): State<Shared>, jar: CookieJar, uri: Ur
         // 还没登录：先去登录，登录完回到这里。
         return to_login(Some(&authorize_path(&request)));
     };
+    if session.email.is_none() {
+        return Redirect::to(&templates::carry_next(
+            "/web/legacy",
+            &authorize_path(&request),
+        ))
+        .into_response();
+    }
     let Some(callback_origin) = request.callback_origin() else {
         return bad_request("请求不合法");
     };
@@ -154,6 +162,9 @@ pub async fn authorize_submit(
     let Some(session) = web_session(&state.pool, &jar).await else {
         return refused("登录状态已失效，请回到 Assemble 重新发起登录。");
     };
+    if session.email.is_none() {
+        return refused("请先绑定并验证邮箱，再授权新设备。");
+    }
     let paired = session.csrf_token.len() == form.csrf.len()
         && bool::from(session.csrf_token.as_bytes().ct_eq(form.csrf.as_bytes()));
     if !paired {
@@ -393,11 +404,13 @@ mod tests {
             account_id: "a".into(),
             username: "alex".into(),
             display_name: "Alex Wang".into(),
+            email: None,
             csrf_token: "c".into(),
         };
         assert_eq!(account_label(&session), "Alex Wang（alex）");
         let plain = WebSession {
             display_name: "alex".into(),
+            email: None,
             ..session
         };
         assert_eq!(account_label(&plain), "alex");

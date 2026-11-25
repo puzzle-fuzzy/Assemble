@@ -831,6 +831,7 @@ async fn sends_nobody_accepts_expire_and_release_their_content() {
     )
     .await
     .unwrap();
+    sqlx::query("UPDATE accounts SET email = username || '@example.test', email_verified_at = 1 WHERE username = 'alex'").execute(&fixture.server.state.pool).await.unwrap();
     let (mut pc, mut mac) = pair(&fixture).await;
     let bytes = payload(9_000);
     let file = outgoing(&fixture.dir, "later.zip", &bytes).await;

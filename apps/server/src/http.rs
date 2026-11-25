@@ -40,11 +40,17 @@ pub struct AppState {
     pub throttle: LoginThrottle,
     /// 文件内容的存放处，按摘要寻址。
     pub blobs: Arc<BlobStore>,
+    pub mailer: Arc<dyn crate::mail::Mailer>,
+    pub github_flows: crate::github::Flows,
+    pub github_provider: Arc<dyn crate::github::Provider>,
 }
 
 impl AppState {
     pub fn new(pool: SqlitePool, config: Config) -> Self {
         Self {
+            mailer: Arc::new(crate::mail::SmtpMailer(config.smtp.clone())),
+            github_flows: crate::github::Flows::default(),
+            github_provider: Arc::new(crate::github::GithubProvider(config.github.clone())),
             blobs: Arc::new(BlobStore::new(&config.data_dir, pool.clone())),
             pool,
             config: Arc::new(config),
@@ -72,14 +78,18 @@ pub enum ServeError {
 
 /// 组装全部路由。
 pub fn router(state: Shared) -> Router {
-    Router::new()
-        .route(HEALTH_PATH, get(health))
-        .route(READY_PATH, get(ready))
-        // 系统浏览器里的页面
+    let browser_routes = Router::new()
         .merge(crate::web::routes())
         .merge(crate::register::routes())
         .merge(crate::account::routes())
+        .merge(crate::identity_web::routes())
+        .merge(crate::github::routes())
         .merge(crate::desktop_login::routes())
+        .layer(DefaultBodyLimit::max(16 * 1024));
+    Router::new()
+        .route(HEALTH_PATH, get(health))
+        .route(READY_PATH, get(ready))
+        .merge(browser_routes)
         // 桌面端的接口
         .route(EXCHANGE_PATH, post(crate::desktop_login::exchange))
         .route("/v1/me", get(crate::devices::me))
@@ -345,6 +355,17 @@ impl TestServer {
         Self::serve(listener, config, pool)
     }
 
+    /// 用替身发送器验证完整网页流程，不发送真实邮件、不访问外部 OAuth。
+    pub async fn start_with_services(
+        config: Config,
+        pool: SqlitePool,
+        mailer: Arc<dyn crate::mail::Mailer>,
+        github: Arc<dyn crate::github::Provider>,
+    ) -> std::io::Result<Self> {
+        let listener = TcpListener::bind(config.addr).await?;
+        Self::serve_custom(listener, config, pool, Some((mailer, github)))
+    }
+
     /// 用开发配置与 `data_dir` 里的数据库启动；对外地址跟着实际端口走。
     pub async fn start_default(data_dir: &std::path::Path) -> std::io::Result<Self> {
         let pool = crate::db::open(data_dir)
@@ -358,7 +379,19 @@ impl TestServer {
         Self::serve(listener, config, pool)
     }
 
-    fn serve(listener: TcpListener, mut config: Config, pool: SqlitePool) -> std::io::Result<Self> {
+    fn serve(listener: TcpListener, config: Config, pool: SqlitePool) -> std::io::Result<Self> {
+        Self::serve_custom(listener, config, pool, None)
+    }
+
+    fn serve_custom(
+        listener: TcpListener,
+        mut config: Config,
+        pool: SqlitePool,
+        services: Option<(
+            Arc<dyn crate::mail::Mailer>,
+            Arc<dyn crate::github::Provider>,
+        )>,
+    ) -> std::io::Result<Self> {
         let address = listener.local_addr()?;
         let origin = assemble_protocol::origin::ServerOrigin::parse(&format!("http://{address}"))
             .expect("a loopback address is a valid origin");
@@ -366,7 +399,12 @@ impl TestServer {
         config.public_origin = origin.clone();
         let stop = CancellationToken::new();
         let triggered = stop.clone();
-        let state = Arc::new(AppState::new(pool, config));
+        let mut state = AppState::new(pool, config);
+        if let Some((mailer, github)) = services {
+            state.mailer = mailer;
+            state.github_provider = github;
+        }
+        let state = Arc::new(state);
         let served = Arc::clone(&state);
         let task = tokio::spawn(async move {
             if let Err(error) = serve_until(listener, served, triggered, TEST_GRACE).await {

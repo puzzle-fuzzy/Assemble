@@ -75,10 +75,7 @@ async fn the_account_page_is_only_for_a_signed_in_browser() {
     let page = open_account(&fixture.browser).await;
     assert_eq!(page.status, StatusCode::OK);
     assert!(page.html.contains("<title>账户 · Assemble</title>"));
-    assert!(
-        page.html
-            .contains("当前登录：<strong>Alex Wang（alex）</strong>")
-    );
+    assert!(page.html.contains("主邮箱：alex@example.test"));
     assert!(page.html.contains("action=\"/web/account/password\""));
     assert!(page.html.contains("autocomplete=\"current-password\""));
     assert!(page.html.contains("action=\"/web/logout\""));

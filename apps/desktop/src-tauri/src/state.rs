@@ -103,6 +103,8 @@ pub struct AccountView {
     pub id: String,
     pub username: String,
     pub display_name: String,
+    pub email: Option<String>,
+    pub avatar_url: Option<String>,
 }
 
 impl From<&Account> for AccountView {
@@ -111,6 +113,8 @@ impl From<&Account> for AccountView {
             id: account.id.clone(),
             username: account.username.clone(),
             display_name: account.display_name.clone(),
+            email: account.email.clone(),
+            avatar_url: account.avatar_url.clone(),
         }
     }
 }
@@ -1211,6 +1215,8 @@ mod tests {
                 id: "a1".into(),
                 username: "example".into(),
                 display_name: "Example".into(),
+                email: None,
+                avatar_url: None,
             },
             device: device("d1", "Mac", true),
         };

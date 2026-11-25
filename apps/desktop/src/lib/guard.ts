@@ -65,7 +65,13 @@ export function isAccountView(value: unknown): value is AccountView {
     isRecord(value) &&
     hasString(value, "id") &&
     hasString(value, "username") &&
-    hasString(value, "displayName")
+    hasString(value, "displayName") &&
+    (value.email === null || typeof value.email === "string") &&
+    (value.avatarUrl === null ||
+      (typeof value.avatarUrl === "string" &&
+        /^https:\/\/avatars\.githubusercontent\.com\/u\/\d{1,20}\?s=96$/.test(
+          value.avatarUrl,
+        )))
   );
 }
 

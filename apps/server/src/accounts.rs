@@ -14,6 +14,10 @@ pub struct AccountRow {
     pub display_name: String,
     pub password_hash: String,
     pub created_at: i64,
+    pub email: Option<String>,
+    pub email_verified_at: Option<i64>,
+    pub password_enabled: bool,
+    pub avatar_url: Option<String>,
 }
 
 /// 用户名的长度范围。
@@ -142,6 +146,10 @@ pub async fn create(
         display_name,
         password_hash,
         created_at: now,
+        email: None,
+        email_verified_at: None,
+        password_enabled: true,
+        avatar_url: None,
     })
 }
 
@@ -191,6 +199,9 @@ pub async fn change_password(
     let account = find_by_id(pool, account_id)
         .await?
         .ok_or(ChangePasswordError::Missing)?;
+    if !account.password_enabled {
+        return Err(ChangePasswordError::WrongCurrent);
+    }
     // 两个都是这次请求里刚填的明文，直接比就行。
     if current.expose() == new.expose() {
         return Err(ChangePasswordError::Unchanged);
@@ -223,7 +234,7 @@ async fn replace_password(
     // "新的不能和现在的一样"只在用户自己改的时候拦（那里知道现在的明文）；
     // 命令行找回不知道旧的，不去拦。
     let password_hash = secrets::hash_password(new).await?;
-    sqlx::query("UPDATE accounts SET password_hash = ? WHERE id = ?")
+    sqlx::query("UPDATE accounts SET password_hash = ?, password_enabled = 1 WHERE id = ?")
         .bind(password_hash)
         .bind(&account.id)
         .execute(pool)
@@ -263,6 +274,8 @@ impl AccountRow {
             id: self.id.clone(),
             username: self.username.clone(),
             display_name: self.display_name.clone(),
+            email: self.email.clone(),
+            avatar_url: self.avatar_url.clone(),
             created_at: Timestamp::from_millis(self.created_at).unwrap_or_else(Timestamp::now),
         }
     }

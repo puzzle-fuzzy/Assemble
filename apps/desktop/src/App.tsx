@@ -5,6 +5,7 @@
 import { ArrowDownToLine, ArrowUpToLine } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -280,7 +281,24 @@ function SessionCard({ source, snapshot, onError }: CardProps) {
   return (
     <Card>
       <CardHeader>
-        <CardTitle>账户</CardTitle>
+        <CardTitle className="flex items-center gap-3">
+          {session?.phase === "signedIn" ? (
+            <Avatar>
+              {session.account.avatarUrl ? (
+                <AvatarImage
+                  src={session.account.avatarUrl}
+                  alt="账户头像"
+                  referrerPolicy="no-referrer"
+                />
+              ) : null}
+              <AvatarFallback aria-label="默认头像">
+                {Array.from(session.account.displayName)[0]?.toUpperCase() ||
+                  "A"}
+              </AvatarFallback>
+            </Avatar>
+          ) : null}
+          账户
+        </CardTitle>
         <CardDescription>{describe(session, unreachable)}</CardDescription>
         <CardAction>{action}</CardAction>
       </CardHeader>
@@ -304,10 +322,11 @@ function describe(
     case "signingIn":
       return "已在浏览器打开登录页，完成后会自动返回。";
     case "signedIn": {
-      const { displayName, username } = session.account;
-      return displayName === username
-        ? username
-        : `${displayName}（${username}）`;
+      const { displayName, username, email } = session.account;
+      const identity = email ?? username;
+      return displayName === identity
+        ? identity
+        : `${displayName}（${identity}）`;
     }
     case "signedOut":
       return unreachable ? "服务暂不可达，恢复后即可登录。" : "";

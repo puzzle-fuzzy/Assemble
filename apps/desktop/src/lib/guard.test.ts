@@ -2,11 +2,34 @@
 
 import { describe, expect, test } from "bun:test";
 
-import { isSnapshot } from "@/lib/guard";
+import { isAccountView, isSnapshot } from "@/lib/guard";
 import type { Snapshot, TransferView } from "@/lib/types";
 
-const ACCOUNT = { id: "a", username: "u", displayName: "U" };
+const ACCOUNT = {
+  id: "a",
+  username: "u",
+  displayName: "U",
+  email: null,
+  avatarUrl: null,
+};
 const DEVICE = { id: "d", name: "MacBook", platform: "macos", online: true };
+
+test("头像只接受已知 GitHub 数字身份地址", () => {
+  expect(
+    isAccountView({
+      ...ACCOUNT,
+      avatarUrl: "https://avatars.githubusercontent.com/u/123?s=96",
+    }),
+  ).toBe(true);
+  for (const avatarUrl of [
+    "http://avatars.githubusercontent.com/u/123?s=96",
+    "https://example.test/avatar",
+    "file:///C:/secret",
+    "https://avatars.githubusercontent.com@evil.test/u/123?s=96",
+  ]) {
+    expect(isAccountView({ ...ACCOUNT, avatarUrl })).toBe(false);
+  }
+});
 
 const VALID: Snapshot = {
   service: { target: "production", reachable: true, stream: "off" },

@@ -31,6 +31,9 @@ clap.workspace = true
 futures-core.workspace = true
 futures-util.workspace = true
 getrandom.workspace = true
+email_address = "0.2.10"
+lettre = { version = "0.11.24", default-features = false, features = ["builder", "smtp-transport", "tokio1-rustls-tls"] }
+reqwest = { workspace = true, features = ["form"] }
 rpassword.workspace = true
 serde.workspace = true
 serde_json.workspace = true

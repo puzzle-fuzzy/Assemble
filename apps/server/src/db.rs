@@ -97,6 +97,9 @@ mod tests {
                 "desktop_auth_codes",
                 "devices",
                 "drive_files",
+                "email_actions",
+                "email_rate_limits",
+                "github_identities",
                 "notifications",
                 "planner_mutations",
                 "reminders",
@@ -114,7 +117,7 @@ mod tests {
             .fetch_one(&again)
             .await
             .unwrap();
-        assert_eq!(applied, 2);
+        assert_eq!(applied, 3);
     }
 
     #[tokio::test]

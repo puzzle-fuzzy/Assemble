@@ -1,71 +1,183 @@
-//! 服务端的集成测试：邀请码注册。对着真实运行的服务走一遍。
-//!
-//! 核对的是几道防线拼在一起之后是不是真的挡得住：没配邀请码就没有注册页；
-//! 邀请码不对建不出账户；连续错太多次谁也注册不了；填对了就算登录，接着去授权确认页。
+//! 真实 HTTP、数据库和 Cookie 串起邮箱与 OAuth；只有外部邮件与 GitHub 使用替身。
 
 mod common;
 
-use assemble_client::{Client, RequestOptions};
-use assemble_protocol::primitives::Platform;
-use assemble_store::secret::SecretString;
+use assemble_server::email_identity::{self as identity, Action};
+use assemble_server::github::{Exchange, GithubConfig, Profile, Provider};
+use assemble_server::http::TestServer;
+use assemble_server::mail::{Delivery, Mail, Mailer};
+use assemble_server::{Config, SecretString};
 use common::*;
 use reqwest::StatusCode;
+use std::sync::{Arc, Mutex};
 
-const INVITE: &str = "welcome-to-assemble";
-/// 与登录失败共用一张表：15 分钟内最多错 5 次。
-const MAX_FAILURES: usize = 5;
-
-async fn account_count(server: &assemble_server::http::TestServer) -> i64 {
-    sqlx::query_scalar("SELECT count(*) FROM accounts")
-        .fetch_one(&server.state.pool)
-        .await
-        .unwrap()
+#[derive(Debug, Default)]
+struct Inbox(Mutex<Vec<Mail>>);
+impl Mailer for Inbox {
+    fn send(&self, mail: Mail) -> Delivery<'_> {
+        self.0.lock().unwrap().push(mail);
+        Box::pin(async { Ok(()) })
+    }
+}
+impl Inbox {
+    fn token(&self) -> String {
+        let mail = self.0.lock().unwrap();
+        mail.last()
+            .unwrap()
+            .body
+            .expose()
+            .split("#token=")
+            .nth(1)
+            .unwrap()
+            .lines()
+            .next()
+            .unwrap()
+            .to_owned()
+    }
+    fn recipient(&self) -> String {
+        self.0.lock().unwrap().last().unwrap().to.clone()
+    }
 }
 
-/// 配了邀请码、还没有任何账户的服务。
-async fn open_registration() -> Fixture {
+#[derive(Debug)]
+struct BrokenMailer;
+impl Mailer for BrokenMailer {
+    fn send(&self, _mail: Mail) -> Delivery<'_> {
+        Box::pin(async { Err(assemble_server::mail::MailError) })
+    }
+}
+
+#[derive(Debug)]
+struct Github(Mutex<Profile>);
+impl Provider for Github {
+    fn exchange(
+        &self,
+        code: SecretString,
+        verifier: SecretString,
+        callback: String,
+    ) -> Exchange<'_> {
+        assert_eq!(code.expose(), "test-code");
+        assert_eq!(verifier.expose().len(), 43);
+        assert!(callback.ends_with("/web/github/callback"));
+        let profile = self.0.lock().unwrap().clone();
+        Box::pin(async { Ok(profile) })
+    }
+}
+
+struct Fixture {
+    _dir: tempfile::TempDir,
+    server: TestServer,
+    browser: Browser,
+    inbox: Arc<Inbox>,
+    github: Arc<Github>,
+}
+async fn setup() -> Fixture {
     let dir = tempfile::tempdir().unwrap();
     let pool = assemble_server::db::open(dir.path()).await.unwrap();
-    let config = assemble_server::Config::development(dir.path()).with_invite_code(INVITE);
-    let server = assemble_server::http::TestServer::start(config, pool)
+    let inbox = Arc::new(Inbox::default());
+    let github = Arc::new(Github(Mutex::new(Profile {
+        id: "123".into(),
+        login: "octocat".into(),
+        name: "Octocat".into(),
+        verified_emails: vec!["github@example.test".into()],
+    })));
+    let mut config = Config::development(dir.path());
+    config.github = Some(GithubConfig {
+        client_id: "test-client".into(),
+        client_secret: SecretString::new("test-secret"),
+    });
+    let server = TestServer::start_with_services(config, pool, inbox.clone(), github.clone())
         .await
         .unwrap();
     let browser = Browser::new(server.origin.as_str());
     Fixture {
-        dir,
+        _dir: dir,
         server,
         browser,
+        inbox,
+        github,
     }
 }
 
-async fn audit_actions(server: &assemble_server::http::TestServer) -> Vec<String> {
-    sqlx::query_scalar("SELECT action FROM audit_log ORDER BY id")
-        .fetch_all(&server.state.pool)
+async fn request(browser: &Browser, path: &str, email: &str, extra: &[(&str, &str)]) -> Page {
+    let page = send(browser.get(path)).await;
+    let csrf = hidden(&page.html, "csrf").unwrap();
+    let mut fields = vec![("email", email), ("csrf", csrf.as_str())];
+    fields.extend_from_slice(extra);
+    send(browser.post_form(path, &fields)).await
+}
+
+async fn confirm(browser: &Browser, token: &str, password: &str) -> Page {
+    let entry = send(browser.get("/web/verify")).await;
+    let csrf = hidden(&entry.html, "csrf").unwrap();
+    let form =
+        send(browser.post_form("/web/verify/prepare", &[("token", token), ("csrf", &csrf)])).await;
+    if form.status != StatusCode::OK {
+        return form;
+    }
+    send(browser.post_form(
+        "/web/verify",
+        &[
+            ("token", token),
+            ("csrf", &csrf),
+            ("password", password),
+            ("password2", password),
+            ("display_name", "Alex Wang"),
+        ],
+    ))
+    .await
+}
+
+async fn count(f: &Fixture) -> i64 {
+    sqlx::query_scalar("SELECT count(*) FROM accounts")
+        .fetch_one(&f.server.state.pool)
         .await
         .unwrap()
 }
 
-/// 先取注册页，再用页面上的防伪值提交一次。`display_name` 固定为 Alex Wang。
-async fn try_register(
-    browser: &Browser,
-    username: &str,
-    password: &str,
-    password2: &str,
-    invite: &str,
-    next: &str,
-) -> Page {
-    let form = send(browser.get("/web/register")).await;
-    assert_eq!(form.status, StatusCode::OK, "the register page should open");
-    let csrf = hidden(&form.html, "csrf").unwrap();
+async fn register(f: &Fixture, email: &str) -> String {
+    assert_eq!(
+        request(&f.browser, "/web/register", email, &[])
+            .await
+            .status,
+        StatusCode::OK
+    );
+    assert_eq!(
+        confirm(&f.browser, &f.inbox.token(), PASSWORD).await.status,
+        StatusCode::SEE_OTHER
+    );
+    identity::by_email(&f.server.state.pool, email)
+        .await
+        .unwrap()
+        .unwrap()
+        .id
+}
+
+async fn github_callback(browser: &Browser) -> Page {
+    let start = send(browser.get("/web/github/start")).await;
+    let url = url::Url::parse(&start.location().unwrap()).unwrap();
+    assert_eq!(url.host_str(), Some("github.com"));
+    let pairs = url
+        .query_pairs()
+        .collect::<std::collections::HashMap<_, _>>();
+    assert_eq!(pairs.get("code_challenge_method").unwrap(), "S256");
+    assert_eq!(pairs.get("code_challenge").unwrap().len(), 43);
+    assert!(!url.as_str().contains("test-secret"));
+    let state = pairs.get("state").unwrap();
+    send(browser.get(&format!(
+        "/web/github/callback?state={state}&code=test-code"
+    )))
+    .await
+}
+
+async fn github_profile(browser: &Browser, email: &str) -> Page {
+    let page = send(browser.get("/web/github/profile")).await;
+    let csrf = hidden(&page.html, "csrf").unwrap();
     send(browser.post_form(
-        "/web/register",
+        "/web/github/profile",
         &[
-            ("username", username),
-            ("display_name", "Alex Wang"),
-            ("password", password),
-            ("password2", password2),
-            ("invite", invite),
-            ("next", next),
+            ("email", email),
+            ("display_name", "Octocat"),
             ("csrf", &csrf),
         ],
     ))
@@ -73,287 +185,543 @@ async fn try_register(
 }
 
 #[tokio::test]
-async fn there_is_no_registration_unless_an_invite_code_is_configured() {
-    let fixture = fixture().await;
-    let page = send(fixture.browser.get("/web/register")).await;
-    assert_eq!(page.status, StatusCode::NOT_FOUND);
-    assert!(page.html.contains("没有开放注册"));
-    // 硬提交也不行：连表单都不认。
-    let submitted = send(fixture.browser.post_form(
-        "/web/register",
-        &[("username", "sam"), ("password", PASSWORD)],
-    ))
-    .await;
-    assert_eq!(submitted.status, StatusCode::NOT_FOUND);
-    // 登录页上也没有去注册的入口。
-    let login = open_login(&fixture.browser).await;
-    assert!(!login.html.contains("/web/register"));
-    assert_eq!(account_count(&fixture.server).await, 1);
-}
-
-#[tokio::test]
-async fn the_register_page_is_paired_with_its_cookie_and_linked_from_the_login_page() {
-    let fixture = open_registration().await;
-    let login = open_login(&fixture.browser).await;
-    assert!(
-        login.html.contains("href=\"/web/register\""),
-        "{}",
-        login.html
-    );
-    // 登录页带着"之后要回去"的参数时，注册的入口也带着。
-    let login = send(
-        fixture
-            .browser
-            .get("/web/login?next=%2Fdesktop%2Fauthorize"),
-    )
-    .await;
-    assert!(
-        login
-            .html
-            .contains("href=\"/web/register?next=%2Fdesktop%2Fauthorize\"")
-    );
-
-    let page = send(fixture.browser.get("/web/register")).await;
+async fn registration_is_public_and_no_account_exists_until_mail_is_verified() {
+    let f = setup().await;
+    let page = send(f.browser.get("/web/register")).await;
     assert_eq!(page.status, StatusCode::OK);
-    assert!(page.html.contains("<title>注册 · Assemble</title>"));
-    assert!(page.html.contains("action=\"/web/register\""));
-    assert!(page.html.contains("autocomplete=\"new-password\""));
-    assert!(!page.html.contains("<script"));
-    // 与登录页同一套头：不缓存、样式只认哈希、表单只发往本站。
-    assert_eq!(page.headers.get("cache-control").unwrap(), "no-store");
-    let policy = page.headers.get("content-security-policy").unwrap();
-    assert!(policy.to_str().unwrap().contains("form-action 'self'"));
-    // 防伪值与 Cookie 成对；页面与 Cookie 里都没有邀请码。
-    let csrf = hidden(&page.html, "csrf").unwrap();
-    let cookies = page.set_cookies().join("\n");
-    assert!(
-        cookies.contains(&format!("assemble_csrf={csrf}")),
-        "{cookies}"
-    );
-    assert!(cookies.contains("HttpOnly"));
-    assert!(!page.html.contains(INVITE));
-    assert!(!cookies.contains(INVITE));
-    // "之后要回去"的参数只认本站的授权页；别处的地址被丢掉。
-    let hostile = send(
-        fixture
-            .browser
-            .get("/web/register?next=https%3A%2F%2Fevil.example%2F"),
-    )
-    .await;
-    assert_eq!(hostile.status, StatusCode::OK);
-    assert_eq!(hidden(&hostile.html, "next").as_deref(), Some(""));
-    let kept = send(
-        fixture
-            .browser
-            .get("/web/register?next=%2Fdesktop%2Fauthorize%3Frequest%3Dabc"),
-    )
-    .await;
+    assert!(!page.html.contains("invite"));
+    assert!(!page.html.contains("type=\"password\""));
     assert_eq!(
-        hidden(&kept.html, "next").as_deref(),
-        Some("/desktop/authorize?request=abc")
+        request(
+            &f.browser,
+            "/web/register",
+            " Alex@Example.Test ",
+            &[("next", "/web/account")]
+        )
+        .await
+        .status,
+        StatusCode::OK
     );
-    assert_eq!(account_count(&fixture.server).await, 0);
+    assert_eq!(count(&f).await, 0);
+    let token = f.inbox.token();
+    let stored: String = sqlx::query_scalar("SELECT token_hash FROM email_actions")
+        .fetch_one(&f.server.state.pool)
+        .await
+        .unwrap();
+    assert_ne!(stored, token);
+    let ignored = send(f.browser.get("/web/verify")).await;
+    assert_eq!(ignored.status, StatusCode::OK);
+    assert_eq!(count(&f).await, 0);
+    let confirmed = confirm(&f.browser, &token, PASSWORD).await;
+    assert_eq!(confirmed.status, StatusCode::SEE_OTHER);
+    assert_eq!(count(&f).await, 1);
+    let account = identity::by_email(&f.server.state.pool, "alex@example.test")
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(account.email.as_deref(), Some("alex@example.test"));
+    assert!(account.email_verified_at.is_some());
+    assert!(account.password_hash.starts_with("$argon2id$"));
+    assert!(account.avatar_url.is_none());
+    assert_eq!(
+        confirm(&f.browser, &token, PASSWORD).await.status,
+        StatusCode::BAD_REQUEST
+    );
+    let browser = Browser::new(f.server.origin.as_str());
+    assert_eq!(
+        try_login(&browser, "ALEX@EXAMPLE.TEST", PASSWORD, "/web/account")
+            .await
+            .status,
+        StatusCode::SEE_OTHER
+    );
+    let profile = send(browser.get("/web/account")).await;
+    assert!(profile.html.contains("默认头像"));
+    assert!(profile.html.contains("主邮箱：alex@example.test"));
+    let other = Browser::new(f.server.origin.as_str());
+    assert_eq!(
+        try_login(&other, &account.username, PASSWORD, "")
+            .await
+            .status,
+        StatusCode::UNAUTHORIZED
+    );
 }
 
 #[tokio::test]
-async fn registration_refuses_foreign_sites_forged_forms_and_wrong_invite_codes() {
-    let fixture = open_registration().await;
-    let browser = &fixture.browser;
-    let form = send(browser.get("/web/register")).await;
-    let csrf = hidden(&form.html, "csrf").unwrap();
-    let fields = [
-        ("username", "sam"),
-        ("display_name", "Sam Lee"),
-        ("password", PASSWORD),
-        ("password2", PASSWORD),
-        ("invite", INVITE),
-        ("next", ""),
-        ("csrf", csrf.as_str()),
-    ];
-
-    // 没有 Origin（不是浏览器从本站页面发出的）。
-    let no_origin = send(
-        browser
-            .http
-            .post(format!("{}/web/register", browser.origin))
-            .form(&fields),
-    )
-    .await;
-    assert_eq!(no_origin.status, StatusCode::FORBIDDEN);
-    // 冒充别的站点。
-    let forged = send(
-        browser
-            .http
-            .post(format!("{}/web/register", browser.origin))
-            .header("origin", "https://evil.example")
-            .form(&fields),
-    )
-    .await;
-    assert_eq!(forged.status, StatusCode::FORBIDDEN);
-    // 防伪值对不上（别的站点自己拼的表单）。
-    let mut mismatched = fields;
-    mismatched[6] = ("csrf", "not-the-paired-value");
-    let forged_form = send(browser.post_form("/web/register", &mismatched)).await;
-    assert_eq!(forged_form.status, StatusCode::FORBIDDEN);
-    assert_eq!(account_count(&fixture.server).await, 0);
-
-    // 邀请码不对：只有一句话，账户没有建出来。
-    let wrong = try_register(browser, "sam", PASSWORD, PASSWORD, "not-the-invite", "").await;
-    assert_eq!(wrong.status, StatusCode::FORBIDDEN);
-    assert!(wrong.html.contains("邀请码不对"));
-    assert!(!wrong.html.contains("not-the-invite"));
-    // 用户名与显示名摆回去了，密码与邀请码没有。
-    assert!(wrong.html.contains("name=\"username\" value=\"sam\""));
-    assert!(
-        wrong
-            .html
-            .contains("name=\"display_name\" value=\"Alex Wang\"")
-    );
-    assert!(!wrong.html.contains(PASSWORD));
-    assert!(
-        wrong
-            .set_cookies()
-            .iter()
-            .all(|cookie| !cookie.starts_with("assemble_web="))
-    );
-    assert_eq!(account_count(&fixture.server).await, 0);
+async fn requests_require_csrf_and_mail_limits_survive_concurrent_requests() {
+    let f = setup().await;
     assert_eq!(
-        audit_actions(&fixture.server).await,
-        ["web.register_failed"]
+        send(f.browser.post_form(
+            "/web/register",
+            &[("email", "a@example.test"), ("csrf", "fake")]
+        ))
+        .await
+        .status,
+        StatusCode::FORBIDDEN
     );
+    assert!(f.inbox.0.lock().unwrap().is_empty());
+    assert_eq!(
+        request(&f.browser, "/web/register", "not-an-email", &[])
+            .await
+            .status,
+        StatusCode::BAD_REQUEST
+    );
+    let pool = &f.server.state.pool;
+    let (first, second) = tokio::join!(
+        identity::reserve_mail(pool, "one@example.test"),
+        identity::reserve_mail(pool, "one@example.test")
+    );
+    assert_eq!(usize::from(first.is_ok()) + usize::from(second.is_ok()), 1);
+    assert!(matches!(
+        identity::reserve_mail(pool, "one@example.test").await,
+        Err(identity::Error::RateLimited)
+    ));
+}
 
-    // 邀请码对了，别的填错：各自说各自的，账户还是没有建出来。
-    let mismatch = try_register(browser, "sam", PASSWORD, "something-else", INVITE, "").await;
-    assert_eq!(mismatch.status, StatusCode::BAD_REQUEST);
-    assert!(mismatch.html.contains("两次输入的密码不一致"));
-    let short = try_register(browser, "sam", "short", "short", INVITE, "").await;
-    assert_eq!(short.status, StatusCode::BAD_REQUEST);
-    assert!(short.html.contains("密码至少 8 个字符"));
-    let bad_name = try_register(browser, "sam!", PASSWORD, PASSWORD, INVITE, "").await;
-    assert_eq!(bad_name.status, StatusCode::BAD_REQUEST);
-    assert!(bad_name.html.contains("用户名不合法"));
-    // 这些失败不计入邀请码的失败次数：下面再错几次仍然是从零数。
-    assemble_server::accounts::create(
-        &fixture.server.state.pool,
-        "taken",
-        "",
-        SecretString::new(PASSWORD.to_owned()),
+#[tokio::test]
+async fn a_verification_is_single_use_even_with_concurrent_submission_and_expiry() {
+    let f = setup().await;
+    let action = Action::new("register", "new@example.test".into(), String::new());
+    let token = identity::issue(&f.server.state.pool, &action)
+        .await
+        .unwrap();
+    let password = || Some(SecretString::new(PASSWORD));
+    let (one, two) = tokio::join!(
+        identity::complete(
+            &f.server.state.pool,
+            token.expose(),
+            password(),
+            "Alex",
+            None
+        ),
+        identity::complete(
+            &f.server.state.pool,
+            token.expose(),
+            password(),
+            "Alex",
+            None
+        )
+    );
+    assert_eq!(usize::from(one.is_ok()) + usize::from(two.is_ok()), 1);
+    assert_eq!(count(&f).await, 1);
+    let mut expired = Action::new("register", "expired@example.test".into(), String::new());
+    expired.expires_at = 1;
+    let token = identity::issue(&f.server.state.pool, &expired)
+        .await
+        .unwrap();
+    assert!(matches!(
+        identity::inspect(&f.server.state.pool, token.expose()).await,
+        Err(identity::Error::Invalid)
+    ));
+}
+
+#[tokio::test]
+async fn recovery_revokes_web_sessions_and_cannot_overwrite_a_later_password_change() {
+    let f = setup().await;
+    let id = register(&f, "recover@example.test").await;
+    let account = assemble_server::accounts::find_by_id(&f.server.state.pool, &id)
+        .await
+        .unwrap()
+        .unwrap();
+    let action =
+        Action::new("reset", "recover@example.test".into(), String::new()).for_account(&account);
+    let stale = identity::issue(&f.server.state.pool, &action)
+        .await
+        .unwrap();
+    assemble_server::accounts::set_password(
+        &f.server.state.pool,
+        &id,
+        SecretString::new("intermediate-password"),
     )
     .await
     .unwrap();
-    let taken = try_register(browser, "taken", PASSWORD, PASSWORD, INVITE, "").await;
-    assert_eq!(taken.status, StatusCode::CONFLICT);
-    assert!(taken.html.contains("这个用户名已经被占用了"));
-    assert_eq!(account_count(&fixture.server).await, 1);
-    // 这些原因不是"邀请码错了"，不记那一笔：审计里还是只有邀请码错的那一次。
-    assert_eq!(
-        audit_actions(&fixture.server).await,
-        ["web.register_failed"]
-    );
-}
-
-#[tokio::test]
-async fn a_valid_registration_signs_you_in_and_carries_on_to_the_device() {
-    let fixture = open_registration().await;
-    let browser = &fixture.browser;
-    let (request, verifier) = desktop_request('r', "MacBook", Platform::Macos);
-    let next = assemble_server::desktop_login::authorize_path(&request);
-
-    let page = try_register(browser, "Alex", PASSWORD, PASSWORD, INVITE, &next).await;
-    assert_eq!(page.status, StatusCode::SEE_OTHER, "{}", page.html);
-    // 回到原来要去的授权确认页。
-    assert_eq!(page.location().as_deref(), Some(next.as_str()));
-    let cookies = page.set_cookies().join("\n");
-    assert!(cookies.contains("assemble_web="), "{cookies}");
-    // 注册表单的防伪值用完即弃。
-    assert!(cookies.contains("assemble_csrf=;"), "{cookies}");
-    assert!(cookies.contains("Max-Age=0"), "{cookies}");
-    assert!(!page.html.contains(INVITE));
-
-    let account = assemble_server::accounts::find_by_username(&fixture.server.state.pool, "alex")
-        .await
-        .unwrap()
-        .expect("the account was created");
-    assert_eq!(account.display_name, "Alex Wang");
-    assert!(account.password_hash.starts_with("$argon2id$"));
-    assert_eq!(audit_actions(&fixture.server).await, ["account.registered"]);
-
-    // 已经是登录状态：直接在确认页上点"确认登录"，桌面端换到令牌。
-    let code = code_from(&authorize(browser, &request, "allow").await, &request);
-    let client = Client::new(fixture.server.origin.clone()).unwrap();
-    let cancel = tokio_util::sync::CancellationToken::new();
-    let (response, _token) = client
-        .exchange(
-            &exchange_input(&request, &verifier, code),
-            &RequestOptions::new(&cancel),
+    assert!(matches!(
+        identity::complete(
+            &f.server.state.pool,
+            stale.expose(),
+            Some(SecretString::new(PASSWORD)),
+            "",
+            None,
         )
+        .await,
+        Err(identity::Error::Invalid)
+    ));
+    sqlx::query("DELETE FROM email_rate_limits")
+        .execute(&f.server.state.pool)
         .await
         .unwrap();
-    assert_eq!(response.account.username, "alex");
-    assert_eq!(response.account.id, account.id);
-    assert_eq!(response.device.name, "MacBook");
+    let browser = Browser::new(f.server.origin.as_str());
+    assert_eq!(
+        request(&browser, "/web/forgot", "recover@example.test", &[])
+            .await
+            .status,
+        StatusCode::OK
+    );
+    let token = f.inbox.token();
+    assert_eq!(
+        confirm(&browser, &token, "the-recovered-password")
+            .await
+            .status,
+        StatusCode::OK
+    );
+    assert_eq!(
+        send(f.browser.get("/web/account")).await.status,
+        StatusCode::SEE_OTHER
+    );
+    assert_eq!(
+        try_login(
+            &browser,
+            "recover@example.test",
+            "the-recovered-password",
+            "/web/account"
+        )
+        .await
+        .status,
+        StatusCode::SEE_OTHER
+    );
 }
 
 #[tokio::test]
-async fn without_a_destination_a_registration_ends_signed_in() {
-    let fixture = open_registration().await;
-    let page = try_register(&fixture.browser, "sam", PASSWORD, PASSWORD, INVITE, "").await;
-    assert_eq!(page.status, StatusCode::OK);
-    assert!(page.html.contains("注册成功"));
-    assert!(page.html.contains("已经帮你登录"));
-    assert!(
-        page.set_cookies()
-            .iter()
-            .any(|c| c.starts_with("assemble_web="))
+async fn legacy_binding_keeps_the_original_account_and_never_accepts_username_login() {
+    let f = setup().await;
+    let account = assemble_server::accounts::create(
+        &f.server.state.pool,
+        "legacy",
+        "Old",
+        SecretString::new(PASSWORD),
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        try_login(&f.browser, "legacy", PASSWORD, "").await.status,
+        StatusCode::UNAUTHORIZED
     );
-
-    // 已登录的浏览器再去注册页：不会又摆一张表单，而是回到登录页（那里会显示"已登录"）。
-    let again = send(fixture.browser.get("/web/register")).await;
-    assert_eq!(again.status, StatusCode::SEE_OTHER);
-    assert_eq!(again.location().as_deref(), Some("/web/login"));
-    let (request, _verifier) = desktop_request('x', "MacBook", Platform::Macos);
-    let next = assemble_server::desktop_login::authorize_path(&request);
-    let carried = send(
-        fixture
-            .browser
-            .get(&format!("/web/register?next={}", encode(&next))),
+    let page = request(
+        &f.browser,
+        "/web/legacy",
+        "old@example.test",
+        &[("username", "legacy"), ("current", PASSWORD)],
     )
     .await;
-    assert_eq!(carried.status, StatusCode::SEE_OTHER);
-    assert_eq!(carried.location().as_deref(), Some(next.as_str()));
-    assert_eq!(account_count(&fixture.server).await, 1);
-}
-
-/// 查询串里的地址要转义。
-fn encode(value: &str) -> String {
-    url::form_urlencoded::byte_serialize(value.as_bytes()).collect()
+    assert_eq!(page.status, StatusCode::OK);
+    let other_browser = Browser::new(f.server.origin.as_str());
+    assert_eq!(
+        confirm(&other_browser, &f.inbox.token(), "").await.status,
+        StatusCode::BAD_REQUEST
+    );
+    assert_eq!(
+        confirm(&f.browser, &f.inbox.token(), "").await.status,
+        StatusCode::SEE_OTHER
+    );
+    let updated = identity::by_email(&f.server.state.pool, "old@example.test")
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(account.id, updated.id);
+    assert_eq!(account.password_hash, updated.password_hash);
+    assert_eq!(count(&f).await, 1);
 }
 
 #[tokio::test]
-async fn wrong_invite_codes_are_throttled_for_everyone() {
-    let fixture = open_registration().await;
-    for attempt in 1..=MAX_FAILURES {
-        let page = try_register(
-            &fixture.browser,
-            "sam",
-            PASSWORD,
-            PASSWORD,
-            &format!("wrong-number-{attempt}"),
-            "",
-        )
-        .await;
-        assert_eq!(page.status, StatusCode::FORBIDDEN, "{attempt}");
-        assert_eq!(page.headers.get("retry-after").unwrap(), "1");
-    }
-    // 次数用完：这回邀请码是对的也不收。
-    let blocked = try_register(&fixture.browser, "sam", PASSWORD, PASSWORD, INVITE, "").await;
-    assert_eq!(blocked.status, StatusCode::TOO_MANY_REQUESTS);
-    assert!(blocked.html.contains("尝试次数太多"));
-    assert_eq!(blocked.headers.get("retry-after").unwrap(), "900");
-    assert_eq!(account_count(&fixture.server).await, 0);
-    // 另一个"人"（不带任何 Cookie 的浏览器）同样被挡：次数是全局的。
-    let stranger = Browser::new(fixture.server.origin.as_str());
-    let also = try_register(&stranger, "jo", PASSWORD, PASSWORD, INVITE, "").await;
-    assert_eq!(also.status, StatusCode::TOO_MANY_REQUESTS);
-    assert_eq!(account_count(&fixture.server).await, 0);
+async fn changing_email_requires_both_mailboxes_and_invalidates_old_recovery() {
+    let f = setup().await;
+    let id = register(&f, "old@example.test").await;
+    sqlx::query("DELETE FROM email_rate_limits")
+        .execute(&f.server.state.pool)
+        .await
+        .unwrap();
+    let page = send(f.browser.get("/web/account")).await;
+    let csrf = hidden(&page.html, "csrf").unwrap();
+    assert_eq!(
+        send(f.browser.post_form(
+            "/web/account/email",
+            &[("email", "new@example.test"), ("csrf", &csrf)]
+        ))
+        .await
+        .status,
+        StatusCode::OK
+    );
+    assert_eq!(f.inbox.recipient(), "old@example.test");
+    assert_eq!(
+        confirm(&f.browser, &f.inbox.token(), "").await.status,
+        StatusCode::OK
+    );
+    assert_eq!(f.inbox.recipient(), "new@example.test");
+    assert!(
+        identity::by_email(&f.server.state.pool, "new@example.test")
+            .await
+            .unwrap()
+            .is_none()
+    );
+    assert_eq!(
+        confirm(&f.browser, &f.inbox.token(), "").await.status,
+        StatusCode::SEE_OTHER
+    );
+    assert_eq!(
+        identity::by_email(&f.server.state.pool, "new@example.test")
+            .await
+            .unwrap()
+            .unwrap()
+            .id,
+        id
+    );
+    assert!(
+        identity::by_email(&f.server.state.pool, "old@example.test")
+            .await
+            .unwrap()
+            .is_none()
+    );
+}
+
+#[tokio::test]
+async fn github_verified_email_registers_once_and_later_email_changes_do_not_move_the_account() {
+    let f = setup().await;
+    assert_eq!(
+        github_callback(&f.browser).await.location().as_deref(),
+        Some("/web/github/profile")
+    );
+    assert_eq!(
+        github_profile(&f.browser, "github@example.test")
+            .await
+            .status,
+        StatusCode::SEE_OTHER
+    );
+    let account = identity::by_email(&f.server.state.pool, "github@example.test")
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(!account.password_enabled);
+    assert_eq!(
+        account.avatar_url.as_deref(),
+        Some("https://avatars.githubusercontent.com/u/123?s=96")
+    );
+    f.github.0.lock().unwrap().verified_emails = vec!["different@example.test".into()];
+    f.github.0.lock().unwrap().login = "renamed".into();
+    let browser = Browser::new(f.server.origin.as_str());
+    assert_eq!(
+        github_callback(&browser).await.status,
+        StatusCode::SEE_OTHER
+    );
+    assert_eq!(count(&f).await, 1);
+    assert_eq!(
+        identity::by_email(&f.server.state.pool, "github@example.test")
+            .await
+            .unwrap()
+            .unwrap()
+            .id,
+        account.id
+    );
+    assert!(
+        identity::by_email(&f.server.state.pool, "different@example.test")
+            .await
+            .unwrap()
+            .is_none()
+    );
+}
+
+#[tokio::test]
+async fn github_same_email_never_merges_accounts_and_alternate_email_requires_mail() {
+    let f = setup().await;
+    let id = register(&f, "github@example.test").await;
+    let browser = Browser::new(f.server.origin.as_str());
+    github_callback(&browser).await;
+    assert_eq!(
+        github_profile(&browser, "github@example.test").await.status,
+        StatusCode::CONFLICT
+    );
+    let linked: i64 = sqlx::query_scalar("SELECT count(*) FROM github_identities")
+        .fetch_one(&f.server.state.pool)
+        .await
+        .unwrap();
+    assert_eq!(linked, 0);
+    assert_eq!(count(&f).await, 1);
+    assert_eq!(
+        github_profile(&browser, "chosen@example.test").await.status,
+        StatusCode::OK
+    );
+    assert_eq!(count(&f).await, 1);
+    let unrelated_browser = Browser::new(f.server.origin.as_str());
+    // 即使邮箱收件人误点别人发起的验证，也不能给发起者创建可登录的新账户。
+    let refused = confirm(&unrelated_browser, &f.inbox.token(), "").await;
+    assert_eq!(refused.status, StatusCode::BAD_REQUEST);
+    assert!(refused.html.contains("同一浏览器"));
+
+    assert_eq!(
+        confirm(&browser, &f.inbox.token(), "").await.status,
+        StatusCode::SEE_OTHER
+    );
+    let second = identity::by_email(&f.server.state.pool, "chosen@example.test")
+        .await
+        .unwrap()
+        .unwrap();
+    assert_ne!(second.id, id);
+    assert!(!second.password_enabled);
+}
+
+#[tokio::test]
+async fn github_callback_requires_its_browser_and_cannot_be_replayed() {
+    let f = setup().await;
+    let start = send(f.browser.get("/web/github/start")).await;
+    let url = url::Url::parse(&start.location().unwrap()).unwrap();
+    let state = url
+        .query_pairs()
+        .find(|(k, _)| k == "state")
+        .unwrap()
+        .1
+        .into_owned();
+    let callback = format!("/web/github/callback?state={state}&code=test-code");
+    let foreign = Browser::new(f.server.origin.as_str());
+    assert_eq!(
+        send(foreign.get(&callback)).await.status,
+        StatusCode::FORBIDDEN
+    );
+    assert_eq!(
+        send(f.browser.get(&callback)).await.status,
+        StatusCode::SEE_OTHER
+    );
+    assert_eq!(
+        send(f.browser.get(&callback)).await.status,
+        StatusCode::FORBIDDEN
+    );
+    assert_eq!(count(&f).await, 0);
+}
+
+#[tokio::test]
+async fn github_binding_requires_original_password_and_preserves_account_id() {
+    let f = setup().await;
+    let id = register(&f, "owner@example.test").await;
+    let page = send(f.browser.get("/web/account")).await;
+    let policy = page
+        .headers
+        .get("content-security-policy")
+        .unwrap()
+        .to_str()
+        .unwrap();
+    assert!(policy.contains("form-action 'self' https://github.com"));
+    assert!(!policy.contains("form-action *"));
+    let csrf = hidden(&page.html, "csrf").unwrap();
+    assert_eq!(
+        send(f.browser.post_form(
+            "/web/account/github",
+            &[("csrf", &csrf), ("current", "wrong")]
+        ))
+        .await
+        .status,
+        StatusCode::FORBIDDEN
+    );
+    let start = send(f.browser.post_form(
+        "/web/account/github",
+        &[("csrf", &csrf), ("current", PASSWORD)],
+    ))
+    .await;
+    let url = url::Url::parse(&start.location().unwrap()).unwrap();
+    let state = url
+        .query_pairs()
+        .find(|(k, _)| k == "state")
+        .unwrap()
+        .1
+        .into_owned();
+    assert_eq!(
+        send(f.browser.get(&format!(
+            "/web/github/callback?state={state}&code=test-code"
+        )))
+        .await
+        .status,
+        StatusCode::SEE_OTHER
+    );
+    let linked: String = sqlx::query_scalar("SELECT account_id FROM github_identities")
+        .fetch_one(&f.server.state.pool)
+        .await
+        .unwrap();
+    assert_eq!(linked, id);
+    assert_eq!(count(&f).await, 1);
+    assert_eq!(
+        identity::by_email(&f.server.state.pool, "owner@example.test")
+            .await
+            .unwrap()
+            .unwrap()
+            .id,
+        id
+    );
+}
+
+#[tokio::test]
+async fn a_github_only_account_can_set_a_password_through_its_primary_email() {
+    let f = setup().await;
+    github_callback(&f.browser).await;
+    github_profile(&f.browser, "github@example.test").await;
+    let original = identity::by_email(&f.server.state.pool, "github@example.test")
+        .await
+        .unwrap()
+        .unwrap();
+    let browser = Browser::new(f.server.origin.as_str());
+    assert_eq!(
+        request(&browser, "/web/forgot", "github@example.test", &[])
+            .await
+            .status,
+        StatusCode::OK
+    );
+    assert_eq!(
+        confirm(&browser, &f.inbox.token(), PASSWORD).await.status,
+        StatusCode::OK
+    );
+    let updated = identity::by_email(&f.server.state.pool, "github@example.test")
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(original.id, updated.id);
+    assert!(updated.password_enabled);
+    assert_eq!(
+        try_login(&browser, "github@example.test", PASSWORD, "/web/account")
+            .await
+            .status,
+        StatusCode::SEE_OTHER
+    );
+}
+
+#[tokio::test]
+async fn registration_remains_visible_without_smtp_and_delivery_failure_removes_the_action() {
+    let dir = tempfile::tempdir().unwrap();
+    let server = TestServer::start_default(dir.path()).await.unwrap();
+    let browser = Browser::new(server.origin.as_str());
+    assert_eq!(
+        send(browser.get("/web/register")).await.status,
+        StatusCode::OK
+    );
+    assert_eq!(
+        request(&browser, "/web/register", "one@example.test", &[])
+            .await
+            .status,
+        StatusCode::SERVICE_UNAVAILABLE
+    );
+    let oversized = "x".repeat(20 * 1024);
+    assert_eq!(
+        send(browser.post_form("/web/register", &[("email", oversized.as_str())]))
+            .await
+            .status,
+        StatusCode::PAYLOAD_TOO_LARGE
+    );
+    let f = setup().await;
+    let pool = assemble_server::db::open(dir.path().join("broken").as_path())
+        .await
+        .unwrap();
+    let failed = TestServer::start_with_services(
+        Config::development(dir.path().join("broken")),
+        pool,
+        Arc::new(BrokenMailer),
+        f.github.clone(),
+    )
+    .await
+    .unwrap();
+    let browser = Browser::new(failed.origin.as_str());
+    assert_eq!(
+        request(&browser, "/web/register", "one@example.test", &[])
+            .await
+            .status,
+        StatusCode::SERVICE_UNAVAILABLE
+    );
+    let pending: i64 = sqlx::query_scalar("SELECT count(*) FROM email_actions")
+        .fetch_one(&failed.state.pool)
+        .await
+        .unwrap();
+    assert_eq!(pending, 0);
 }

@@ -11,6 +11,8 @@ export interface AccountView {
   id: string;
   username: string;
   displayName: string;
+  email: string | null;
+  avatarUrl: string | null;
 }
 
 /** 一台设备在界面上的样子。 */

@@ -138,6 +138,8 @@ mod tests {
             id: "a1".into(),
             username: "example".into(),
             display_name: "Example".into(),
+            email: None,
+            avatar_url: None,
             // 2026-11-01T00:00:00.000Z
             created_at: Timestamp::from_millis(1_793_491_200_000).unwrap(),
         }

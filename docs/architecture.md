@@ -6,14 +6,14 @@
 
 - **服务端与桌面端都在这个仓库里。** 服务端是 Rust（axum + SQLite），桌面端是 Tauri 2；两者共用一份协议类型。Assemble 完全替换 jarvis，不迁移它的数据。
 - **优先级：文件传输与日程规划。** 文件传输已落地，正式服务已上线；日程规划的第一批（日程、提醒、到点通知）在服务端与桌面端都已写完，给助手用的对话入口（`assemble-mcp`）也写完了，都有自动化测试；手机上的提醒还没有做（[决策 0003](decisions/0003-schedule-first-batch-and-conversational-entry.md)）。宠物、壁纸排在最后。
-- **第一期的端：Windows 与 macOS 桌面端，加上给助手用的入口 `assemble-mcp`。** 网页端只有几页服务端渲染的页面：登录、邀请码注册（配了邀请码才有）、授权确认、账户（改密码、退出登录）。日程要在手机上提醒：2026-11-25 定了做原生的 iPhone 应用，还没有做（[决策 0003](decisions/0003-schedule-first-batch-and-conversational-entry.md)）。
+- **第一期的端：Windows 与 macOS 桌面端，加上给助手用的入口 `assemble-mcp`。** 网页端只有几页服务端渲染的页面：邮箱登录、公开注册与验证、GitHub 授权、桌面授权确认、账户（主邮箱、头像、网页改密与找回）。日程要在手机上提醒：2026-11-25 定了做原生的 iPhone 应用，还没有做（[决策 0003](decisions/0003-schedule-first-batch-and-conversational-entry.md)）。
 
 ## 结构
 
 ```text
 ┌──────────────────────────── apps/desktop（Tauri 2）────────────────────────────┐
 │  界面（React）：主窗口 · 发送面板                                              │
-│    只调用具名命令、接收状态事件；没有凭据，不联网，路径操作仍由 Rust 负责        │
+│    只调用具名命令、接收状态事件；没有凭据，仅加载白名单 GitHub 头像，路径操作仍由 Rust 负责        │
 │      │ invoke（具名命令）                              ▲ 事件（完整状态快照）  │
 │  应用壳（Rust，src-tauri）                                                     │
 │    会话 · 后台任务（收、发、对账）· 传输记录表 · 日程名单                      │
@@ -42,7 +42,7 @@
 | `assemble-device`        | 这台电脑落盘的边界：接收目录、文件名收敛、同名加序号、一次接收的落盘规则、清扫中断留下的暂存文件；右键菜单的参数与注册表                     | 网络、窗口                         |
 | `assemble-store`         | 设置文件的原子私有写入；密钥存储抽象（系统钥匙串 / 内存）                                                                                    | 决定存什么                         |
 | `assemble-schedule`      | 日程出现规则的推算：一条日程在某段时间里出现在哪几场、某个时刻是不是它的一场。服务端的调度、桌面端的名单展开、助手看到的名单与撞车判断共用它 | 决定什么时候提醒、提醒谁           |
-| `apps/server`            | 账户、登录页与邀请码注册、改密码、桌面授权、设备与在线状态、发送、云盘、日程与提醒的存取和到点调度、定时清理                                 | 文件怎么存到用户的电脑上           |
+| `apps/server`            | 账户、公开邮箱注册与验证、GitHub 登录、网页改密码与找回、桌面授权、设备与在线状态、发送、云盘、日程与提醒的存取和到点调度、定时清理          | 文件怎么存到用户的电脑上           |
 | `apps/desktop/src-tauri` | 窗口、托盘、生命周期、会话、后台任务、传输记录、日程名单、通知、设置与具名命令                                                               | 把规则再写一遍                     |
 | `apps/mcp`               | 给助手用的入口 `assemble-mcp`：标准输入输出上的 MCP 服务端、十个日程与提醒的工具、以一台设备的身份登录、给助手看的名单与说法                 | 理解与排程（不含模型）、文件、窗口 |
 
@@ -50,7 +50,7 @@
 
 ### 启动与配置
 
-没有配置文件，全部来自环境变量（前缀 `ASSEMBLE_`）。没有配置文件、必须显式给出数据目录与对外地址，是因为猜错它们的后果比启动失败更糟。
+没有配置文件，全部来自环境变量（业务配置用 `ASSEMBLE_`，邮件与 OAuth 使用 `SMTP_*`、`GITHUB_*`）。没有配置文件、必须显式给出数据目录与对外地址，是因为猜错它们的后果比启动失败更糟。
 
 | 环境变量                     | 说明                                           | 默认             |
 | ---------------------------- | ---------------------------------------------- | ---------------- |
@@ -61,9 +61,16 @@
 | `ASSEMBLE_SEND_TTL_HOURS`    | 未送达的发送保留多久                           | 24 小时          |
 | `ASSEMBLE_SEND_HISTORY_DAYS` | 发送记录保留多久                               | 30 天            |
 | `ASSEMBLE_WEB_SESSION_HOURS` | 网页登录状态保留多久                           | 12 小时          |
-| `ASSEMBLE_INVITE_CODE`       | 邀请码：填了才开放网页注册                     | 不填即不开放     |
 
-命令行有 `serve`、`check-config`（只读取配置并连接数据库，报告后退出；最后几行是账户数与网页注册开着没有）、`create-account`（密码从终端读两遍，永不当参数传入；网页上的注册要邀请码，这里不用）、`set-password`（给一个已有账户换密码，忘了密码时用）和 `list-accounts`（每行一个用户名；有哪些账户只能从这里看）。
+命令行有 `serve`、`check-config`（只读取配置并连接数据库，报告后退出；最后几行是账户数与网页注册开着没有）、`create-account`（密码从终端读两遍，永不当参数传入；建立待绑定的旧式账户，不能用用户名从普通登录页登录）、`set-password`（给一个已有账户换密码，忘了密码时用）和 `list-accounts`（每行一个用户名；有哪些账户只能从这里看）。
+
+### 邮箱、GitHub 与头像
+
+账户规则见[决策 0005](decisions/0005-public-email-accounts-and-github.md)。新增 `email_identity` 负责邮箱归一化、数据库限流与凭据原子消费，`identity_web` 适配浏览器表单，`mail` 通过 Rust SMTP 发信，`github` 核对稳定的外部身份。邮箱和密码在网页验证后使用；桌面端只接收公开邮箱和头像，不接触 SMTP 或 OAuth 凭据。
+
+`0003_email_identity.sql` 为旧账户增加邮箱与头像，新增 `github_identities`、`email_actions`、`email_rate_limits`；不改已有迁移。旧账号保留原 id，通过原密码和邮件验证补绑邮箱。邮箱匹配不能自动合并 GitHub 账户。更换主邮箱需先后确认原、新邮箱，密码找回后撤销网页登录状态；设备凭据保留。
+
+公开网页还包括 `/web/forgot`、`/web/legacy`、`/web/verify`、`/web/github/start`、`/web/github/callback`、`/web/github/profile`；账户页提供 `/web/account/email`、`/web/account/github`。验证表单使用 POST 和成对 CSRF，邮件凭据只有摘要落库；GET 不消费凭据。SMTP/OAuth 配置、限额与代理日志要求见[账户配置手册](runbooks/email-and-github.md)。
 
 ### 部署
 
@@ -82,19 +89,19 @@
 
 ### 接口
 
-| 分组       | 接口                                                                                                                                           | 说明                                                                                                                      |
-| ---------- | ---------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
-| 公开       | `GET /healthz`、`GET /readyz`                                                                                                                  | 探活                                                                                                                      |
-| 网页       | `GET`、`POST /web/login`、`GET`、`POST /web/register`、`GET /web/account`、`POST /web/account/password`、`POST /web/logout`                    | 系统浏览器里的登录页、注册页、账户页。服务端渲染，没有脚本。注册页只在配了邀请码时存在                                    |
-| 桌面登录   | `GET /desktop/authorize`、`POST /v1/auth/desktop/exchange`                                                                                     | 确认页把单次授权码经回环地址交回桌面端或助手入口；换码时完成设备注册                                                      |
-| 账户与设备 | `GET /v1/me`、`POST /v1/auth/logout`、`GET /v1/devices`、`PATCH /v1/devices/{id}`、`DELETE /v1/devices/{id}`                                   | 设备令牌只存摘要，可以在任意设备上远程撤销                                                                                |
-| 事件流     | `GET /v1/events`                                                                                                                               | SSE。持有这条连接就是"在线"                                                                                               |
-| 发送到设备 | `POST /v1/sends`、`GET /v1/sends`、`GET /v1/sends/{id}/content`、`POST /v1/sends/{id}/accept`、`…/decline`、`…/cancel`、`…/failed`             | 正文是文件的字节。只能发给同账户的在线设备                                                                                |
-| 云盘       | `POST /v1/drive/files`、`GET /v1/drive/files`、`GET /v1/drive/files/{id}/content`、`PATCH /v1/drive/files/{id}`、`DELETE /v1/drive/files/{id}` | 取内容支持分段                                                                                                            |
-| 日程       | `GET /v1/planner`                                                                                                                              | 整份名单：还在进行中的日程与提醒、还没读的通知。任何一处改动都经事件流再推一份                                            |
-| 日程       | `POST /v1/schedules`、`PUT /v1/schedules/{id}`、`DELETE /v1/schedules/{id}`、`POST /v1/schedules/{id}/complete`、`…/cancel`、`…/reopen`        | 新建可以带 `Idempotency-Key`，同一个键重试拿回原来那一条。修改、删除、改状态都带版本号，对不上返回 409 `VERSION_CONFLICT` |
-| 提醒       | `POST /v1/reminders`、`PUT /v1/reminders/{id}`、`DELETE /v1/reminders/{id}`、`POST /v1/reminders/{id}/dismiss`、`…/cancel`                     | 幂等键与版本号同日程。已经到点的不能再改，返回 409 `INVALID_STATE`                                                        |
-| 通知       | `POST /v1/notifications/read`、`POST /v1/notifications/read-all`                                                                               | 只标成已读，不删除                                                                                                        |
+| 分组       | 接口                                                                                                                                           | 说明                                                                                                                                                                                                       |
+| ---------- | ---------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 公开       | `GET /healthz`、`GET /readyz`                                                                                                                  | 探活                                                                                                                                                                                                       |
+| 网页       | `GET`、`POST /web/login`、`GET`、`POST /web/register`、`GET /web/account`、`POST /web/account/password`、`POST /web/logout`                    | 系统浏览器里的登录页、注册页、账户页。服务端渲染；验证页仅用本站脚本把 URL 片段中的凭据填进 POST 表单并清除片段。公开注册，无邀请码；规则见[决策 0005](decisions/0005-public-email-accounts-and-github.md) |
+| 桌面登录   | `GET /desktop/authorize`、`POST /v1/auth/desktop/exchange`                                                                                     | 确认页把单次授权码经回环地址交回桌面端或助手入口；换码时完成设备注册                                                                                                                                       |
+| 账户与设备 | `GET /v1/me`、`POST /v1/auth/logout`、`GET /v1/devices`、`PATCH /v1/devices/{id}`、`DELETE /v1/devices/{id}`                                   | 设备令牌只存摘要，可以在任意设备上远程撤销                                                                                                                                                                 |
+| 事件流     | `GET /v1/events`                                                                                                                               | SSE。持有这条连接就是"在线"                                                                                                                                                                                |
+| 发送到设备 | `POST /v1/sends`、`GET /v1/sends`、`GET /v1/sends/{id}/content`、`POST /v1/sends/{id}/accept`、`…/decline`、`…/cancel`、`…/failed`             | 正文是文件的字节。只能发给同账户的在线设备                                                                                                                                                                 |
+| 云盘       | `POST /v1/drive/files`、`GET /v1/drive/files`、`GET /v1/drive/files/{id}/content`、`PATCH /v1/drive/files/{id}`、`DELETE /v1/drive/files/{id}` | 取内容支持分段                                                                                                                                                                                             |
+| 日程       | `GET /v1/planner`                                                                                                                              | 整份名单：还在进行中的日程与提醒、还没读的通知。任何一处改动都经事件流再推一份                                                                                                                             |
+| 日程       | `POST /v1/schedules`、`PUT /v1/schedules/{id}`、`DELETE /v1/schedules/{id}`、`POST /v1/schedules/{id}/complete`、`…/cancel`、`…/reopen`        | 新建可以带 `Idempotency-Key`，同一个键重试拿回原来那一条。修改、删除、改状态都带版本号，对不上返回 409 `VERSION_CONFLICT`                                                                                  |
+| 提醒       | `POST /v1/reminders`、`PUT /v1/reminders/{id}`、`DELETE /v1/reminders/{id}`、`POST /v1/reminders/{id}/dismiss`、`…/cancel`                     | 幂等键与版本号同日程。已经到点的不能再改，返回 409 `INVALID_STATE`                                                                                                                                         |
+| 通知       | `POST /v1/notifications/read`、`POST /v1/notifications/read-all`                                                                               | 只标成已读，不删除                                                                                                                                                                                         |
 
 ### 几条规则怎么落地
 
@@ -252,7 +259,7 @@ target/release/assemble-mcp print-config zcode --name "ZCode 的助手"
 - **命令。** 界面能调用的只有这 42 个：`snapshot`、`sign_in`、`cancel_sign_in`、`sign_out`、`launch_at_login`、`set_launch_at_login`、`rename_device`、`remove_device`、`choose_receive_folder`、`reset_receive_folder`、`reveal_received`、`start_send`、`send_to_device`、`send_to_drive`、`close_send_panel`、`open_main`、`cancel_transfer`、`retry_transfer`、`drive_refresh`、`drive_upload`、`drive_download`、`drive_delete`、`set_send_menu`、`dismiss_notice`、`planner_refresh`、`schedule_create`、`schedule_update`、`schedule_complete`、`schedule_cancel`、`schedule_reopen`、`schedule_delete`、`reminder_create`、`reminder_update`、`reminder_dismiss`、`reminder_cancel`、`reminder_delete`、`notifications_read`、`notifications_read_all`、`planner_focus`、`planner_compose`、`set_planner_muted`。命令失败只返回稳定错误码。
 - **标识，不是操作路径。** 界面引用一条传输、一个云盘文件、一台设备、一条日程、一条提醒、一条通知，用的都是标识。文件的位置由系统选择器、右键菜单或拖放直接交给 Rust；唯一的显示例外是 Windows 的接收目录文字，不能把它传回作为文件操作参数。
 - **助手。** `assemble-mcp` 只有上面那十个具名工具，全部围着日程、提醒与通知；没有文件、云盘，也没有"随便调一个接口"的工具。新增能力时在 `apps/mcp` 里加工具并补测试。它不碰窗口，也不接收文件路径。
-- **凭据。** 设备令牌存在系统钥匙串里，条目名按服务来源区分；助手的登录是另一条条目，账号位是助手的名字，不会顶掉桌面应用的。令牌、Cookie、密码与邀请码不进界面、日志、命令返回值与状态（邀请码在配置里只留摘要）；写操作的网页表单都要来自本站，并带着与 Cookie 或会话成对的随机值；`assemble-mcp status` 与工具的返回值里都不出现令牌，它的标准输出上只有协议消息，日志一律写标准错误。
+- **凭据。** 设备令牌存在系统钥匙串里，条目名按服务来源区分；助手的登录是另一条条目，账号位是助手的名字，不会顶掉桌面应用的。令牌、Cookie、密码、SMTP 授权码与 OAuth Secret 不进桌面界面、日志、命令返回值与状态；邮件凭据只存摘要，密钥只在受保护环境或文件中；写操作的网页表单都要来自本站，并带着与 Cookie 或会话成对的随机值；`assemble-mcp status` 与工具的返回值里都不出现令牌，它的标准输出上只有协议消息，日志一律写标准错误。
 - **联网。** 客户端只访问构建时确定的那个来源，不跟随重定向；标识符与路径在拼进请求之前先校验。
 - **文件。** 接收目录只能来自默认位置或系统选择器，必须是真实的目录、不能是整块磁盘；文件名来自网络，收敛成单个在 Windows 上也合法的名字。发布之前再确认一次接收目录还是原来那个——下载途中目录被删、被换成链接，文件都不会落到别处。收到的内容按声明的长度与摘要核对，对不上就不出现。通知与"在文件夹中显示"只选中文件，不打开它。
 

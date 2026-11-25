@@ -11,7 +11,7 @@ use std::time::Instant;
 
 use assemble_store::secret::SecretString;
 use axum::extract::{Form, State};
-use axum::http::{HeaderMap, StatusCode, Uri};
+use axum::http::{HeaderMap, HeaderValue, StatusCode, Uri, header};
 use axum::response::{IntoResponse, Redirect, Response};
 use axum::routing::get;
 use axum_extra::extract::CookieJar;
@@ -21,9 +21,8 @@ use subtle::ConstantTimeEq;
 use crate::accounts::{self, ChangePasswordError, PasswordRule};
 use crate::audit::{self, actions};
 use crate::auth::{is_same_origin, web_session};
-use crate::desktop_login::account_label;
 use crate::http::Shared;
-use crate::templates;
+use crate::identity_templates as templates;
 use crate::web::{TOO_MANY_ATTEMPTS, WINDOW, page, refused, retry_after, to_login, unavailable};
 
 pub const ACCOUNT_PATH: &str = "/web/account";
@@ -35,7 +34,7 @@ const CHANGED_QUERY: &str = "changed=1";
 const WRONG_CURRENT: &str = "现在的密码不对。";
 const MISMATCH: &str = "两次输入的新密码不一致。";
 
-#[derive(Debug, Deserialize)]
+#[derive(Deserialize)]
 pub struct PasswordForm {
     current: String,
     #[serde(default)]
@@ -60,15 +59,41 @@ pub async fn account_form(State(state): State<Shared>, jar: CookieJar, uri: Uri)
     let Some(session) = web_session(&state.pool, &jar).await else {
         return to_login(Some(ACCOUNT_PATH));
     };
-    page(
+    let Ok(Some(account)) = accounts::find_by_id(&state.pool, &session.account_id).await else {
+        return unavailable();
+    };
+    let github = github_login(&state, &session.account_id).await;
+    account_response(
         StatusCode::OK,
         templates::account_page(
-            &account_label(&session),
+            &account,
+            &session,
+            github.as_deref(),
+            state.config.github.is_some(),
             None,
             uri.query() == Some(CHANGED_QUERY),
-            &session.csrf_token,
         ),
     )
+}
+
+fn account_response(status: StatusCode, body: String) -> Response {
+    let mut response = page(status, body);
+    let policy = crate::templates::account_content_security_policy();
+    if let Ok(value) = HeaderValue::from_str(&policy) {
+        response
+            .headers_mut()
+            .insert(header::CONTENT_SECURITY_POLICY, value);
+    }
+    response
+}
+
+async fn github_login(state: &Shared, account_id: &str) -> Option<String> {
+    sqlx::query_scalar("SELECT login FROM github_identities WHERE account_id = ?")
+        .bind(account_id)
+        .fetch_optional(&state.pool)
+        .await
+        .ok()
+        .flatten()
 }
 
 fn password_words(rule: PasswordRule) -> String {
@@ -96,21 +121,30 @@ pub async fn password_submit(
     if !paired {
         return refused("页面可能已经过期，请回到账户页重新操作。");
     }
+    let Ok(Some(account)) = accounts::find_by_id(&state.pool, &session.account_id).await else {
+        return unavailable();
+    };
+    let github = github_login(&state, &session.account_id).await;
     let shown = |error: Option<&str>, status: StatusCode, changed: bool| {
-        page(
+        account_response(
             status,
             templates::account_page(
-                &account_label(&session),
+                &account,
+                &session,
+                github.as_deref(),
+                state.config.github.is_some(),
                 error,
                 changed,
-                &session.csrf_token,
             ),
         )
     };
 
-    // 现在的密码连错太多次：和登录失败记在一起，按键名就是这个账户的用户名。
+    // 现在的密码连错太多次：和登录失败记在一起，键是这个账户的已验证邮箱（旧会话回退到用户名）。
     let now = Instant::now();
-    if state.throttle.is_blocked(&session.username, now) {
+    if state
+        .throttle
+        .is_blocked(account.email.as_deref().unwrap_or(&session.username), now)
+    {
         return retry_after(
             shown(
                 Some(TOO_MANY_ATTEMPTS),
@@ -129,7 +163,9 @@ pub async fn password_submit(
     match accounts::change_password(&state.pool, &session.account_id, current, new).await {
         Ok(()) => {}
         Err(ChangePasswordError::WrongCurrent) => {
-            state.throttle.record_failure(&session.username, now);
+            state
+                .throttle
+                .record_failure(account.email.as_deref().unwrap_or(&session.username), now);
             audit::record(
                 &state.pool,
                 Some(&session.account_id),

@@ -3,6 +3,7 @@
 
 import type { Bridge, BridgeError, UnlistenFn } from "@/lib/bridge";
 import type {
+  AccountView,
   DeviceView,
   DriveView,
   LaunchState,
@@ -14,10 +15,12 @@ import type {
   TransferView,
 } from "@/lib/types";
 
-export const ACCOUNT = {
+export const ACCOUNT: AccountView = {
   id: "account-1",
   username: "example",
   displayName: "Example",
+  email: null,
+  avatarUrl: null,
 };
 
 /** 这台电脑自己。 */

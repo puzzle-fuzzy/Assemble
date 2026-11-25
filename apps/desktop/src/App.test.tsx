@@ -213,6 +213,18 @@ describe("账户", () => {
     expect(text(view.host)).not.toContain("（example）");
   });
 
+  test("账户显示已验证邮箱与默认头像", async () => {
+    const source = new FakeBridge(snapshot({ phase: "signedIn" }));
+    source.current = {
+      ...source.current,
+      session: signedIn({ ...ACCOUNT, email: "user@example.test" }),
+    };
+    const view = await render(<App bridge={source} />);
+    await settle();
+    expect(text(view.host)).toContain("Example（user@example.test）");
+    expect(view.host.querySelector('[aria-label="默认头像"]')).not.toBeNull();
+  });
+
   test("已登录时显示这台设备在账户里的名字", async () => {
     const source = new FakeBridge(snapshot({ phase: "signedIn" }));
     const view = await render(<App bridge={source} />);

@@ -82,7 +82,7 @@ async fn login_rejects_cross_site_requests_forged_forms_and_wrong_passwords() {
             .http
             .post(format!("{}/web/login", browser.origin))
             .form(&[
-                ("username", USERNAME),
+                ("email", EMAIL),
                 ("password", PASSWORD),
                 ("next", ""),
                 ("csrf", csrf.as_str()),
@@ -98,7 +98,7 @@ async fn login_rejects_cross_site_requests_forged_forms_and_wrong_passwords() {
             .post(format!("{}/web/login", browser.origin))
             .header("origin", "https://evil.example")
             .form(&[
-                ("username", USERNAME),
+                ("email", EMAIL),
                 ("password", PASSWORD),
                 ("next", ""),
                 ("csrf", csrf.as_str()),
@@ -124,7 +124,7 @@ async fn login_rejects_cross_site_requests_forged_forms_and_wrong_passwords() {
     // 密码错：回答里只有一句固定的话，不说是用户名错了还是密码错了。
     let wrong = try_login(browser, USERNAME, "not-the-password", "").await;
     assert_eq!(wrong.status, StatusCode::UNAUTHORIZED);
-    assert!(wrong.html.contains("用户名或密码不对"));
+    assert!(wrong.html.contains("邮箱或密码不对"));
     assert!(!wrong.html.contains("not-the-password"));
     assert!(
         !wrong
@@ -183,6 +183,7 @@ async fn too_many_failures_lock_a_username_out_for_a_while() {
     )
     .await
     .unwrap();
+    sqlx::query("UPDATE accounts SET email = 'sam@example.test', email_verified_at = 1 WHERE username = 'sam'").execute(&fixture.server.state.pool).await.unwrap();
     let sam = try_login(&fixture.browser, "sam", PASSWORD, "").await;
     assert!(
         sam.html.contains("已登录"),
@@ -339,7 +340,7 @@ async fn the_authorize_page_needs_a_login_and_names_the_device() {
         "the device name"
     );
     assert!(page.html.contains("（Windows）"));
-    assert!(page.html.contains("Alex Wang（alex）"));
+    assert!(page.html.contains("Alex Wang（alex@example.test）"));
     assert!(page.html.contains("name=\"choice\" value=\"allow\""));
     assert!(page.html.contains("name=\"choice\" value=\"deny\""));
     assert_eq!(page.headers.get("cache-control").unwrap(), "no-store");

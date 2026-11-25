@@ -56,7 +56,9 @@
       "account": {
         "id": "3d1c0a5e-6cf4-4d3a-9a67-1f2f4c1f6f01",
         "username": "example",
-        "displayName": "Example"
+        "displayName": "Example",
+        "email": "example@example.test",
+        "avatarUrl": "https://avatars.githubusercontent.com/u/123?s=96"
       },
       "device": {
         "id": "9b2e7c4d1a5f4e3b8c6d0a1b2c3d4e5f",
@@ -247,7 +249,9 @@
       "account": {
         "id": "account-1",
         "username": "example",
-        "displayName": "Example"
+        "displayName": "Example",
+        "email": null,
+        "avatarUrl": null
       },
       "device": {
         "id": "c1d2e3f4a5b64c7d8e9f0a1b2c3d4e5f",
@@ -300,7 +304,9 @@
       "account": {
         "id": "3d1c0a5e-6cf4-4d3a-9a67-1f2f4c1f6f01",
         "username": "example",
-        "displayName": "Example"
+        "displayName": "Example",
+        "email": null,
+        "avatarUrl": null
       },
       "device": {
         "id": "9b2e7c4d1a5f4e3b8c6d0a1b2c3d4e5f",
@@ -439,7 +445,9 @@
       "account": {
         "id": "3d1c0a5e-6cf4-4d3a-9a67-1f2f4c1f6f01",
         "username": "example",
-        "displayName": "Example"
+        "displayName": "Example",
+        "email": null,
+        "avatarUrl": null
       },
       "device": {
         "id": "9b2e7c4d1a5f4e3b8c6d0a1b2c3d4e5f",
@@ -657,7 +665,9 @@
       "account": {
         "id": "3d1c0a5e-6cf4-4d3a-9a67-1f2f4c1f6f01",
         "username": "example",
-        "displayName": "Example"
+        "displayName": "Example",
+        "email": null,
+        "avatarUrl": null
       },
       "device": {
         "id": "9b2e7c4d1a5f4e3b8c6d0a1b2c3d4e5f",
@@ -724,7 +734,9 @@
       "account": {
         "id": "3d1c0a5e-6cf4-4d3a-9a67-1f2f4c1f6f01",
         "username": "example",
-        "displayName": "Example"
+        "displayName": "Example",
+        "email": null,
+        "avatarUrl": null
       },
       "device": {
         "id": "9b2e7c4d1a5f4e3b8c6d0a1b2c3d4e5f",
@@ -809,7 +821,9 @@
       "account": {
         "id": "3d1c0a5e-6cf4-4d3a-9a67-1f2f4c1f6f01",
         "username": "example",
-        "displayName": "Example"
+        "displayName": "Example",
+        "email": null,
+        "avatarUrl": null
       },
       "device": {
         "id": "9b2e7c4d1a5f4e3b8c6d0a1b2c3d4e5f",
@@ -1030,7 +1044,9 @@
       "account": {
         "id": "3d1c0a5e-6cf4-4d3a-9a67-1f2f4c1f6f01",
         "username": "example",
-        "displayName": "Example"
+        "displayName": "Example",
+        "email": null,
+        "avatarUrl": null
       },
       "device": {
         "id": "9b2e7c4d1a5f4e3b8c6d0a1b2c3d4e5f",
@@ -1261,7 +1277,9 @@
       "account": {
         "id": "3d1c0a5e-6cf4-4d3a-9a67-1f2f4c1f6f01",
         "username": "example",
-        "displayName": "Example"
+        "displayName": "Example",
+        "email": null,
+        "avatarUrl": null
       },
       "device": {
         "id": "9b2e7c4d1a5f4e3b8c6d0a1b2c3d4e5f",

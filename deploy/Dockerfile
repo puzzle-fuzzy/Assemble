@@ -25,7 +25,11 @@ RUN --mount=type=cache,target=/target \
 
 # ---- 运行：只带着可执行文件，用一个没有登录壳的专用账户跑 ----
 FROM debian:bookworm-slim
-RUN useradd --system --uid 10001 --home-dir /var/lib/assemble --shell /usr/sbin/nologin assemble \
+# GitHub HTTPS 与 SMTP TLS 需要系统信任根；不能为了缺证书而关闭验证。
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates \
+    && rm -rf /var/lib/apt/lists/* \
+    && useradd --system --uid 10001 --home-dir /var/lib/assemble --shell /usr/sbin/nologin assemble \
     && mkdir -p /var/lib/assemble \
     && chown assemble:assemble /var/lib/assemble
 COPY --from=build /out/assemble-server /usr/local/bin/assemble-server

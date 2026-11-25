@@ -11,8 +11,6 @@ use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD as BASE64;
 use sha2::{Digest, Sha256};
 
-use crate::accounts::PASSWORD_MIN_CHARS;
-
 const STYLE: &str = r#":root{color-scheme:light dark;font:16px/1.6 system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif}
 body{margin:0;min-height:100vh;display:grid;place-items:center;background:light-dark(#f6f6f7,#141416);color:light-dark(#1b1b1f,#ededf0)}
 main{box-sizing:border-box;width:min(26rem,calc(100vw - 2rem));padding:1.75rem;border:1px solid light-dark(#dcdce1,#2c2c33);border-radius:14px;background:light-dark(#fff,#1c1c21)}
@@ -24,6 +22,8 @@ label{display:block;margin:.9rem 0 0;font-size:.875rem}
 input:not([type=hidden]){display:block;box-sizing:border-box;width:100%;margin-top:.3rem;padding:.55rem .7rem;border:1px solid light-dark(#b9b9c2,#46464f);border-radius:8px;background:light-dark(#fff,#141416);color:inherit;font:inherit}
 button{margin:1.25rem .6rem 0 0;padding:.55rem 1.1rem;border:0;border-radius:8px;background:light-dark(#1f5fd0,#5b8ff5);color:#fff;font:inherit;cursor:pointer}
 button.secondary{background:light-dark(#e8e8ec,#2c2c33);color:inherit}
+.avatar{display:inline-grid;place-items:center;width:48px;height:48px;border-radius:50%;object-fit:cover;background:light-dark(#e8e8ec,#2c2c33);font-size:1.25rem}
+h2{font-size:1rem;margin:1.5rem 0 .5rem}
 a{color:light-dark(#1f5fd0,#5b8ff5)}"#;
 
 /// 一份内容安全策略：什么都不加载，样式只认上面那一段的哈希，不许嵌进别的页面；
@@ -31,7 +31,7 @@ a{color:light-dark(#1f5fd0,#5b8ff5)}"#;
 fn policy(form_action: &str) -> String {
     let digest = BASE64.encode(Sha256::digest(STYLE.as_bytes()));
     format!(
-        "default-src 'none'; style-src 'sha256-{digest}'; {form_action}; base-uri 'none'; frame-ancestors 'none'"
+        "default-src 'none'; style-src 'sha256-{digest}'; {form_action}; base-uri 'none'; frame-ancestors 'none'; img-src https://avatars.githubusercontent.com"
     )
 }
 
@@ -40,6 +40,11 @@ static POLICY: LazyLock<String> = LazyLock::new(|| policy("form-action 'self'"))
 
 pub fn content_security_policy() -> &'static str {
     &POLICY
+}
+
+/// 账户绑定表单会跳到 GitHub 授权页，额外只允许这个固定来源。
+pub fn account_content_security_policy() -> String {
+    policy("form-action 'self' https://github.com")
 }
 
 /// 授权确认页的那一份：表单除了提交到本站，提交之后还要能被送回 `callback_origin`
@@ -86,7 +91,7 @@ pub fn escape(value: &str) -> Cow<'_, str> {
     }
 }
 
-fn page(title: &str, body: &str) -> String {
+pub(crate) fn page(title: &str, body: &str) -> String {
     format!(
         "<!doctype html><html lang=\"zh-CN\"><head><meta charset=\"utf-8\">\
 <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\
@@ -107,7 +112,7 @@ pub fn message_page(title: &str, body: &str) -> String {
 }
 
 /// 一条去另一个页面的链接，把"之后要回来"的参数原样带上。
-fn carry_next(link: &str, next: &str) -> String {
+pub(crate) fn carry_next(link: &str, next: &str) -> String {
     if next.is_empty() {
         link.to_owned()
     } else {
@@ -118,99 +123,33 @@ fn carry_next(link: &str, next: &str) -> String {
     }
 }
 
-fn alert(error: Option<&str>) -> String {
+pub(crate) fn alert(error: Option<&str>) -> String {
     match error {
         Some(error) => format!("<p class=\"error\" role=\"alert\">{}</p>", escape(error)),
         None => String::new(),
     }
 }
 
-/// 登录页。`error` 是上一回失败的原因；`next` 是登录之后要去的地方；
-/// 配了邀请码（`registration_open`）才有"注册"的入口。
-pub fn login_page(error: Option<&str>, next: &str, csrf: &str, registration_open: bool) -> String {
-    let register = registration_open.then(|| {
+/// 邮箱登录始终提供公开注册；GitHub 入口只在凭据配置完整后显示。
+pub fn login_page(error: Option<&str>, next: &str, csrf: &str, github_enabled: bool) -> String {
+    let github = if github_enabled {
         format!(
-            "<p class=\"hint\">还没有账户？<a href=\"{}\">注册</a></p>\n",
-            escape(&carry_next("/web/register", next))
+            "<p><a href=\"{}\">使用 GitHub 登录</a></p>",
+            escape(&carry_next("/web/github/start", next))
         )
-    });
+    } else {
+        String::new()
+    };
     page(
         "登录 · Assemble",
         &format!(
-            "<h1>登录 Assemble</h1>{}\
-<form method=\"post\" action=\"/web/login\">\
-<input type=\"hidden\" name=\"csrf\" value=\"{}\">\
-<input type=\"hidden\" name=\"next\" value=\"{}\">\
-<label>用户名<input name=\"username\" autocomplete=\"username\" autocapitalize=\"none\" spellcheck=\"false\" maxlength=\"64\" required></label>\
-<label>密码<input type=\"password\" name=\"password\" autocomplete=\"current-password\" maxlength=\"1024\" required></label>\
-<button type=\"submit\">登录</button></form>\
-{}",
+            "<h1>登录 Assemble</h1>{}<form method=\"post\" action=\"/web/login\"><input type=\"hidden\" name=\"csrf\" value=\"{}\"><input type=\"hidden\" name=\"next\" value=\"{}\"><label for=\"email\">邮箱</label><input id=\"email\" type=\"email\" name=\"email\" autocomplete=\"username\" spellcheck=\"false\" maxlength=\"254\" required><label for=\"password\">密码</label><input id=\"password\" type=\"password\" name=\"password\" autocomplete=\"current-password\" maxlength=\"1024\" required><button type=\"submit\">登录</button></form>{}<p><a href=\"{}\">注册账户</a> · <a href=\"/web/forgot\">忘记密码</a></p><p class=\"hint\">原来使用用户名登录？<a href=\"{}\">为旧账户绑定邮箱</a></p>",
             alert(error),
             escape(csrf),
             escape(next),
-            register.unwrap_or_default()
-        ),
-    )
-}
-
-/// 注册页。`error` 是上一回失败的原因；用户名与显示名照着上一回填的摆回去，
-/// 密码与邀请码不摆回去。
-pub fn register_page(
-    error: Option<&str>,
-    next: &str,
-    csrf: &str,
-    username: &str,
-    display_name: &str,
-) -> String {
-    page(
-        "注册 · Assemble",
-        &format!(
-            "<h1>注册 Assemble</h1>{}\
-<form method=\"post\" action=\"/web/register\">\
-<input type=\"hidden\" name=\"csrf\" value=\"{}\">\
-<input type=\"hidden\" name=\"next\" value=\"{}\">\
-<label>用户名<input name=\"username\" value=\"{}\" autocomplete=\"username\" autocapitalize=\"none\" spellcheck=\"false\" maxlength=\"64\" required></label>\
-<label>显示名（可以不填）<input name=\"display_name\" value=\"{}\" autocomplete=\"nickname\" maxlength=\"60\"></label>\
-<label>密码（至少 {PASSWORD_MIN_CHARS} 个字符）<input type=\"password\" name=\"password\" autocomplete=\"new-password\" maxlength=\"1024\" required></label>\
-<label>再输一次密码<input type=\"password\" name=\"password2\" autocomplete=\"new-password\" maxlength=\"1024\" required></label>\
-<label>邀请码<input name=\"invite\" autocomplete=\"off\" spellcheck=\"false\" maxlength=\"128\" required></label>\
-<button type=\"submit\">注册</button></form>\
-<p class=\"hint\">已有账户？<a href=\"{}\">登录</a></p>",
-            alert(error),
-            escape(csrf),
-            escape(next),
-            escape(username),
-            escape(display_name),
-            escape(&carry_next("/web/login", next))
-        ),
-    )
-}
-
-/// 已登录的账户页：改密码、退出登录。`error` 是上一回改密码失败的原因；
-/// `changed` 说明上一回改成功了。
-pub fn account_page(account: &str, error: Option<&str>, changed: bool, csrf: &str) -> String {
-    let success = if changed {
-        "<p role=\"status\">密码已改好。别处的登录状态已退出；电脑与助手上的 Assemble 不受影响。</p>\n"
-    } else {
-        ""
-    };
-    page(
-        "账户 · Assemble",
-        &format!(
-            "<h1>账户</h1>\
-<p>当前登录：<strong>{}</strong></p>{}{}\
-<form method=\"post\" action=\"/web/account/password\">\
-<input type=\"hidden\" name=\"csrf\" value=\"{}\">\
-<label>现在的密码<input type=\"password\" name=\"current\" autocomplete=\"current-password\" maxlength=\"1024\" required></label>\
-<label>新密码（至少 {PASSWORD_MIN_CHARS} 个字符）<input type=\"password\" name=\"password\" autocomplete=\"new-password\" maxlength=\"1024\" required></label>\
-<label>再输一次新密码<input type=\"password\" name=\"password2\" autocomplete=\"new-password\" maxlength=\"1024\" required></label>\
-<button type=\"submit\">改密码</button></form>\
-<p class=\"hint\">电脑与助手上的 Assemble 用的是各自的登录凭据，改密码不会让它们下线。</p>\
-<form method=\"post\" action=\"/web/logout\"><button type=\"submit\" class=\"secondary\">退出登录</button></form>",
-            escape(account),
-            alert(error),
-            success,
-            escape(csrf),
+            github,
+            escape(&carry_next("/web/register", next)),
+            escape(&carry_next("/web/legacy", next))
         ),
     )
 }
@@ -273,86 +212,16 @@ mod tests {
     }
 
     #[test]
-    fn the_login_page_carries_its_hidden_fields_and_no_scripts() {
-        let html = login_page(
-            Some("用户名或密码不对"),
-            "/desktop/authorize?request=abc",
-            "csrf-value",
-            false,
-        );
-        assert!(html.contains("<title>登录 · Assemble</title>"));
-        assert!(html.contains("action=\"/web/login\""));
+    fn login_uses_email_and_registration_is_always_visible() {
+        let html = login_page(None, "/desktop/authorize?request=abc", "csrf-value", false);
+        assert!(html.contains("type=\"email\" name=\"email\" autocomplete=\"username\""));
         assert!(html.contains("name=\"csrf\" value=\"csrf-value\""));
-        assert!(html.contains("name=\"next\" value=\"/desktop/authorize?request=abc\""));
-        assert!(html.contains("用户名或密码不对"));
+        assert!(html.contains("/web/register?next=%2Fdesktop%2Fauthorize%3Frequest%3Dabc"));
+        assert!(html.contains("/web/forgot"));
+        assert!(html.contains("/web/legacy"));
+        assert!(!html.contains("/web/github/start"));
+        assert!(login_page(None, "", "c", true).contains("/web/github/start"));
         assert!(!html.contains("<script"));
-        assert!(!html.contains("onclick"));
-        // 来源策略不能是 no-referrer：浏览器在那种策略下会把同源 POST 的 Origin 发成 null。
-        assert!(html.contains(r#"<meta name="referrer" content="same-origin">"#));
-        assert!(!html.contains("no-referrer"));
-        assert!(message_page("t", "b").contains("same-origin"));
-        let clean = login_page(None, "", "c", false);
-        assert!(!clean.contains("role=\"alert\""));
-        // 没配邀请码就没有注册的入口；配了才有，并且把"之后要回去"的参数带上。
-        assert!(!html.contains("/web/register"));
-        let open = login_page(None, "/desktop/authorize?request=abc", "c", true);
-        assert!(
-            open.contains("href=\"/web/register?next=%2Fdesktop%2Fauthorize%3Frequest%3Dabc\"")
-        );
-        assert!(login_page(None, "", "c", true).contains("href=\"/web/register\""));
-    }
-
-    #[test]
-    fn the_register_page_keeps_what_was_typed_except_the_secrets() {
-        let html = register_page(
-            Some("邀请码不对"),
-            "/desktop/authorize?request=abc",
-            "csrf-value",
-            "alex\"><script>x</script>",
-            "Alex",
-        );
-        assert!(html.contains("<title>注册 · Assemble</title>"));
-        assert!(html.contains("action=\"/web/register\""));
-        assert!(html.contains("name=\"csrf\" value=\"csrf-value\""));
-        assert!(html.contains("name=\"next\" value=\"/desktop/authorize?request=abc\""));
-        // 用户名原样摆回去，并且转义过；页面里没有脚本。
-        assert!(
-            html.contains(
-                "name=\"username\" value=\"alex&quot;&gt;&lt;script&gt;x&lt;/script&gt;\""
-            )
-        );
-        assert!(html.contains("name=\"display_name\" value=\"Alex\""));
-        assert!(!html.contains("<script"));
-        // 密码与邀请码的输入框是空的：页面上没有地方摆上一回填的值。
-        assert!(html.contains("name=\"password\" autocomplete=\"new-password\""));
-        assert!(html.contains("name=\"invite\" autocomplete=\"off\""));
-        assert!(!html.contains("type=\"password\" value="));
-        assert!(!html.contains("name=\"invite\" value="));
-        assert!(!html.contains("autocomplete=\"current-password\""));
-        // 两个密码框都让浏览器按"新密码"来填。
-        assert_eq!(html.matches("autocomplete=\"new-password\"").count(), 2);
-        // 回登录的链接带着回去的参数。
-        assert!(html.contains("href=\"/web/login?next=%2Fdesktop%2Fauthorize%3Frequest%3Dabc\""));
-        // 下一跳里的恶意内容出不了隐藏字段。
-        let hostile = register_page(None, "\"><script>x</script>", "c", "", "");
-        assert!(!hostile.contains("<script"));
-    }
-
-    #[test]
-    fn the_account_page_offers_to_change_the_password_and_to_sign_out() {
-        let html = account_page("Alex Wang（alex）", None, false, "csrf-value");
-        assert!(html.contains("<title>账户 · Assemble</title>"));
-        assert!(html.contains("当前登录：<strong>Alex Wang（alex）</strong>"));
-        assert!(html.contains("action=\"/web/account/password\""));
-        assert!(html.contains("name=\"csrf\" value=\"csrf-value\""));
-        assert!(html.contains("name=\"current\" autocomplete=\"current-password\""));
-        assert!(html.contains("action=\"/web/logout\""));
-        assert!(!html.contains("role=\"alert\""));
-        assert!(!html.contains("role=\"status\""));
-        let failed = account_page("alex", Some("现在的密码不对"), true, "c");
-        assert!(failed.contains("role=\"alert\">现在的密码不对"));
-        assert!(failed.contains("role=\"status\">密码已改好"));
-        assert!(!account_page("\"><script>x</script>", None, false, "c\"s").contains("<script"));
     }
 
     #[test]
@@ -372,7 +241,10 @@ mod tests {
         let policy = content_security_policy();
         assert!(policy.starts_with("default-src 'none'; style-src 'sha256-"));
         assert!(policy.contains("form-action 'self'"));
-        assert!(policy.contains("frame-ancestors 'none'"));
+        assert!(
+            policy
+                .contains("frame-ancestors 'none'; img-src https://avatars.githubusercontent.com")
+        );
         assert!(!policy.contains("unsafe-inline"));
         assert!(!policy.contains("script-src"));
         // 哈希确实来自页面里那一段样式。
@@ -405,7 +277,7 @@ mod tests {
             "default-src 'none'",
             "style-src 'sha256-",
             "base-uri 'none'",
-            "frame-ancestors 'none'",
+            "frame-ancestors 'none'; img-src https://avatars.githubusercontent.com",
         ] {
             assert!(policy.contains(kept), "{policy}");
         }

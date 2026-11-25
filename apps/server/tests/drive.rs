@@ -101,6 +101,7 @@ async fn cramped(quota: u64) -> (Fixture, Registered) {
     )
     .await
     .unwrap();
+    sqlx::query("UPDATE accounts SET email = username || '@example.test', email_verified_at = 1 WHERE username = 'alex'").execute(&server.state.pool).await.unwrap();
     let fixture = Fixture {
         dir,
         browser: Browser::new(server.origin.as_str()),

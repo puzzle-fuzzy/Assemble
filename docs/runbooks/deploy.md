@@ -15,6 +15,10 @@
 
 服务端在 Linux 上只依赖 C 库：SQLite 是静态编进去的，钥匙串的依赖只在 macOS 与 Windows 上进入构建。镜像约 120 MB。
 
+## 当前账户与邮件配置
+
+2026-11-25 用户纠正为公开邮箱注册，邀请码限制已经撤销。新代码需配置 SMTP，GitHub 登录另需 OAuth App；配置、旧账户过渡与验收见[账户配置手册](email-and-github.md)。本文后半的既往升级记录保留当时情况，不代表当前注册规则。新增 callback 代理设置与现网有差异，应用前须备份并 `nginx -t`。
+
 ## 第一次部署
 
 1. **域名。** 把域名的解析指到服务器。DNS 要你本人操作，做完之后用公共解析服务确认一下已经生效。
@@ -73,7 +77,7 @@
    ```
 
    注意 `docker compose exec` 后面要带可执行文件的名字：`assemble assemble-server <子命令>`，第一个 `assemble` 是服务名，第二个是程序名。
-7. **建第一个账户。** 密码在终端里输两遍，不回显，也不作为参数传入；这一步由你自己做。之后的账户可以在网页上凭邀请码注册（见下面"日常"里的"邀请码注册"）：
+7. **注册第一个账户。** 配好 SMTP 后由本人在 `/web/register` 注册、收信验证并设置密码。下列运维命令仍保留，但创建的旧式账户需到 `/web/legacy` 验证原密码并绑定邮箱：
 
    ```sh
    ssh -t <服务器> 'cd /opt/assemble && docker compose exec assemble assemble-server create-account <用户名>'
@@ -99,20 +103,9 @@ docker compose exec -T assemble assemble-server list-accounts
 docker compose exec assemble assemble-server set-password <用户名>   # 密码在终端里输两遍
 ```
 
-### 邀请码注册
+### 公开邮箱注册
 
-在 `.env` 的末尾加一行邀请码（不要加引号，前后不要有空格），再让容器重新读一次配置：
-
-```sh
-cd /opt/assemble
-cp -p .env .env.before-invite
-#   ASSEMBLE_INVITE_CODE=<8 到 128 个字符，不能有空白>
-chmod 600 .env
-docker compose up -d
-docker compose exec -T assemble assemble-server check-config   # 最后一行应是"网页注册：开放（要邀请码）"
-```
-
-之后 `https://<域名>/web/register` 就是注册页，登录页上也会多一个"注册"的入口。想换邀请码就改那一行再 `docker compose up -d`；清空它，注册页就没了（已经注册的账户不受影响）。从此 `.env` 里有一份要保管的秘密：服务器上的 root 看得到它，别把这个文件拷到别处。
+任何人可从 `/web/register` 申请邮件；验证后设置密码并建立账户，不再读取 `ASSEMBLE_INVITE_CODE`。SMTP、GitHub、网页找回密码与旧账户绑定步骤见[账户配置手册](email-and-github.md)。
 
 ### 升级
 

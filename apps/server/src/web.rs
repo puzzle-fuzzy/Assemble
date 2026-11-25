@@ -1,15 +1,15 @@
 //! 系统浏览器里的登录页。桌面端从不加载它，也不接触这里提交的密码。
 //!
-//! 流程：打开登录页 → 填用户名和密码 → 服务端核对 → 发一枚只给浏览器用的
+//! 流程：打开登录页 → 填邮箱和密码 → 服务端核对 → 发一枚只给浏览器用的
 //! 会话 Cookie → 跳到原来要去的页面（通常是桌面端的授权确认页）。
-//! 配了邀请码的话，登录页上还有去注册页的入口（[`crate::register`]）；
+//! 登录页始终提供公开注册（[`crate::register`]）与邮件找回密码；
 //! 登录之后的账户页在 [`crate::account`]。
 //!
 //! 三道防线：
 //!
 //! - 写操作必须来自本站（`Origin` 头）；
 //! - 登录表单带一个与 Cookie 成对的随机值，别的站点伪造不出；
-//! - 同一个用户名连续失败太多次就暂时拒绝，而回答永远只有"用户名或密码不对"。
+//! - 同一个邮箱连续失败太多次就暂时拒绝，而回答永远只有"邮箱或密码不对"。
 
 use std::collections::HashMap;
 use std::sync::{Mutex, PoisonError};
@@ -39,12 +39,12 @@ pub const LOGOUT_PATH: &str = "/web/logout";
 const CSRF_LIFETIME: Duration = Duration::from_hours(1);
 
 /// 失败的窗口与上限：同一个用户名 15 分钟内最多错 5 次。
-/// 注册时邀请码的失败也记在这张表里，用的是另一个键。
+/// 旧账户过渡和敏感操作使用不同的键。
 pub(crate) const WINDOW: Duration = Duration::from_mins(15);
 const MAX_FAILURES: usize = 5;
 
 /// 登录页上说的话。失败的原因对外只有这一句。
-const WRONG_CREDENTIALS: &str = "用户名或密码不对。";
+const WRONG_CREDENTIALS: &str = "邮箱或密码不对。";
 pub(crate) const TOO_MANY_ATTEMPTS: &str = "尝试次数太多，请 15 分钟后再试。";
 
 /// 让被暂时拒绝的人知道过多久再来（秒）。
@@ -107,9 +107,11 @@ pub fn routes() -> axum::Router<Shared> {
         .route(LOGOUT_PATH, post(logout))
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Deserialize)]
 pub struct LoginForm {
-    username: String,
+    #[serde(default)]
+    email: String,
+    #[serde(default)]
     password: String,
     next: String,
     csrf: String,
@@ -239,7 +241,7 @@ pub async fn login_form(State(state): State<Shared>, jar: CookieJar, uri: Uri) -
                 None,
                 next.as_deref().unwrap_or_default(),
                 csrf.expose(),
-                state.config.registration_open(),
+                state.config.github.is_some(),
             ),
         ),
         [csrf_cookie(
@@ -270,11 +272,9 @@ pub async fn login_submit(
     let next = safe_next(&form.next).unwrap_or_default().to_owned();
     let csrf = form.csrf.clone();
 
-    let registration_open = state.config.registration_open();
+    let registration_open = state.config.github.is_some();
     let password = SecretString::new(std::mem::take(&mut form.password));
-    let typed = form.username.trim();
-    let username =
-        crate::accounts::normalize_username(typed).unwrap_or_else(|_| typed.to_lowercase());
+    let username = form.email.trim().to_ascii_lowercase();
     let now = Instant::now();
     if state.throttle.is_blocked(&username, now) {
         return retry_after(
@@ -286,13 +286,18 @@ pub async fn login_submit(
         );
     }
 
-    let account = crate::accounts::find_by_username(&state.pool, &username)
+    let account = crate::email_identity::by_email(&state.pool, &username)
         .await
         .ok()
         .flatten();
     // 账户不存在时也照样算一次散列：从回答的时间上看不出这个用户名有没有人用。
     let matched = match &account {
-        Some(account) => crate::secrets::verify_password(&account.password_hash, password).await,
+        Some(account) if account.password_enabled => {
+            crate::secrets::verify_password(&account.password_hash, password).await
+        }
+        Some(_) => crate::secrets::verify_password(&DECOY_HASH, password)
+            .await
+            .map(|_| false),
         None => crate::secrets::verify_password(&DECOY_HASH, password).await,
     }
     .unwrap_or(false);

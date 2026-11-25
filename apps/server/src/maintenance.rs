@@ -99,6 +99,15 @@ pub async fn run_once(state: &Shared) -> Result<Report, sqlx::Error> {
         .await?
         .rows_affected();
 
+    sqlx::query("DELETE FROM email_actions WHERE expires_at <= ?")
+        .bind(now)
+        .execute(pool)
+        .await?;
+    sqlx::query("DELETE FROM email_rate_limits WHERE started_at < ?")
+        .bind(now - 3_600_000)
+        .execute(pool)
+        .await?;
+
     // 4. 太久的通知，读没读过都一样。
     report.pruned_notifications = sqlx::query("DELETE FROM notifications WHERE raised_at < ?")
         .bind(now - NOTIFICATION_HISTORY_MILLIS)

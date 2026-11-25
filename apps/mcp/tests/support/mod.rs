@@ -47,6 +47,7 @@ pub async fn create_account(server: &TestServer, username: &str, display_name: &
     )
     .await
     .unwrap();
+    sqlx::query("UPDATE accounts SET email = username || '@example.test', email_verified_at = 1 WHERE username = ?").bind(username).execute(&server.state.pool).await.unwrap();
 }
 
 pub fn browser(server: &TestServer) -> common::Browser {

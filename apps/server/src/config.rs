@@ -1,4 +1,4 @@
-//! 服务端配置：全部来自环境变量，前缀 `ASSEMBLE_`。
+//! 服务端配置：环境变量和受保护密钥文件引用。
 //!
 //! 没有配置文件。数据目录与对外地址必须显式给出——猜错任何一个的后果
 //! （数据写到别处、Cookie 发错域）都比启动失败更糟。
@@ -8,7 +8,7 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use assemble_protocol::origin::ServerOrigin;
-use subtle::ConstantTimeEq;
+use assemble_store::secret::SecretString;
 
 /// 数据目录必须显式指定。
 pub const DATA_DIR: &str = "ASSEMBLE_DATA_DIR";
@@ -24,13 +24,6 @@ pub const SEND_TTL_HOURS: &str = "ASSEMBLE_SEND_TTL_HOURS";
 pub const SEND_HISTORY_DAYS: &str = "ASSEMBLE_SEND_HISTORY_DAYS";
 /// 网页登录状态保留多少小时。
 pub const WEB_SESSION_HOURS: &str = "ASSEMBLE_WEB_SESSION_HOURS";
-/// 邀请码：填了才开放网页注册，要填对它才能建账户。不填就是不开放注册。
-pub const INVITE_CODE: &str = "ASSEMBLE_INVITE_CODE";
-
-/// 邀请码的长度范围（字符）。太短了可以被一个个试出来。
-pub const INVITE_CODE_MIN_CHARS: usize = 8;
-pub const INVITE_CODE_MAX_CHARS: usize = 128;
-
 pub const DEFAULT_ADDR: &str = "127.0.0.1:8787";
 pub const DEFAULT_DRIVE_QUOTA_BYTES: u64 = 2 * 1024 * 1024 * 1024;
 pub const DEFAULT_SEND_TTL: Duration = Duration::from_hours(24);
@@ -42,7 +35,7 @@ const MAX_HOURS: u64 = 365 * 24;
 /// 天数的上限：十年。
 const MAX_DAYS: u64 = 3650;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub struct Config {
     pub addr: SocketAddr,
     pub data_dir: PathBuf,
@@ -51,11 +44,8 @@ pub struct Config {
     pub send_ttl: Duration,
     pub send_history: Duration,
     pub web_session_ttl: Duration,
-    /// 邀请码的摘要，`None` 是不开放注册。
-    ///
-    /// 配置里给的是明文，读完只留摘要：进程里、日志里、这份配置的调试输出里都不会出现邀请码本身。
-    /// 比对的时候把用户填的也算一遍摘要再比。
-    pub invite_code: Option<String>,
+    pub smtp: Option<crate::mail::SmtpConfig>,
+    pub github: Option<crate::github::GithubConfig>,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -81,6 +71,46 @@ impl std::fmt::Display for ConfigError {
 }
 
 impl std::error::Error for ConfigError {}
+
+/// 密钥可以引用受保护文件；错误不回显值或文件路径。
+pub(crate) fn secret(
+    get: &impl Fn(&'static str) -> Option<String>,
+    variable: &'static str,
+    file_variable: &'static str,
+) -> Result<Option<SecretString>, ConfigError> {
+    match (get(variable), get(file_variable)) {
+        (None, None) => Ok(None),
+        (Some(_), Some(_)) => Err(ConfigError::Invalid {
+            variable,
+            reason: "密钥值与文件引用不能同时配置".to_owned(),
+        }),
+        (value, path) => {
+            let value = if let Some(path) = path {
+                let invalid = || ConfigError::Invalid {
+                    variable: file_variable,
+                    reason: "密钥文件不可读、为空或过大".to_owned(),
+                };
+                let file = std::fs::File::open(path).map_err(|_| invalid())?;
+                if !file.metadata().map_err(|_| invalid())?.is_file() {
+                    return Err(invalid());
+                }
+                let mut value = String::new();
+                std::io::Read::read_to_string(&mut std::io::Read::take(file, 4097), &mut value)
+                    .map_err(|_| invalid())?;
+                if value.trim().is_empty() || value.len() > 4096 {
+                    return Err(invalid());
+                }
+                value.trim_end_matches(['\r', '\n']).to_owned()
+            } else {
+                value.expect("one source exists")
+            };
+            if value.trim().is_empty() {
+                return Err(ConfigError::Missing { variable });
+            }
+            Ok(Some(SecretString::new(value)))
+        }
+    }
+}
 
 impl Config {
     /// 从进程环境变量读取。
@@ -124,13 +154,6 @@ impl Config {
         .unwrap_or(DEFAULT_SEND_HISTORY);
         let web_session_ttl = optional(WEB_SESSION_HOURS, get(WEB_SESSION_HOURS), hours)?
             .unwrap_or(DEFAULT_WEB_SESSION_TTL);
-        let invite_code = optional(INVITE_CODE, get(INVITE_CODE), |value| {
-            invite_digest(value).ok_or_else(|| {
-                format!(
-                    "需要是 {INVITE_CODE_MIN_CHARS} 到 {INVITE_CODE_MAX_CHARS} 个字符，不能有空白"
-                )
-            })
-        })?;
 
         Ok(Self {
             addr,
@@ -140,28 +163,9 @@ impl Config {
             send_ttl,
             send_history,
             web_session_ttl,
-            invite_code,
+            smtp: crate::mail::SmtpConfig::from_lookup(&get)?,
+            github: crate::github::GithubConfig::from_lookup(&get)?,
         })
-    }
-
-    /// 网页注册开着没有：配了邀请码才开。
-    pub fn registration_open(&self) -> bool {
-        self.invite_code.is_some()
-    }
-
-    /// 用户填的邀请码对不对。没有配邀请码，填什么都是错的。
-    pub fn invite_matches(&self, typed: &str) -> bool {
-        self.invite_code.as_ref().is_some_and(|expected| {
-            // 长度先比，内容再按恒定时间比：从快慢上看不出对到了第几个字符。
-            same_secret(expected, &crate::secrets::token_digest(typed))
-        })
-    }
-
-    /// 在这份配置里设一个邀请码，把注册打开。测试与开发工具用。
-    #[must_use]
-    pub fn with_invite_code(mut self, code: &str) -> Self {
-        self.invite_code = invite_digest(code);
-        self
     }
 
     /// 本地开发与测试用的配置：只监听回环地址的随机端口，其余取默认值。
@@ -174,7 +178,8 @@ impl Config {
             send_ttl: DEFAULT_SEND_TTL,
             send_history: DEFAULT_SEND_HISTORY,
             web_session_ttl: DEFAULT_WEB_SESSION_TTL,
-            invite_code: None,
+            smtp: None,
+            github: None,
         }
     }
 
@@ -184,22 +189,6 @@ impl Config {
         self.public_origin = origin;
         self
     }
-}
-
-/// 邀请码合不合规则；合的话交出它的摘要。
-fn invite_digest(raw: &str) -> Option<String> {
-    let length = raw.chars().count();
-    let too_short = length < INVITE_CODE_MIN_CHARS;
-    let too_long = length > INVITE_CODE_MAX_CHARS;
-    let untypable = raw
-        .chars()
-        .any(|character| character.is_whitespace() || character.is_control());
-    (!too_short && !too_long && !untypable).then(|| crate::secrets::token_digest(raw))
-}
-
-/// 两个值必须一样长、内容相同。长度不同的直接就是不一样，不值得做恒定时间比较。
-fn same_secret(a: &str, b: &str) -> bool {
-    a.len() == b.len() && bool::from(a.as_bytes().ct_eq(b.as_bytes()))
 }
 
 fn required(
@@ -249,6 +238,32 @@ fn hours(value: &str) -> Result<Duration, String> {
 mod tests {
     use super::*;
 
+    #[test]
+    fn secret_files_are_read_only_by_rust_and_diagnostics_never_echo_them() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("password");
+        std::fs::write(&path, "test-private-value\n").unwrap();
+        let get = |key| (key == "SMTP_PASS_FILE").then(|| path.to_string_lossy().into_owned());
+        let value = secret(&get, "SMTP_PASS", "SMTP_PASS_FILE")
+            .unwrap()
+            .unwrap();
+        assert_eq!(value.expose(), "test-private-value");
+        assert!(!format!("{value:?}").contains("test-private-value"));
+        let get = |key| match key {
+            "SMTP_PASS_FILE" => Some(path.to_string_lossy().into_owned()),
+            "SMTP_PASS" => Some("test-private-value".to_owned()),
+            _ => None,
+        };
+        let error = secret(&get, "SMTP_PASS", "SMTP_PASS_FILE")
+            .unwrap_err()
+            .to_string();
+        assert!(!error.contains("test-private-value"));
+        assert!(!error.contains(path.to_string_lossy().as_ref()));
+        std::fs::write(&path, "x".repeat(4097)).unwrap();
+        let get = |key| (key == "SMTP_PASS_FILE").then(|| path.to_string_lossy().into_owned());
+        assert!(secret(&get, "SMTP_PASS", "SMTP_PASS_FILE").is_err());
+    }
+
     fn lookup<'a>(
         values: &'a [(&'static str, &'a str)],
     ) -> impl Fn(&'static str) -> Option<String> + 'a {
@@ -275,10 +290,8 @@ mod tests {
         assert_eq!(config.send_ttl, DEFAULT_SEND_TTL);
         assert_eq!(config.send_history, DEFAULT_SEND_HISTORY);
         assert_eq!(config.web_session_ttl, DEFAULT_WEB_SESSION_TTL);
-        // 没配邀请码：不开放注册。
-        assert_eq!(config.invite_code, None);
-        assert!(!config.registration_open());
-        assert!(!config.invite_matches(""));
+        assert!(config.smtp.is_none());
+        assert!(config.github.is_none());
         assert_eq!(DEFAULT_DRIVE_QUOTA_BYTES, 2 * 1024 * 1024 * 1024);
 
         assert_eq!(
@@ -308,20 +321,9 @@ mod tests {
             (SEND_TTL_HOURS, "6"),
             (SEND_HISTORY_DAYS, "7"),
             (WEB_SESSION_HOURS, "1"),
-            (INVITE_CODE, "welcome-to-assemble"),
         ]))
         .unwrap();
         assert_eq!(config.addr.to_string(), "0.0.0.0:9000");
-        // 配置里只留摘要，不留邀请码本身。
-        assert_eq!(
-            config.invite_code.as_deref(),
-            Some(crate::secrets::token_digest("welcome-to-assemble").as_str())
-        );
-        assert!(!format!("{config:?}").contains("welcome-to-assemble"));
-        assert!(config.registration_open());
-        assert!(config.invite_matches("welcome-to-assemble"));
-        assert!(!config.invite_matches("welcome-to-assemblf"));
-        assert!(!config.invite_matches(""));
         assert_eq!(config.drive_quota_bytes, 1000);
         assert_eq!(config.send_ttl, Duration::from_secs(6 * 60 * 60));
         assert_eq!(config.send_history, Duration::from_secs(7 * 24 * 60 * 60));
@@ -339,10 +341,6 @@ mod tests {
             (SEND_TTL_HOURS, too_many_hours.as_str()),
             (SEND_HISTORY_DAYS, "forever"),
             (WEB_SESSION_HOURS, "1.5"),
-            (INVITE_CODE, "short"),
-            (INVITE_CODE, &"x".repeat(129)),
-            (INVITE_CODE, "has a space"),
-            (INVITE_CODE, "line\nbreak"),
         ] {
             // 同名变量以排在前面的为准，所以把不合法的值放在最前。
             let get = |name: &'static str| {
@@ -382,18 +380,5 @@ mod tests {
             ConfigError::Missing { variable: DATA_DIR }.to_string(),
             "ASSEMBLE_DATA_DIR is required"
         );
-        // 邀请码太短时的说明里也不回显填进去的是什么。
-        let short = Config::from_lookup(lookup(&[
-            (DATA_DIR, "/data"),
-            (PUBLIC_ORIGIN, "https://assemble.example"),
-            (INVITE_CODE, "hunter2"),
-        ]))
-        .unwrap_err()
-        .to_string();
-        assert!(
-            short.starts_with("ASSEMBLE_INVITE_CODE is invalid"),
-            "{short}"
-        );
-        assert!(!short.contains("hunter2"), "{short}");
     }
 }

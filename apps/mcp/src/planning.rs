@@ -599,6 +599,8 @@ mod tests {
                 id: "a".into(),
                 username: "alex".into(),
                 display_name: "Alex".into(),
+                email: None,
+                avatar_url: None,
                 created_at: at(now.local),
             },
             Device {

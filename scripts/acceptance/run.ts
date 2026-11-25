@@ -474,7 +474,9 @@ async function start(options: Options): Promise<number> {
       );
     }
   }
-  note(`登录用的账户：${options.account}`);
+  note(
+    `验收账户的内部用户名：${options.account}。普通登录使用已验证邮箱；尚未绑定时，从登录页的“为旧账户绑定邮箱”入口验证原密码和邮箱。请先配置本机 SMTP（可用 SMTP_PASS_FILE），见 docs/runbooks/email-and-github.md。`,
+  );
 
   step(`替身设备“${fakeName}”`);
   // 上一回被中断时留下的替身设备：先停掉，免得两台用同一个令牌同时在线。
@@ -522,7 +524,7 @@ async function start(options: Options): Promise<number> {
   console.log("  窗口打开之后，请你：");
   console.log("    1. 点“使用浏览器登录”。系统浏览器会打开本机的登录页。");
   console.log(
-    `    2. 用账户 ${options.account} 和你设的密码登录，然后点“确认登录”。`,
+    `    2. 使用验收账户 ${options.account} 已绑定的邮箱和密码登录；首次先用“为旧账户绑定邮箱”验证，再点“确认登录”。`,
   );
   console.log(
     `    3. 回到 Assemble 窗口：账户下面写着“这台设备：…”，“设备”里“${fakeName}”是在线的。`,
