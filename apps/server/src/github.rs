@@ -494,6 +494,14 @@ async fn finish_callback(
             if update_avatar(state, &id, &profile).await.is_err() {
                 return unavailable();
             }
+            crate::audit::record(
+                &state.pool,
+                Some(&id),
+                None,
+                crate::audit::actions::WEB_LOGIN,
+                None,
+            )
+            .await;
             web::signed_in(state, &id, &next, "已登录", "可以返回 Assemble。").await
         }
         Ok(None) => {
@@ -642,6 +650,14 @@ async fn profile_submit(
             Ok(v) => v,
             Err(e) => return crate::identity_web::problem(&e),
         };
+        crate::audit::record(
+            &state.pool,
+            Some(&complete.account_id),
+            None,
+            crate::audit::actions::ACCOUNT_REGISTERED,
+            None,
+        )
+        .await;
         state
             .github_flows
             .enrollments

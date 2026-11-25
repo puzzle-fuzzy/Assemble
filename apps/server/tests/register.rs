@@ -502,6 +502,11 @@ async fn github_verified_email_registers_once_and_later_email_changes_do_not_mov
         StatusCode::SEE_OTHER
     );
     assert_eq!(count(&f).await, 1);
+    let actions: Vec<String> = sqlx::query_scalar("SELECT action FROM audit_log ORDER BY id")
+        .fetch_all(&f.server.state.pool)
+        .await
+        .unwrap();
+    assert_eq!(actions, ["account.registered", "web.login"]);
     assert_eq!(
         identity::by_email(&f.server.state.pool, "github@example.test")
             .await
