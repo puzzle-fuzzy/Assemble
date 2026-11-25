@@ -21,7 +21,7 @@ Assemble 是一个全新的、自带服务端的项目，用来完全替换 jarv
 | 日程规划                                                                                      | 日程、提醒、到点通知：服务端与桌面端都已实现（主窗口里的"日程"卡片、托盘里的"新建提醒…"、点通知定位到那一条）。手机上的提醒还没有做（[决策 0003](docs/decisions/0003-schedule-first-batch-and-conversational-entry.md)） | 自动化测试；服务端的调度与推送在真实运行里核对过，桌面端没有                                                                                                      |
 | 对话入口 `assemble-mcp`：让 Codex、ZCode 经 MCP 管理日程与提醒                                | 已实现：登录成账户里的一台设备，十个工具（看名单，日程与提醒的新建、修改、完成或取消、删除，通知标已读）                                                                                                                 | 自动化测试（对着真实服务端）；发布构建对着正式地址握过手；真实的登录与接入还没有人做过                                                                            |
 | 持续集成                                                                                      | 仓库公开；每次推送在 macOS 与 Windows 上各跑一遍验证、构建服务端镜像；打标签或手动触发出安装包                                                                                                                           | 两个平台的验证都全绿过，两个平台的安装包都构建成功过                                                                                                              |
-| 部署到服务器                                                                                  | **已上线**：<https://as.yxswy.com>，Docker Compose 加 nginx；2026-11-25 已上线日程、公开邮箱验证注册与 GitHub 登录入口                                                                                                   | 正式升级、备份、迁移与 SMTP 真发送已核对；Windows 已登录，GitHub 真人授权及收信确认单独验收                                                                       |
+| 部署到服务器                                                                                  | **已上线**：<https://as.yxswy.com>，Docker Compose 加 nginx；2026-11-25 已上线日程、公开邮箱验证注册与 GitHub 登录入口                                                                                                   | 正式升级与 SMTP 真发送已核对；随后按用户要求清空账号数据，空库及旧登录失效已验证；真人注册与 GitHub 授权单独验收                                                  |
 
 哪些还没有在真实运行里验证过，逐条列在[运行手册](docs/runbooks/verify-macos-launch.md)的"还没有做过的"一节。
 
@@ -69,7 +69,7 @@ bun run mcp          # 构建给助手用的入口 target/release/assemble-mcp�
 
 ### 部署
 
-正式服务在 2026-11-24 上线：<https://as.yxswy.com>。材料在 `deploy/`（`Dockerfile`、`compose.yaml`、配置模板、反向代理的片段、送镜像的脚本）。做过的与还没有验证过的，逐条见[部署手册](docs/runbooks/deploy.md)。2026-11-25 已完成带真实账户、设备和云盘数据的升级，Windows 登录仍有效；两台真实设备互传与第三方真人授权仍待逐项验收。
+正式服务在 2026-11-24 上线：<https://as.yxswy.com>。材料在 `deploy/`（`Dockerfile`、`compose.yaml`、配置模板、反向代理的片段、送镜像的脚本）。做过的与还没有验证过的，逐条见[部署手册](docs/runbooks/deploy.md)。2026-11-25 完成升级后，按用户要求清空了原账号及关联数据，现在从[公开注册](https://as.yxswy.com/web/register)重新开始；SMTP 与 GitHub 配置保留，原登录全部失效。两台真实设备互传与第三方真人授权仍待逐项验收。
 
 ## 让助手管理你的日程
 

@@ -52,7 +52,9 @@ GITHUB_CLIENT_SECRET_FILE=/run/assemble-secrets/github-client-secret
 
 实现使用 GitHub 的 [OAuth Web Flow、state 与 PKCE](https://docs.github.com/en/apps/oauth-apps/building-oauth-apps/authorizing-oauth-apps)，读取 [已验证邮箱](https://docs.github.com/en/rest/users/emails)。没有配置完整两项时 GitHub 登录入口隐藏；邮箱注册不受影响。
 
-## 升级与旧账户
+## 升级与历史兼容
+
+2026-11-25 已按用户要求清空正式账号及关联数据，当前新用户直接从 `/web/register` 或 GitHub 入口注册，无需补绑旧账号。下面保留兼容实现的技术说明，不代表要恢复已删除的正式账号。
 
 升级前按[部署手册](deploy.md)备份。新迁移原地增加邮箱、头像、外部身份、邮件凭据和限流表，不重建账户或迁移云盘。`ASSEMBLE_INVITE_CODE` 不再读取，应从旧 `.env` 删除。
 
