@@ -8,6 +8,8 @@
 
 pub mod account;
 pub mod accounts;
+pub mod admin;
+pub mod admin_assets;
 pub mod audit;
 pub mod auth;
 pub mod blobs;
@@ -56,6 +58,9 @@ pub enum StartupError {
 pub async fn load() -> Result<(Config, SqlitePool), StartupError> {
     let config = Config::from_env()?;
     let pool = db::open(&config.data_dir).await?;
+    admin::bootstrap(&pool, config.super_admin_email.as_deref())
+        .await
+        .map_err(db::DbError::from)?;
     Ok((config, pool))
 }
 

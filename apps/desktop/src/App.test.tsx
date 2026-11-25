@@ -444,7 +444,11 @@ describe("传输", () => {
   test("没登录时没有这一块；登录后没有记录时如实说还没有", async () => {
     const signedOut = await renderApp(new FakeBridge(snapshot()));
     await settle();
-    expect(text(signedOut.host)).not.toContain("传输");
+    expect(
+      signedOut.host.querySelector(
+        'section:not([hidden]) [data-slot="card-title"]',
+      ),
+    ).toBeNull();
 
     const view = await renderApp(
       new FakeBridge(snapshot({ phase: "signedIn" })),
@@ -628,8 +632,19 @@ describe("传输", () => {
     expect(page).toContain("发送失败：对方设备没能把文件写下来。");
     // 还没到头的三条可以取消；只有文件没到服务端的那次失败可以重发。
     // 日程的每一行上也有"取消"：只在传输卡片里数。
-    expect(buttons(card(view.host, "传输"), "取消")).toHaveLength(3);
+    for (const id of ["t8", "t7", "t6"]) {
+      await click(
+        view.host.querySelector<HTMLElement>(`[data-item-id="${id}"]`) ??
+          undefined,
+      );
+      expect(buttons(card(view.host, "传输"), "取消")).toHaveLength(1);
+      expect(buttons(card(view.host, "传输"), "重发")).toHaveLength(0);
+    }
+    await click(
+      view.host.querySelector<HTMLElement>('[data-item-id="t1"]') ?? undefined,
+    );
     expect(buttons(card(view.host, "传输"), "重发")).toHaveLength(1);
+    expect(buttons(card(view.host, "传输"), "取消")).toHaveLength(0);
     // 发出去的文件不在这台电脑上，没有"在文件夹中显示"。
     expect(buttons(card(view.host, "传输"), "在文件夹中显示")).toHaveLength(0);
   });
@@ -661,6 +676,9 @@ describe("传输", () => {
     // 两个按钮各属于各自的那条记录。
     const transfers = card(view.host, "传输");
     await click(button(transfers, "取消"));
+    await click(
+      view.host.querySelector<HTMLElement>('[data-item-id="t1"]') ?? undefined,
+    );
     await click(button(transfers, "重发"));
     expect(source.calls).toEqual(["cancelTransfer:t2", "retryTransfer:t1"]);
   });
@@ -686,7 +704,11 @@ describe("云盘", () => {
   test("列出云盘里的文件与已用空间；没登录时没有这一块", async () => {
     const signedOut = await renderApp(new FakeBridge(snapshot()), "云盘");
     await settle();
-    expect(text(signedOut.host)).not.toContain("云盘");
+    expect(
+      signedOut.host.querySelector(
+        'section:not([hidden]) [data-slot="card-title"]',
+      ),
+    ).toBeNull();
 
     const source = new FakeBridge(snapshot({ phase: "signedIn" }));
     const view = await renderApp(source, "云盘");
@@ -791,9 +813,18 @@ describe("云盘", () => {
     expect(page).toContain("取回失败：云盘里已经没有这个文件了。");
     expect(page).toContain("已取回");
     // 存进云盘的文件不经过接收位置：只有取回来的那个能"在文件夹中显示"。
+    await click(
+      view.host.querySelector<HTMLElement>('[data-item-id="t1"]') ?? undefined,
+    );
     expect(buttons(view.host, "在文件夹中显示")).toHaveLength(1);
-    // 空间不够的可以重发；云盘里已经没有的不能。
+    await click(
+      view.host.querySelector<HTMLElement>('[data-item-id="t2"]') ?? undefined,
+    );
     expect(buttons(view.host, "重发")).toHaveLength(1);
+    await click(
+      view.host.querySelector<HTMLElement>('[data-item-id="t1b"]') ?? undefined,
+    );
+    expect(buttons(view.host, "重发")).toHaveLength(0);
   });
 
   test("云盘是空的时候如实说", async () => {
@@ -815,6 +846,8 @@ describe("右键菜单", () => {
     const source = new FakeBridge(snapshot({ sendMenu: "unsupported" }));
     const view = await renderApp(source, "本机设置");
     await settle();
+    if (button(view.host, "选择右键菜单"))
+      await click(button(view.host, "选择右键菜单"));
     expect(text(view.host)).not.toContain("右键菜单");
     expect(text(view.host)).toContain("接收位置");
   });
@@ -823,6 +856,8 @@ describe("右键菜单", () => {
     const source = new FakeBridge(snapshot({ sendMenu: "enabled" }));
     const view = await renderApp(source, "本机设置");
     await settle();
+    if (button(view.host, "选择右键菜单"))
+      await click(button(view.host, "选择右键菜单"));
     expect(text(view.host)).toContain("右键菜单");
     expect(text(view.host)).toContain(
       "在文件上点右键，选择「用 Assemble 发送」。",
@@ -844,6 +879,8 @@ describe("右键菜单", () => {
     const source = new FakeBridge(snapshot({ sendMenu: "disabled" }));
     const view = await renderApp(source, "本机设置");
     await settle();
+    if (button(view.host, "选择右键菜单"))
+      await click(button(view.host, "选择右键菜单"));
     expect(text(view.host)).toContain(
       "文件的右键菜单里没有「用 Assemble 发送」",
     );
@@ -854,6 +891,8 @@ describe("右键菜单", () => {
     source.failWith = new BridgeError("SYSTEM_REJECTED", "os error 5");
     const view = await renderApp(source, "本机设置");
     await settle();
+    if (button(view.host, "选择右键菜单"))
+      await click(button(view.host, "选择右键菜单"));
     const toggle = view.host.querySelector<HTMLButtonElement>(
       '[aria-label="右键菜单里的“用 Assemble 发送”"]',
     );
@@ -869,6 +908,7 @@ describe("接收位置", () => {
     const source = new FakeBridge(snapshot());
     const view = await renderApp(source, "本机设置");
     await settle();
+    await click(button(view.host, "选择接收位置"));
 
     expect(text(view.host)).toContain("下载/Assemble");
     expect(button(view.host, "恢复默认")).toBeUndefined();
@@ -883,6 +923,7 @@ describe("接收位置", () => {
     );
     const view = await renderApp(source, "本机设置");
     await settle();
+    await click(button(view.host, "选择接收位置"));
 
     expect(text(view.host)).toContain("「工作资料」文件夹");
     expect(text(view.host)).not.toContain("下载/Assemble");
@@ -904,6 +945,7 @@ describe("接收位置", () => {
     source.failWith = new BridgeError("INVALID_RECEIVE_FOLDER", "NotDirectory");
     const view = await renderApp(source, "本机设置");
     await settle();
+    await click(button(view.host, "选择接收位置"));
 
     await click(button(view.host, "更改…"));
     expect(text(view.host)).toContain(
@@ -919,6 +961,7 @@ describe("接收位置", () => {
     );
     const view = await renderApp(source, "本机设置");
     await settle();
+    await click(button(view.host, "选择接收位置"));
     expect(text(card(view.host, "本机"))).toContain(defaultPath);
     expect(text(card(view.host, "本机"))).not.toContain("下载/Assemble");
     expect(button(view.host, "恢复默认")).toBeUndefined();
@@ -1020,8 +1063,8 @@ describe("设备", () => {
 
     await click(button(view.host, "改名"));
     // 从当前名字开始改。
-    expect(textField(view.host).value).toBe("工作电脑");
-    await typeInto(view.host, "公司的电脑");
+    expect(textField(card(view.host, "设备")).value).toBe("工作电脑");
+    await typeInto(card(view.host, "设备"), "公司的电脑");
     await click(button(view.host, "保存"));
 
     expect(source.calls).toEqual(["renameDevice:device-2:公司的电脑"]);
@@ -1040,7 +1083,7 @@ describe("设备", () => {
     expect(button(view.host, "改名")).toBeDefined();
 
     await click(button(view.host, "改名"));
-    await typeInto(view.host, "   ");
+    await typeInto(card(view.host, "设备"), "   ");
     await click(button(view.host, "保存"));
     expect(source.calls).toEqual([]);
     expect(text(view.host)).toContain("名字不能为空");

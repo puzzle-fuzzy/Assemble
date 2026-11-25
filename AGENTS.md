@@ -61,5 +61,6 @@ Assemble 是一个全新的、自带服务端的项目，用来完全替换 jarv
 
 - TypeScript 侧只使用 Bun：根目录唯一的 `bun.lock`，不引入其它包管理器。
 - 格式与 lint 只使用 Biome；Biome 也会格式化 Markdown 表格。
-- 前端组件使用 shadcn 生成的 `apps/desktop/src/components/ui`，缺少的组件通过 shadcn CLI 拉取，不自行编写同类基础控件；图标使用 Lucide。
+- 前端基础组件使用 shadcn 生成的 `packages/ui`，桌面端与管理端共享实现、主题与字体；桌面旧路径只转发导出。图标使用 Lucide。缺少的组件通过 CLI 添加，应用内只做组合。
+- 管理端同源发布于 `/admin/`；所有管理 API 逐次检查已验证邮箱、超级管理员权限与同源请求。设备令牌不能访问管理 API，首个注册者不能自动提权。真实管理员邮箱只写受保护部署配置，见[管理端手册](docs/runbooks/admin.md)。
 - Rust 依赖只用稳定版。本机 `cargo info` 会把预发布版本排在最前，选版本前用 crates.io 的接口核对。

@@ -39,6 +39,8 @@ bun run verify       # 一键验证，提交前运行
 bun run acceptance   # 在 macOS 上真实验收：起好本机环境，等你登录，自动核对收发（约 15 分钟）
 bun run server:dev   # 只要本地开发用的服务端：数据在 data/local/server，地址 http://127.0.0.1:8787
 bun run dev          # 桌面端的开发运行：Vite 热更新 + 调试构建，连本地开发服务
+bun run admin:dev    # 管理端开发页面：127.0.0.1:1421/admin/，复用本地服务端
+bun run build:frontend # 构建桌面与管理前端，管理资源随服务端镜像发布
 bun run mcp          # 构建给助手用的入口 target/release/assemble-mcp，连正式服务
 ```
 
@@ -53,7 +55,9 @@ bun run mcp          # 构建给助手用的入口 target/release/assemble-mcp�
 
 `bun run verify` 依次执行 Biome、类型检查、界面与工具脚本的测试、前端构建、Rust 格式、Rust 静态检查与全部 Rust 测试（含服务端与助手入口）。装了 Windows 的 Rust 目标时（`rust-toolchain.toml` 里列了它），它还会给能在本机上检查的五个基础库做一次针对 Windows 目标的静态检查。客户端与服务端带着 TLS 与 SQLite 的本机依赖，从 macOS 上检查不了 Windows 目标，依赖它们的助手入口也一样，桌面应用壳更是一次都没在这台 Mac 上为 Windows 编译过——那是持续集成里 Windows 那一栏的事。
 
-主窗口采用固定的左侧图标导航：文件传输、云盘、日程与提醒、本机设置分别显示，选中项有深色底块，悬停或键盘聚焦可查看名称。左下角头像打开账户与设备面板，登录、退出和设备管理都在面板中。界面只组合 shadcn 组件，缺少的组件用 CLI 拉取；切换内容保留日程草稿，托盘和系统通知可直接进入日程页。
+主窗口按官方 sidebar-09 组织为三列：左侧图标切换文件传输、云盘、日程与提醒、本机设置；中间搜索并选择项目；右侧显示对应详情与操作。选中项、键盘焦点与提示保持清晰，左下角头像打开账户和设备面板。切换内容保留本账户日程草稿，托盘和系统通知可直接进入日程页。桌面端与管理端共享 `packages/ui` 的 shadcn 组件、主题与字体，缺少的基础组件用 CLI 拉取。
+
+管理端在 `/admin/`，按 sidebar-13 的菜单与内容结构显示概览、用户、设备和登录记录，提供查询、分页与用户详情。只有指定且已验证邮箱的超级管理员能够读取数据，不把首个注册者自动提权；初始化与登录见[管理端手册](docs/runbooks/admin.md)。本次没有扩展定时邮件或 RSS。
 
 主窗口底部固定显示“正式版本 / 预览版本 / 本地测试 - 版本号.commit号”，下一行显示对应环境的官网地址。版本号与 Git 提交号自动读取；类型与官网统一按构建时的服务地址识别，正常连接时右上角不再重复显示“正式服务”。Windows 的接收位置显示完整目录，Mac 保留“下载/Assemble”等简称；完整约定见[架构说明](docs/architecture.md#主窗口固定展示构建身份)。
 
@@ -100,6 +104,8 @@ apps/desktop/           桌面端（Tauri 2）
   contract/             Rust 与界面共用的状态样本，两侧各自对着它校验
   src-tauri/            应用壳：窗口、托盘、生命周期与具名命令
 apps/mcp/               给助手用的入口 assemble-mcp：标准输入输出上的 MCP 服务端，十个日程与提醒的工具
+apps/admin/             同源管理端（React + Vite）：概览、用户、设备与登录记录
+packages/ui/            两端共用的 shadcn 基础组件、主题与字体
 crates/
   assemble-protocol     服务端 ⇄ 桌面端 ⇄ 界面的类型，只有这一份
   assemble-client       桌面端与助手入口访问服务端的唯一出口：HTTP、事件流、回环登录

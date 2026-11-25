@@ -4,6 +4,18 @@
 #
 # 服务端在 Linux 上只依赖 C 库：SQLite 是静态编进去的，钥匙串的依赖只在 macOS 与 Windows 上进入构建。
 
+# ---- 管理端：同一锁文件、同一份 shadcn 组件，产物随镜像发布 ----
+FROM oven/bun:1.4.4 AS admin
+WORKDIR /src
+COPY package.json bun.lock bunfig.toml ./
+COPY apps/desktop/package.json apps/desktop/package.json
+COPY apps/admin/package.json apps/admin/package.json
+COPY packages/ui/package.json packages/ui/package.json
+RUN bun install --frozen-lockfile
+COPY apps/admin/ apps/admin/
+COPY packages/ui/ packages/ui/
+RUN bun run admin:build
+
 # ---- 构建：官方 Rust 镜像自带编译 C 代码要用的工具链 ----
 # 版本与仓库根目录的 rust-toolchain.toml 一致（官方镜像不用 rustup，那个文件在这里不生效）。升级时两处一起改。
 FROM rust:1.100.0-bookworm AS build
@@ -33,12 +45,14 @@ RUN apt-get update \
     && mkdir -p /var/lib/assemble \
     && chown assemble:assemble /var/lib/assemble
 COPY --from=build /out/assemble-server /usr/local/bin/assemble-server
+COPY --from=admin /src/apps/admin/dist/ /usr/share/assemble/admin/
 # 从这里起以专用账户运行；少了这一行，容器会以 root 跑。
 USER assemble:assemble
 
 # 容器里的回环地址外面连不上，所以监听所有网卡；对不对外，由部署时的端口映射与反向代理决定。
 ENV ASSEMBLE_DATA_DIR=/var/lib/assemble \
-    ASSEMBLE_ADDR=0.0.0.0:8787
+    ASSEMBLE_ADDR=0.0.0.0:8787 \
+    ASSEMBLE_ADMIN_ASSETS_DIR=/usr/share/assemble/admin
 EXPOSE 8787
 VOLUME /var/lib/assemble
 

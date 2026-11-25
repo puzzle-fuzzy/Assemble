@@ -43,9 +43,9 @@ function Row({
   children: ReactNode;
 }) {
   return (
-    <li className="flex items-start gap-3 rounded-lg border border-border px-3 py-2">
+    <li className="flex flex-wrap items-start gap-3 rounded-lg border border-border px-3 py-2">
       <div className="min-w-0 flex-1">
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <h3 className="truncate text-sm font-medium" title={title}>
             {title}
           </h3>

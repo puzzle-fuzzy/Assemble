@@ -14,6 +14,12 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import {
+  Empty,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyTitle,
+} from "@/components/ui/empty";
 import { type Bridge, toBridgeError } from "@/lib/bridge";
 import { messageFor } from "@/lib/messages";
 import { agenda } from "@/lib/planner-text";
@@ -37,6 +43,9 @@ export interface PlannerCardProps {
   snapshot: Snapshot | null;
   onError: (message: string | null) => void;
   active?: boolean;
+  selected?: string | null;
+  onSelect?: (id: string) => void;
+  onDraftChange?: (editing: boolean) => void;
 }
 
 /** 这些错误码的意思都是"你看到的是旧的"：表单里留着旧值只会再错一次，不如收起来看最新的。 */
@@ -47,9 +56,19 @@ export function PlannerCard({
   snapshot,
   onError,
   active = true,
+  selected,
+  onSelect,
+  onDraftChange,
 }: PlannerCardProps) {
   const [pending, setPending] = useState(false);
   const [form, setForm] = useState<Form | null>(null);
+  useEffect(() => {
+    onDraftChange?.(form !== null);
+  }, [form, onDraftChange]);
+  function edit(next: Form) {
+    setForm(next);
+    onSelect?.("draft");
+  }
   // 名单由 Rust 在连上服务时去拿；万一没拿到（比如刚登录时断了一下），这里补要一次。
   const requested = useRef<string | null>(null);
   const signedInAs =
@@ -75,13 +94,18 @@ export function PlannerCard({
   const focused = useRef<HTMLLIElement | null>(null);
   const focus = planner?.focus ?? null;
   useEffect(() => {
-    if (focus === null || !active) return;
+    if (
+      focus === null ||
+      !active ||
+      (selected !== undefined && selected !== `notification:${focus}`)
+    )
+      return;
     const row = focused.current;
     // 测试用的 DOM 实现没有这个方法。
     if (row && typeof row.scrollIntoView === "function") {
       row.scrollIntoView({ block: "center" });
     }
-  }, [focus, active]);
+  }, [focus, active, selected]);
 
   if (snapshot == null || snapshot.session.phase !== "signedIn") return null;
   const deviceName = snapshot.session.device.name;
@@ -105,6 +129,7 @@ export function PlannerCard({
   async function close() {
     const fromTray = compose !== null;
     setForm(null);
+    onSelect?.("");
     if (fromTray) await act(() => source.plannerCompose(null));
   }
 
@@ -161,23 +186,33 @@ export function PlannerCard({
 
   const entries = planner ? agenda(planner, Date.now()) : [];
   const original = form?.original ?? null;
+  const showForm =
+    form !== null && (selected === undefined || selected === "draft");
+  const notifications =
+    planner?.notifications.filter(
+      (item) =>
+        selected === undefined || selected === `notification:${item.id}`,
+    ) ?? [];
+  const shownEntries = entries.filter(
+    (item) => selected === undefined || selected === item.key,
+  );
 
   return (
     <Card>
       <CardHeader>
         <CardTitle>日程</CardTitle>
-        {form || (planner !== null && entries.length === 0) ? null : (
+        {showForm || (planner !== null && entries.length === 0) ? null : (
           <CardDescription>
             {planner ? `七天之内有 ${entries.length} 项。` : "正在读取日程…"}
           </CardDescription>
         )}
-        {form ? null : (
-          <CardAction className="flex gap-2">
+        {showForm ? null : (
+          <CardAction className="flex flex-wrap gap-2">
             <Button
               size="sm"
               variant="outline"
               disabled={pending}
-              onClick={() => setForm({ kind: "schedule", original: null })}
+              onClick={() => edit({ kind: "schedule", original: null })}
             >
               新建日程…
             </Button>
@@ -185,7 +220,7 @@ export function PlannerCard({
               size="sm"
               variant="outline"
               disabled={pending}
-              onClick={() => setForm({ kind: "reminder", original: null })}
+              onClick={() => edit({ kind: "reminder", original: null })}
             >
               新建提醒…
             </Button>
@@ -193,7 +228,7 @@ export function PlannerCard({
         )}
       </CardHeader>
       {form ? (
-        <CardContent>
+        <CardContent hidden={!showForm}>
           <PlannerForm
             // 换一张表单就是换一份草稿：重新挂一个，上一张里写的不会带过来。
             key={`${form.kind}:${original?.id ?? "new"}`}
@@ -204,9 +239,10 @@ export function PlannerCard({
             onRemove={original ? () => removeIt(original) : null}
           />
         </CardContent>
-      ) : planner ? (
+      ) : null}
+      {!showForm && planner ? (
         <CardContent className="flex flex-col gap-4">
-          {planner.notifications.length > 0 ? (
+          {notifications.length > 0 ? (
             <div className="flex flex-col gap-2">
               <div className="flex items-center justify-between gap-3">
                 <h2 className="text-sm font-medium">到点的提醒</h2>
@@ -224,7 +260,7 @@ export function PlannerCard({
                 ) : null}
               </div>
               <ul className="flex flex-col gap-2">
-                {planner.notifications.map((notification) => (
+                {notifications.map((notification) => (
                   <NotificationRow
                     key={notification.id}
                     ref={notification.id === focus ? focused : undefined}
@@ -251,15 +287,32 @@ export function PlannerCard({
               </ul>
             </div>
           ) : null}
-          <div className="flex flex-col gap-2">
+          <div
+            hidden={notifications.length > 0 && selected !== undefined}
+            className="flex flex-col gap-2"
+          >
             <h2 className="text-sm font-medium">接下来的安排</h2>
             {entries.length === 0 ? (
-              <p className="text-sm text-muted-foreground">
-                七天之内没有安排。
-              </p>
+              <Empty>
+                <EmptyHeader>
+                  <EmptyTitle>七天之内没有安排。</EmptyTitle>
+                  <EmptyDescription>
+                    新建日程或提醒后会显示在这里。
+                  </EmptyDescription>
+                </EmptyHeader>
+              </Empty>
+            ) : shownEntries.length === 0 && notifications.length === 0 ? (
+              <Empty>
+                <EmptyHeader>
+                  <EmptyTitle>没有选中的安排</EmptyTitle>
+                  <EmptyDescription>
+                    在列表中搜索或选择日程、提醒。
+                  </EmptyDescription>
+                </EmptyHeader>
+              </Empty>
             ) : (
               <ul className="flex flex-col gap-2">
-                {entries.map((entry) =>
+                {shownEntries.map((entry) =>
                   "schedule" in entry ? (
                     <ScheduleRow
                       key={entry.key}
@@ -268,7 +321,7 @@ export function PlannerCard({
                       deviceName={deviceName}
                       pending={pending}
                       act={act}
-                      onEdit={setForm}
+                      onEdit={edit}
                     />
                   ) : (
                     <ReminderRow
@@ -278,7 +331,7 @@ export function PlannerCard({
                       deviceName={deviceName}
                       pending={pending}
                       act={act}
-                      onEdit={setForm}
+                      onEdit={edit}
                     />
                   ),
                 )}

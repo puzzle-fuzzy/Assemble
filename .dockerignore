@@ -1,6 +1,11 @@
-# 构建服务端镜像只需要 Rust 工作区，其余一律不进构建上下文：
-# 界面的源码、依赖、构建产物和本机数据都不该被送进守护进程。
+# 镜像同时构建 Rust 服务端与同源管理端；本机依赖、产物和数据不进上下文。
 *
+!package.json
+!bun.lock
+!bunfig.toml
+!packages/
+!packages/ui/
+!packages/ui/**
 !Cargo.toml
 !Cargo.lock
 !crates/
@@ -11,10 +16,16 @@
 # 成员，不会被编译（只构建 assemble-server），它的清单与 Rust 源码却得在构建上下文里；
 # 少了它们，cargo 会报 "failed to load manifest for workspace member"。
 !apps/desktop/
+!apps/desktop/package.json
 !apps/desktop/src-tauri/
 !apps/desktop/src-tauri/**
 # 给助手用的入口 assemble-mcp 也是工作区成员：同样的道理，清单与 Rust 源码得在，不会被编译。
 !apps/mcp/
 !apps/mcp/**
+!apps/admin/
+!apps/admin/**
+**/node_modules
+**/dist
+**/data
 # Tauri 在本机生成的权限清单，不属于源码。
 apps/desktop/src-tauri/gen

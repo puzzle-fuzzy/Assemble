@@ -8,6 +8,8 @@
       "!**/dist",
       "!**/node_modules",
       "!**/target",
+      "!data/local",
+      "!data/runtime",
       "!apps/desktop/src-tauri"
     ]
   },

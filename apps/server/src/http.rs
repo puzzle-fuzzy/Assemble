@@ -90,6 +90,8 @@ pub fn router(state: Shared) -> Router {
         .route(HEALTH_PATH, get(health))
         .route(READY_PATH, get(ready))
         .merge(browser_routes)
+        .merge(crate::admin::routes())
+        .merge(crate::admin_assets::routes(&state.config.admin_assets_dir))
         // 桌面端的接口
         .route(EXCHANGE_PATH, post(crate::desktop_login::exchange))
         .route("/v1/me", get(crate::devices::me))

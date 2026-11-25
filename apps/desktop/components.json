@@ -14,8 +14,8 @@
   "rtl": false,
   "aliases": {
     "components": "@/components",
-    "utils": "@/lib/utils",
-    "ui": "@/components/ui",
+    "utils": "@assemble/ui/lib/utils",
+    "ui": "@assemble/ui/components",
     "lib": "@/lib",
     "hooks": "@/hooks"
   },

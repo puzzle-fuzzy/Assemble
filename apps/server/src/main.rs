@@ -40,6 +40,8 @@ enum Command {
     SetPassword { username: String },
     /// 列出全部账户的用户名，每行一个。
     ListAccounts,
+    /// 为已验证的邮箱账户授予超级管理员权限，并写入审计记录。
+    GrantSuperAdmin { email: String },
 }
 
 fn init_logging() {
@@ -159,6 +161,36 @@ fn main() -> ExitCode {
         }
     };
     match cli.command {
+        Command::GrantSuperAdmin { email } => {
+            match runtime.block_on(async {
+                let (_, pool) = assemble_server::load()
+                    .await
+                    .map_err(|error| error.to_string())?;
+                let result = assemble_server::admin::grant_super_admin(&pool, &email)
+                    .await
+                    .map_err(|error| match error {
+                        assemble_server::admin::GrantError::Email => "邮箱格式不合法。".to_owned(),
+                        assemble_server::admin::GrantError::NotVerified => {
+                            "账户不存在或邮箱尚未验证。".to_owned()
+                        }
+                        assemble_server::admin::GrantError::Database(error) => {
+                            tracing::error!(%error, "administrator grant failed");
+                            "数据库操作失败，权限未授予。".to_owned()
+                        }
+                    });
+                pool.close().await;
+                result
+            }) {
+                Ok(id) => {
+                    println!("已授予账户 {id} 超级管理员权限，审计已记录。");
+                    ExitCode::SUCCESS
+                }
+                Err(error) => {
+                    eprintln!("管理员授权未完成：{error}");
+                    ExitCode::FAILURE
+                }
+            }
+        }
         Command::Serve => match runtime.block_on(assemble_server::run_server()) {
             Ok(()) => ExitCode::SUCCESS,
             Err(error) => {

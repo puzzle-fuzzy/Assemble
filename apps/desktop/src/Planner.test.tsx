@@ -16,12 +16,12 @@ import { BridgeError } from "@/lib/bridge";
 import type { PlannerView } from "@/lib/types";
 import {
   button,
+  buttons,
   card,
   cleanup,
   click,
   field,
   fill,
-  listUnder,
   rows,
   settle,
   switchNamed,
@@ -157,12 +157,14 @@ function listing(overrides: Partial<PlannerView> = {}): PlannerView {
 }
 
 /** 通知那一行：同名的在名单里还有一行，通知的在前面。 */
-function notice(host: HTMLElement, title: string): HTMLElement {
+async function notice(host: HTMLElement, title: string): Promise<HTMLElement> {
+  await click(buttons(document.body, `选择${title}`)[0]);
   return rows(host, title)[0];
 }
 
 /** 接下来的安排里的那一行。 */
-function planned(host: HTMLElement, title: string): HTMLElement {
+async function planned(host: HTMLElement, title: string): Promise<HTMLElement> {
+  await click(buttons(document.body, `选择${title}`).at(-1));
   const found = rows(host, title).at(-1);
   if (!found) throw new Error(`没有找到安排里的「${title}」`);
   return found;
@@ -193,7 +195,9 @@ describe("日程", () => {
   test("没登录时没有这一块", async () => {
     const view = await renderApp(new FakeBridge(snapshot()), "日程与提醒");
     await settle();
-    expect(text(view.host)).not.toContain("日程");
+    expect(
+      view.host.querySelector('section:not([hidden]) [data-slot="card-title"]'),
+    ).toBeNull();
   });
 
   test("列出到点的提醒，与七天之内按时间排好的安排", async () => {
@@ -206,45 +210,49 @@ describe("日程", () => {
 
     expect(text(page)).toContain("七天之内有 5 项。");
     // 通知说清楚是多久之前来的。
-    expect(text(notice(page, "取快递"))).toContain("驿站楼下");
-    expect(text(notice(page, "取快递"))).toContain("20 分钟前");
-    expect(text(notice(page, "周会"))).toContain("刚刚");
+    expect(text(await notice(page, "取快递"))).toContain("驿站楼下");
+    expect(text(await notice(page, "取快递"))).toContain("20 分钟前");
+    expect(text(await notice(page, "周会"))).toContain("刚刚");
 
     // 今天 09:00 那条到点的提醒排最前；天天有的周会按明天那一场排。
     const order = [
-      ...listUnder(page, "接下来的安排").querySelectorAll("h3"),
-    ].map((heading) => heading.textContent);
+      ...view.host.querySelectorAll<HTMLElement>(
+        '[data-item-id^="schedule:"], [data-item-id^="reminder:"]',
+      ),
+    ].map((item) => item.getAttribute("aria-label")?.replace(/^选择/, ""));
     expect(order).toEqual(["取快递", "火车", "周会", "给妈妈打电话", "周报"]);
-    expect(text(planned(page, "取快递"))).toContain("已到点 · 今天 09:00");
-    expect(text(planned(page, "火车"))).toContain(
+    expect(text(await planned(page, "取快递"))).toContain(
+      "已到点 · 今天 09:00",
+    );
+    expect(text(await planned(page, "火车"))).toContain(
       "明天 09:00 到 10:00 · 提前 30 分钟",
     );
-    expect(text(planned(page, "火车"))).toContain("上海虹桥站");
-    expect(text(planned(page, "火车"))).toContain("带身份证");
-    expect(text(planned(page, "周会"))).toContain("明天 09:30 · 每天");
-    expect(text(planned(page, "周会"))).toContain("之后：11月27日 09:30");
-    expect(text(planned(page, "周报"))).toContain(
+    expect(text(await planned(page, "火车"))).toContain("上海虹桥站");
+    expect(text(await planned(page, "火车"))).toContain("带身份证");
+    expect(text(await planned(page, "周会"))).toContain("明天 09:30 · 每天");
+    expect(text(await planned(page, "周会"))).toContain("之后：11月27日 09:30");
+    expect(text(await planned(page, "周报"))).toContain(
       "周一 16:00 到 17:00 · 每周，到 12月31日",
     );
-    expect(text(planned(page, "给妈妈打电话"))).toContain("明天 20:00");
+    expect(text(await planned(page, "给妈妈打电话"))).toContain("明天 20:00");
 
     // 助手记下的标出来；本机自己记的不标。
-    expect(text(planned(page, "周会"))).toContain("ZCode 的助手");
-    expect(text(planned(page, "火车"))).not.toContain(DEVICE.name);
+    expect(text(await planned(page, "周会"))).toContain("ZCode 的助手");
+    expect(text(await planned(page, "火车"))).not.toContain(DEVICE.name);
 
     // 每一行给自己的按钮：重复的日程没有"完成"，到点的提醒不能再改。
-    expect(button(planned(page, "火车"), "完成")).toBeDefined();
-    expect(button(planned(page, "周会"), "完成")).toBeUndefined();
-    expect(button(planned(page, "火车"), "改…")).toBeDefined();
-    expect(button(planned(page, "给妈妈打电话"), "改…")).toBeDefined();
-    expect(button(planned(page, "给妈妈打电话"), "办完了")).toBeDefined();
-    expect(button(planned(page, "取快递"), "看过了")).toBeDefined();
-    expect(button(planned(page, "取快递"), "改…")).toBeUndefined();
-    expect(button(planned(page, "给妈妈打电话"), "不办了")).toBeDefined();
+    expect(button(await planned(page, "火车"), "完成")).toBeDefined();
+    expect(button(await planned(page, "周会"), "完成")).toBeUndefined();
+    expect(button(await planned(page, "火车"), "改…")).toBeDefined();
+    expect(button(await planned(page, "给妈妈打电话"), "改…")).toBeDefined();
+    expect(button(await planned(page, "给妈妈打电话"), "办完了")).toBeDefined();
+    expect(button(await planned(page, "取快递"), "看过了")).toBeDefined();
+    expect(button(await planned(page, "取快递"), "改…")).toBeUndefined();
+    expect(button(await planned(page, "给妈妈打电话"), "不办了")).toBeDefined();
     // 通知上：提醒的能顺手看完，都能"知道了"。
-    expect(button(notice(page, "取快递"), "看过了")).toBeDefined();
-    expect(button(notice(page, "周会"), "看过了")).toBeUndefined();
-    expect(button(notice(page, "周会"), "知道了")).toBeDefined();
+    expect(button(await notice(page, "取快递"), "看过了")).toBeDefined();
+    expect(button(await notice(page, "周会"), "看过了")).toBeUndefined();
+    expect(button(await notice(page, "周会"), "知道了")).toBeDefined();
     expect(source.calls).toEqual([]);
   });
 
@@ -290,8 +298,8 @@ describe("日程", () => {
     await settle();
     const page = card(view.host, "日程");
 
-    await click(button(notice(page, "周会"), "知道了"));
-    await click(button(notice(page, "取快递"), "看过了"));
+    await click(button(await notice(page, "周会"), "知道了"));
+    await click(button(await notice(page, "取快递"), "看过了"));
     // 只交出通知的标识；提醒带上看到的版本号。
     expect(source.calls).toEqual([
       "notificationsRead:note-meeting",
@@ -323,9 +331,9 @@ describe("日程", () => {
       const view = await renderApp(source, "日程与提醒");
       await settle();
       const page = card(view.host, "日程");
-      expect(scrolling.scrolled).toEqual([notice(page, "周会")]);
-      expect(notice(page, "周会").className).toContain("ring-2");
-      expect(notice(page, "取快递").className).not.toContain("ring-2");
+      expect(scrolling.scrolled).toEqual([await notice(page, "周会")]);
+      expect((await notice(page, "周会")).className).toContain("ring-2");
+      expect((await notice(page, "取快递")).className).not.toContain("ring-2");
     } finally {
       scrolling.restore();
     }
@@ -339,18 +347,18 @@ describe("日程", () => {
     await settle();
     const page = card(view.host, "日程");
 
-    await click(button(planned(page, "火车"), "完成"));
+    await click(button(await planned(page, "火车"), "完成"));
     expect(source.calls).toEqual(["scheduleComplete:schedule-2:3"]);
 
-    await click(button(planned(page, "火车"), "取消"));
-    expect(button(planned(page, "火车"), "确认取消")).toBeDefined();
+    await click(button(await planned(page, "火车"), "取消"));
+    expect(button(await planned(page, "火车"), "确认取消")).toBeDefined();
     expect(source.calls).toHaveLength(1);
-    await click(button(planned(page, "火车"), "算了"));
+    await click(button(await planned(page, "火车"), "算了"));
     expect(source.calls).toHaveLength(1);
-    expect(button(planned(page, "火车"), "取消")).toBeDefined();
+    expect(button(await planned(page, "火车"), "取消")).toBeDefined();
 
-    await click(button(planned(page, "火车"), "取消"));
-    await click(button(planned(page, "火车"), "确认取消"));
+    await click(button(await planned(page, "火车"), "取消"));
+    await click(button(await planned(page, "火车"), "确认取消"));
     expect(source.calls.at(-1)).toBe("scheduleCancel:schedule-2:3");
   });
 
@@ -362,11 +370,11 @@ describe("日程", () => {
     await settle();
     const page = card(view.host, "日程");
 
-    await click(button(planned(page, "给妈妈打电话"), "办完了"));
+    await click(button(await planned(page, "给妈妈打电话"), "办完了"));
     expect(source.calls).toEqual(["reminderDismiss:reminder-2:1"]);
 
-    await click(button(planned(page, "取快递"), "不办了"));
-    await click(button(planned(page, "取快递"), "确认不办了"));
+    await click(button(await planned(page, "取快递"), "不办了"));
+    await click(button(await planned(page, "取快递"), "确认不办了"));
     expect(source.calls.at(-1)).toBe("reminderCancel:reminder-1:2");
   });
 
@@ -411,7 +419,7 @@ describe("日程", () => {
     await settle();
     const page = card(view.host, "日程");
 
-    await click(button(planned(page, "火车"), "改…"));
+    await click(button(await planned(page, "火车"), "改…"));
     // 从现在这一条填起，时间是这台电脑的本地时间。
     expect(text(page)).toContain("修改日程");
     expect(field(page, "标题").value).toBe("火车");
@@ -453,7 +461,7 @@ describe("日程", () => {
     await settle();
     const page = card(view.host, "日程");
 
-    await click(button(planned(page, "火车"), "改…"));
+    await click(button(await planned(page, "火车"), "改…"));
     await fill(page, "地点", "上海站");
     await click(button(page, "保存"));
     expect(source.lastSubmitted).toMatchObject({
@@ -474,8 +482,8 @@ describe("日程", () => {
     await settle();
     const page = card(view.host, "日程");
 
-    expect(text(planned(page, "火车"))).toContain("提前 45 分钟");
-    await click(button(planned(page, "火车"), "改…"));
+    expect(text(await planned(page, "火车"))).toContain("提前 45 分钟");
+    await click(button(await planned(page, "火车"), "改…"));
     const lead = field(page, "提醒");
     expect(lead.value).toBe("45");
     expect(text(lead)).toContain("提前 45 分钟");
@@ -495,7 +503,7 @@ describe("日程", () => {
     await settle();
     const page = card(view.host, "日程");
 
-    await click(button(planned(page, "火车"), "改…"));
+    await click(button(await planned(page, "火车"), "改…"));
     await fill(page, "标题", "高铁");
     await click(button(page, "保存"));
     expect(text(view.host)).toContain(
@@ -536,7 +544,7 @@ describe("日程", () => {
     await settle();
     let page = card(view.host, "日程");
 
-    await click(button(planned(page, "给妈妈打电话"), "改…"));
+    await click(button(await planned(page, "给妈妈打电话"), "改…"));
     await click(button(page, "删除…"));
     await click(button(page, "算了"));
     expect(source.calls).toEqual([]);
@@ -606,6 +614,7 @@ describe("到点提醒", () => {
     const source = new FakeBridge(snapshot({ phase: "signedIn" }));
     const view = await renderApp(source, "本机设置");
     await settle();
+    await click(button(view.host, "选择到点提醒"));
     const toggle = switchNamed(view.host, "到点时弹提醒");
     expect(toggle.getAttribute("aria-checked")).toBe("true");
     expect(text(view.host)).toContain("这台电脑会弹系统通知。");

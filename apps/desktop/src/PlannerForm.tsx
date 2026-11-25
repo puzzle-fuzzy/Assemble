@@ -4,6 +4,7 @@
 // 这边先把最常见的几种填错说清楚，省得等一个来回。
 // 时间在输入框里是本地时间，交出去之前换成 UTC。
 
+import { FieldGroup, FieldLabel, Field as FormField } from "@assemble/ui/field";
 import { type ReactNode, useId, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -115,114 +116,118 @@ export function PlannerForm({
       }}
     >
       <h2 className="text-sm font-medium">{heading}</h2>
-      <Field
-        label="标题"
-        control={(id) => (
-          <Input
-            id={id}
-            value={title}
-            maxLength={200}
-            autoFocus
-            disabled={pending}
-            onChange={(event) => setTitle(event.target.value)}
-          />
-        )}
-      />
-      <div className="grid grid-cols-2 gap-3">
+      <FieldGroup>
         <Field
-          label={form.kind === "schedule" ? "开始时间" : "到点时间"}
+          label="标题"
           control={(id) => (
             <Input
               id={id}
-              type="datetime-local"
-              value={at}
+              value={title}
+              maxLength={200}
+              autoFocus
               disabled={pending}
-              onChange={(event) => setAt(event.target.value)}
+              onChange={(event) => setTitle(event.target.value)}
             />
           )}
         />
-        {form.kind === "schedule" ? (
+        <FieldGroup className="grid grid-cols-1 gap-3 @md:grid-cols-2">
           <Field
-            label="结束时间"
+            label={form.kind === "schedule" ? "开始时间" : "到点时间"}
             control={(id) => (
               <Input
                 id={id}
                 type="datetime-local"
-                value={end}
+                value={at}
                 disabled={pending}
-                onChange={(event) => setEnd(event.target.value)}
+                onChange={(event) => setAt(event.target.value)}
               />
             )}
           />
+          {form.kind === "schedule" ? (
+            <Field
+              label="结束时间"
+              control={(id) => (
+                <Input
+                  id={id}
+                  type="datetime-local"
+                  value={end}
+                  disabled={pending}
+                  onChange={(event) => setEnd(event.target.value)}
+                />
+              )}
+            />
+          ) : null}
+        </FieldGroup>
+        {form.kind === "schedule" ? (
+          <>
+            <FieldGroup className="grid grid-cols-1 gap-3 @md:grid-cols-2">
+              <Field
+                label="重复"
+                control={(id) => (
+                  <Select
+                    id={id}
+                    value={repeat}
+                    disabled={pending}
+                    onChange={(event) =>
+                      setRepeat(event.target.value as Repeat)
+                    }
+                  >
+                    {REPEATS.map((option) => (
+                      <option key={option} value={option}>
+                        {repeatLabel(option)}
+                      </option>
+                    ))}
+                  </Select>
+                )}
+              />
+              <Field
+                label="提醒"
+                control={(id) => (
+                  <Select
+                    id={id}
+                    value={lead}
+                    disabled={pending}
+                    onChange={(event) => setLead(event.target.value)}
+                  >
+                    {leads.map(([minutes, text]) => (
+                      <option
+                        key={text}
+                        value={minutes === null ? "" : String(minutes)}
+                      >
+                        {text}
+                      </option>
+                    ))}
+                  </Select>
+                )}
+              />
+            </FieldGroup>
+            <Field
+              label="地点"
+              control={(id) => (
+                <Input
+                  id={id}
+                  value={place}
+                  maxLength={200}
+                  disabled={pending}
+                  onChange={(event) => setPlace(event.target.value)}
+                />
+              )}
+            />
+          </>
         ) : null}
-      </div>
-      {form.kind === "schedule" ? (
-        <>
-          <div className="grid grid-cols-2 gap-3">
-            <Field
-              label="重复"
-              control={(id) => (
-                <Select
-                  id={id}
-                  value={repeat}
-                  disabled={pending}
-                  onChange={(event) => setRepeat(event.target.value as Repeat)}
-                >
-                  {REPEATS.map((option) => (
-                    <option key={option} value={option}>
-                      {repeatLabel(option)}
-                    </option>
-                  ))}
-                </Select>
-              )}
+        <Field
+          label="备注"
+          control={(id) => (
+            <Textarea
+              id={id}
+              value={notes}
+              maxLength={4000}
+              disabled={pending}
+              onChange={(event) => setNotes(event.target.value)}
             />
-            <Field
-              label="提醒"
-              control={(id) => (
-                <Select
-                  id={id}
-                  value={lead}
-                  disabled={pending}
-                  onChange={(event) => setLead(event.target.value)}
-                >
-                  {leads.map(([minutes, text]) => (
-                    <option
-                      key={text}
-                      value={minutes === null ? "" : String(minutes)}
-                    >
-                      {text}
-                    </option>
-                  ))}
-                </Select>
-              )}
-            />
-          </div>
-          <Field
-            label="地点"
-            control={(id) => (
-              <Input
-                id={id}
-                value={place}
-                maxLength={200}
-                disabled={pending}
-                onChange={(event) => setPlace(event.target.value)}
-              />
-            )}
-          />
-        </>
-      ) : null}
-      <Field
-        label="备注"
-        control={(id) => (
-          <Textarea
-            id={id}
-            value={notes}
-            maxLength={4000}
-            disabled={pending}
-            onChange={(event) => setNotes(event.target.value)}
-          />
-        )}
-      />
+          )}
+        />
+      </FieldGroup>
       {problem ? (
         <p role="alert" className="text-xs text-destructive">
           {problem}
@@ -289,11 +294,9 @@ function Field({
 }) {
   const id = useId();
   return (
-    <div className="flex min-w-0 flex-col gap-1 text-sm">
-      <label htmlFor={id} className="text-muted-foreground">
-        {label}
-      </label>
+    <FormField className="min-w-0">
+      <FieldLabel htmlFor={id}>{label}</FieldLabel>
       {control(id)}
-    </div>
+    </FormField>
   );
 }

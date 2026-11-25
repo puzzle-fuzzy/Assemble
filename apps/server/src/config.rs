@@ -24,6 +24,10 @@ pub const SEND_TTL_HOURS: &str = "ASSEMBLE_SEND_TTL_HOURS";
 pub const SEND_HISTORY_DAYS: &str = "ASSEMBLE_SEND_HISTORY_DAYS";
 /// 网页登录状态保留多少小时。
 pub const WEB_SESSION_HOURS: &str = "ASSEMBLE_WEB_SESSION_HOURS";
+/// 只为已经验证的指定邮箱授予管理权限；不影响公开注册。
+pub const SUPER_ADMIN_EMAIL: &str = "ASSEMBLE_SUPER_ADMIN_EMAIL";
+/// 与服务端同源发布的管理端构建目录，不包含任何账户数据。
+pub const ADMIN_ASSETS_DIR: &str = "ASSEMBLE_ADMIN_ASSETS_DIR";
 pub const DEFAULT_ADDR: &str = "127.0.0.1:8787";
 pub const DEFAULT_DRIVE_QUOTA_BYTES: u64 = 2 * 1024 * 1024 * 1024;
 pub const DEFAULT_SEND_TTL: Duration = Duration::from_hours(24);
@@ -46,6 +50,8 @@ pub struct Config {
     pub web_session_ttl: Duration,
     pub smtp: Option<crate::mail::SmtpConfig>,
     pub github: Option<crate::github::GithubConfig>,
+    pub super_admin_email: Option<String>,
+    pub admin_assets_dir: PathBuf,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -165,6 +171,13 @@ impl Config {
             web_session_ttl,
             smtp: crate::mail::SmtpConfig::from_lookup(&get)?,
             github: crate::github::GithubConfig::from_lookup(&get)?,
+            super_admin_email: optional(SUPER_ADMIN_EMAIL, get(SUPER_ADMIN_EMAIL), |value| {
+                crate::email_identity::normalize_email(value)
+                    .map_err(|_| "必须是合法邮箱".to_owned())
+            })?,
+            admin_assets_dir: get(ADMIN_ASSETS_DIR)
+                .filter(|value| !value.trim().is_empty())
+                .map_or_else(|| PathBuf::from("apps/admin/dist"), PathBuf::from),
         })
     }
 
@@ -180,6 +193,8 @@ impl Config {
             web_session_ttl: DEFAULT_WEB_SESSION_TTL,
             smtp: None,
             github: None,
+            super_admin_email: None,
+            admin_assets_dir: PathBuf::from("apps/admin/dist"),
         }
     }
 
@@ -292,6 +307,7 @@ mod tests {
         assert_eq!(config.web_session_ttl, DEFAULT_WEB_SESSION_TTL);
         assert!(config.smtp.is_none());
         assert!(config.github.is_none());
+        assert!(config.super_admin_email.is_none());
         assert_eq!(DEFAULT_DRIVE_QUOTA_BYTES, 2 * 1024 * 1024 * 1024);
 
         assert_eq!(
@@ -321,6 +337,7 @@ mod tests {
             (SEND_TTL_HOURS, "6"),
             (SEND_HISTORY_DAYS, "7"),
             (WEB_SESSION_HOURS, "1"),
+            (SUPER_ADMIN_EMAIL, " Admin@Example.Test "),
         ]))
         .unwrap();
         assert_eq!(config.addr.to_string(), "0.0.0.0:9000");
@@ -328,6 +345,10 @@ mod tests {
         assert_eq!(config.send_ttl, Duration::from_secs(6 * 60 * 60));
         assert_eq!(config.send_history, Duration::from_secs(7 * 24 * 60 * 60));
         assert_eq!(config.web_session_ttl, Duration::from_secs(60 * 60));
+        assert_eq!(
+            config.super_admin_email.as_deref(),
+            Some("admin@example.test")
+        );
 
         let too_many_hours = MAX_HOURS.saturating_add(1).to_string();
         for (variable, value) in [
@@ -341,6 +362,7 @@ mod tests {
             (SEND_TTL_HOURS, too_many_hours.as_str()),
             (SEND_HISTORY_DAYS, "forever"),
             (WEB_SESSION_HOURS, "1.5"),
+            (SUPER_ADMIN_EMAIL, "invalid-email"),
         ] {
             // 同名变量以排在前面的为准，所以把不合法的值放在最前。
             let get = |name: &'static str| {

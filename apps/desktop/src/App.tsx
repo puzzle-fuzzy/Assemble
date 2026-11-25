@@ -3,17 +3,21 @@
 // 现在有六类真实内容：账户与连接、账户里的设备、文件传输、日程与提醒、云盘、本机设置。
 
 import {
-  ArrowDownToLine,
-  ArrowLeftRight,
-  ArrowUpToLine,
-  CalendarClock,
-  Cloud,
-  Settings2,
-  UserRound,
-  X,
-} from "lucide-react";
+  Breadcrumb,
+  BreadcrumbItem,
+  BreadcrumbList,
+  BreadcrumbPage,
+  BreadcrumbSeparator,
+} from "@assemble/ui/breadcrumb";
+import { ArrowDownToLine, ArrowUpToLine, UserRound, X } from "lucide-react";
 import { type CSSProperties, useEffect, useId, useRef, useState } from "react";
 import { toast } from "sonner";
+import {
+  type DesktopListItem,
+  DesktopSidebar,
+  DESKTOP_MODULES as SECTIONS,
+  type DesktopModule as Section,
+} from "@/components/desktop-sidebar";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -45,13 +49,9 @@ import { Progress } from "@/components/ui/progress";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 import {
-  Sidebar,
-  SidebarContent,
-  SidebarFooter,
   SidebarInset,
-  SidebarMenu,
-  SidebarMenuItem,
   SidebarProvider,
+  SidebarTrigger,
 } from "@/components/ui/sidebar";
 import { Toaster } from "@/components/ui/sonner";
 import { Switch } from "@/components/ui/switch";
@@ -65,6 +65,7 @@ import { useSnapshot } from "@/hooks/use-snapshot";
 import { type Bridge, bridge, toBridgeError } from "@/lib/bridge";
 import { formatBuildInfo } from "@/lib/build-info";
 import { messageFor } from "@/lib/messages";
+import { agenda, ago, reminderLine, scheduleLine } from "@/lib/planner-text";
 import {
   formatSize,
   formatSpace,
@@ -91,20 +92,17 @@ export interface AppProps {
 
 const LOGIN_TIMEOUT_MESSAGE = "等待浏览器登录超时，请重试。";
 
-const SECTIONS = [
-  { id: "transfers", label: "文件传输", icon: ArrowLeftRight },
-  { id: "drive", label: "云盘", icon: Cloud },
-  { id: "planner", label: "日程与提醒", icon: CalendarClock },
-  { id: "settings", label: "本机设置", icon: Settings2 },
-] as const;
-type Section = (typeof SECTIONS)[number]["id"];
-
 export function App({ bridge: source = bridge }: AppProps) {
   const { snapshot, loadError } = useSnapshot(source);
   const [actionError, setActionError] = useState<string | null>(null);
   const [section, setSection] = useState<Section>("transfers");
   const [accountOpen, setAccountOpen] = useState(false);
   const accountTitleId = useId();
+  const [selection, setSelection] = useState<Partial<Record<Section, string>>>(
+    {},
+  );
+  const [queries, setQueries] = useState<Partial<Record<Section, string>>>({});
+  const [plannerDraft, setPlannerDraft] = useState(false);
   const account =
     snapshot?.session.phase === "signedIn" ? snapshot.session.account : null;
   const phase = snapshot?.session.phase;
@@ -112,10 +110,33 @@ export function App({ bridge: source = bridge }: AppProps) {
   const compose = snapshot?.planner?.compose ?? null;
   const focused = snapshot?.planner?.focus ?? null;
 
-  // 托盘与系统通知仍能直接到达目标；普通后台刷新不会抢走用户正在看的页面。
+  const accountId = account?.id ?? null;
+  const previousAccount = useRef(accountId);
   useEffect(() => {
-    if (compose !== null || focused !== null) setSection("planner");
-  }, [compose, focused]);
+    if (previousAccount.current === accountId) return;
+    previousAccount.current = accountId;
+    setSelection({});
+    setQueries({});
+    setPlannerDraft(false);
+    setActionError(null);
+  }, [accountId]);
+
+  // 入口分别响应变化：通知定位不会被先前尚未清理的托盘标记盖回草稿。
+  useEffect(() => {
+    if (compose === null) return;
+    setSection("planner");
+    setQueries((previous) => ({ ...previous, planner: "" }));
+    setSelection((previous) => ({ ...previous, planner: "draft" }));
+  }, [compose]);
+  useEffect(() => {
+    if (focused === null) return;
+    setSection("planner");
+    setQueries((previous) => ({ ...previous, planner: "" }));
+    setSelection((previous) => ({
+      ...previous,
+      planner: `notification:${focused}`,
+    }));
+  }, [focused]);
 
   useEffect(() => {
     if (phase === "signedIn" && previousPhase.current === "signingIn")
@@ -148,79 +169,61 @@ export function App({ bridge: source = bridge }: AppProps) {
     }
   }
 
+  const allItems = desktopItems(section, snapshot);
+  const query = queries[section] ?? "";
+  const items = allItems.filter((item) =>
+    `${item.title} ${item.description}`
+      .toLocaleLowerCase()
+      .includes(query.trim().toLocaleLowerCase()),
+  );
+  const selected =
+    section === "planner" && selection.planner === "draft" && plannerDraft
+      ? "draft"
+      : (items.find((item) => item.id === selection[section])?.id ??
+        items[0]?.id ??
+        null);
+  const detailTitle =
+    selected === "draft"
+      ? "未保存的草稿"
+      : items.find((item) => item.id === selected)?.title;
+  function select(id: string) {
+    setSelection((previous) => ({ ...previous, [section]: id }));
+  }
+
   return (
     <>
       <Toaster closeButton containerAriaLabel="登录提示" />
       <TooltipProvider delayDuration={250}>
         <SidebarProvider
-          open={false}
           className="h-svh min-h-0 overflow-hidden"
-          style={{ "--sidebar-width": "4rem" } as CSSProperties}
+          style={{ "--sidebar-width": "350px" } as CSSProperties}
         >
-          {/* 桌面窗口窄于网页的移动断点时，也必须保留这条固定图标栏。 */}
-          <Sidebar
-            collapsible="none"
-            className="shrink-0 border-r"
-            aria-label="功能侧栏"
-            role="complementary"
-          >
-            <SidebarContent className="px-3 py-5">
-              <nav aria-label="主功能">
-                <SidebarMenu className="gap-3">
-                  {SECTIONS.filter((item) => item.id !== "settings").map(
-                    ({ id, label, icon: Icon }) => (
-                      <SidebarMenuItem key={id} className="flex justify-center">
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <Button
-                              type="button"
-                              size="icon-lg"
-                              variant={section === id ? "default" : "ghost"}
-                              aria-label={label}
-                              aria-current={section === id ? "page" : undefined}
-                              aria-controls={`view-${id}`}
-                              onClick={() => navigate(id)}
-                            >
-                              <Icon aria-hidden="true" />
-                            </Button>
-                          </TooltipTrigger>
-                          <TooltipContent side="right" sideOffset={12}>
-                            {label}
-                          </TooltipContent>
-                        </Tooltip>
-                      </SidebarMenuItem>
-                    ),
-                  )}
-                </SidebarMenu>
-              </nav>
-            </SidebarContent>
-            <SidebarFooter className="items-center gap-3 px-3 pb-4">
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button
-                    type="button"
-                    size="icon-lg"
-                    variant={section === "settings" ? "default" : "ghost"}
-                    aria-label="本机设置"
-                    aria-current={section === "settings" ? "page" : undefined}
-                    aria-controls="view-settings"
-                    onClick={() => navigate("settings")}
-                  >
-                    <Settings2 aria-hidden="true" />
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent side="right" sideOffset={12}>
-                  本机设置
-                </TooltipContent>
-              </Tooltip>
-              <Separator />
+          <DesktopSidebar
+            section={section}
+            onNavigate={navigate}
+            items={items}
+            selected={selected}
+            onSelect={select}
+            query={query}
+            onQuery={(value) =>
+              setQueries((previous) => ({ ...previous, [section]: value }))
+            }
+            signedIn={phase === "signedIn"}
+            loading={
+              snapshot === null ||
+              (phase === "signedIn" &&
+                ((section === "drive" && snapshot.drive === null) ||
+                  (section === "planner" && snapshot.planner === null)))
+            }
+            draft={plannerDraft}
+            account={
               <Popover open={accountOpen} onOpenChange={setAccountOpen}>
                 <Tooltip>
                   <TooltipTrigger asChild>
                     <PopoverTrigger asChild>
                       <Button
                         type="button"
-                        size="icon-lg"
+                        size="icon"
                         variant={accountOpen ? "secondary" : "ghost"}
                         className="rounded-full"
                         aria-label="账户"
@@ -294,19 +297,39 @@ export function App({ bridge: source = bridge }: AppProps) {
                   />
                 </PopoverContent>
               </Popover>
-            </SidebarFooter>
-          </Sidebar>
+            }
+          />
           <SidebarInset className="h-full min-h-0 min-w-0 bg-background text-foreground">
-            <header className="flex shrink-0 items-center justify-between gap-4 border-b px-5 py-5">
-              <h1 className="text-base leading-none font-semibold">Assemble</h1>
+            <header className="sticky top-0 flex shrink-0 flex-wrap items-center gap-2 border-b bg-background p-4">
+              <SidebarTrigger className="-ml-1" aria-label="收折列表栏" />
+              <Separator
+                orientation="vertical"
+                className="mr-2 data-vertical:h-4 data-vertical:self-auto"
+              />
+              <Breadcrumb className="min-w-0 flex-1">
+                <BreadcrumbList className="flex-nowrap">
+                  <BreadcrumbItem className="shrink-0">
+                    {SECTIONS.find((item) => item.id === section)?.label}
+                  </BreadcrumbItem>
+                  {detailTitle ? (
+                    <>
+                      <BreadcrumbSeparator />
+                      <BreadcrumbItem className="min-w-0">
+                        <BreadcrumbPage className="truncate">
+                          {detailTitle}
+                        </BreadcrumbPage>
+                      </BreadcrumbItem>
+                    </>
+                  ) : null}
+                </BreadcrumbList>
+              </Breadcrumb>
               <ServiceStatus
                 service={snapshot?.service}
-                signedIn={snapshot?.session.phase === "signedIn"}
+                signedIn={phase === "signedIn"}
               />
             </header>
-
             <ScrollArea className="min-h-0 flex-1">
-              <div className="mx-auto flex w-full max-w-3xl flex-col gap-4 p-5">
+              <div className="@container mx-auto flex w-full min-w-0 flex-col gap-4 p-4">
                 {loadError ? (
                   <p role="alert" className="text-sm text-destructive">
                     {loadError}
@@ -323,7 +346,6 @@ export function App({ bridge: source = bridge }: AppProps) {
                     {actionError}
                   </p>
                 ) : null}
-
                 {phase !== "signedIn" && section !== "settings" ? (
                   <Empty className="min-h-64">
                     <EmptyHeader>
@@ -347,16 +369,22 @@ export function App({ bridge: source = bridge }: AppProps) {
                     </EmptyContent>
                   </Empty>
                 ) : null}
-                {/* 隐藏而不卸载，切换页面不会丢掉正在编辑的日程或中断已有操作。 */}
+                {/* 保持同一账户的草稿与进行中的操作；隐藏的区域不进入键盘导航。 */}
                 <section
                   id="view-transfers"
                   aria-label="文件传输"
                   hidden={section !== "transfers"}
                 >
                   <TransfersCard
+                    key={accountId ?? "signedOut"}
                     source={source}
                     snapshot={snapshot}
                     onError={setActionError}
+                    selected={
+                      section === "transfers"
+                        ? selected
+                        : (selection.transfers ?? null)
+                    }
                   />
                 </section>
                 <section
@@ -365,11 +393,20 @@ export function App({ bridge: source = bridge }: AppProps) {
                   hidden={section !== "planner"}
                 >
                   <PlannerCard
-                    key={account?.id ?? "signedOut"}
+                    key={accountId ?? "signedOut"}
                     active={section === "planner"}
                     source={source}
                     snapshot={snapshot}
                     onError={setActionError}
+                    selected={
+                      section === "planner"
+                        ? selected
+                        : (selection.planner ?? null)
+                    }
+                    onSelect={(id) =>
+                      setSelection((previous) => ({ ...previous, planner: id }))
+                    }
+                    onDraftChange={setPlannerDraft}
                   />
                 </section>
                 <section
@@ -378,9 +415,13 @@ export function App({ bridge: source = bridge }: AppProps) {
                   hidden={section !== "drive"}
                 >
                   <DriveCard
+                    key={accountId ?? "signedOut"}
                     source={source}
                     snapshot={snapshot}
                     onError={setActionError}
+                    selected={
+                      section === "drive" ? selected : (selection.drive ?? null)
+                    }
                   />
                 </section>
                 <section
@@ -392,6 +433,11 @@ export function App({ bridge: source = bridge }: AppProps) {
                     source={source}
                     snapshot={snapshot}
                     onError={setActionError}
+                    selected={
+                      section === "settings"
+                        ? selected
+                        : (selection.settings ?? "startup")
+                    }
                   />
                 </section>
               </div>
@@ -407,6 +453,90 @@ export function App({ bridge: source = bridge }: AppProps) {
       </TooltipProvider>
     </>
   );
+}
+
+function desktopItems(
+  section: Section,
+  snapshot: Snapshot | null,
+): DesktopListItem[] {
+  if (section === "settings")
+    return [
+      {
+        id: "startup",
+        title: "开机启动",
+        meta: "本机",
+        description: "设置登录系统后自动启动 Assemble。",
+      },
+      {
+        id: "receive",
+        title: "接收位置",
+        meta: "文件",
+        description: "查看与更改文件接收目录。",
+      },
+      ...(snapshot?.session.phase === "signedIn"
+        ? [
+            {
+              id: "notifications",
+              title: "到点提醒",
+              meta: "通知",
+              description: "设置这台电脑的日程与提醒通知。",
+            },
+          ]
+        : []),
+      ...(snapshot?.sendMenu && snapshot.sendMenu !== "unsupported"
+        ? [
+            {
+              id: "sendMenu",
+              title: "右键菜单",
+              meta: "Windows",
+              description: "在文件右键菜单中启用 Assemble 发送。",
+            },
+          ]
+        : []),
+    ];
+  if (snapshot?.session.phase !== "signedIn") return [];
+  if (section === "transfers")
+    return snapshot.transfers.map((item) => ({
+      id: item.id,
+      title: item.name,
+      meta: formatSize(item.size),
+      description: `${item.direction === "in" ? "来自" : "发给"} ${item.peer} · ${transferStatus(item)}${item.savedAs ? ` · 已存为「${item.savedAs}」` : ""}`,
+    }));
+  if (section === "drive")
+    return (snapshot.drive?.items ?? []).map((item) => ({
+      id: item.id,
+      title: item.name,
+      meta: formatSize(item.size),
+      description: `${item.createdAt.slice(0, 10)} 存入云盘`,
+    }));
+  const planner = snapshot.planner;
+  if (!planner) return [];
+  return [
+    ...planner.notifications.map((item) => ({
+      id: `notification:${item.id}`,
+      title: item.title,
+      meta: ago(item.raisedAt, Date.now()),
+      description: item.body ?? "到点的提醒",
+      group: "到点的提醒",
+    })),
+    ...agenda(planner, Date.now()).map((entry) =>
+      "schedule" in entry
+        ? {
+            id: entry.key,
+            title: entry.schedule.title,
+            meta: "日程",
+            description: scheduleLine(entry.schedule, Date.now()),
+            group: "接下来的安排",
+          }
+        : {
+            id: entry.key,
+            title: entry.reminder.title,
+            meta: "提醒",
+            description: reminderLine(entry.reminder, Date.now()),
+            group: "接下来的安排",
+          },
+    ),
+  ];
 }
 
 /** 官网地址由页脚展示；这里仅保留检测、断网与登录后的连接状态。 */
@@ -687,7 +817,7 @@ function DeviceRow({
 
   return (
     <div className="rounded-lg border border-border px-3 py-2">
-      <div className="flex items-center gap-3">
+      <div className="flex flex-wrap items-center gap-3">
         <span
           aria-hidden
           className={
@@ -729,7 +859,7 @@ function DeviceRow({
           </p>
         </div>
         {isThisDevice ? null : (
-          <div className="flex shrink-0 gap-2">
+          <div className="flex shrink-0 flex-wrap gap-2">
             {confirming ? (
               <>
                 <Button
@@ -809,7 +939,12 @@ const CANCELLABLE: ReadonlySet<TransferView["phase"]> = new Set([
 ]);
 
 /** 文件传输。收到的自动存进接收位置；发出去的从这里发起，也在这里看得到结果。 */
-function TransfersCard({ source, snapshot, onError }: CardProps) {
+function TransfersCard({
+  source,
+  snapshot,
+  onError,
+  selected,
+}: CardProps & { selected: string | null }) {
   const [pending, setPending] = useState(false);
 
   // 选文件时系统选择器一直开着，命令要到它关掉才返回。
@@ -848,16 +983,32 @@ function TransfersCard({ source, snapshot, onError }: CardProps) {
       </CardHeader>
       <CardContent className="flex flex-col gap-2">
         {snapshot.transfers.length === 0 ? (
-          <p className="text-sm text-muted-foreground">还没有收发过文件。</p>
+          <Empty>
+            <EmptyHeader>
+              <EmptyTitle>还没有收发过文件。</EmptyTitle>
+              <EmptyDescription>
+                发送文件，或等待其他设备发来文件。
+              </EmptyDescription>
+            </EmptyHeader>
+          </Empty>
+        ) : selected === null ? (
+          <Empty>
+            <EmptyHeader>
+              <EmptyTitle>没有选中的传输</EmptyTitle>
+              <EmptyDescription>在列表中搜索或选择一条记录。</EmptyDescription>
+            </EmptyHeader>
+          </Empty>
         ) : (
-          snapshot.transfers.map((transfer) => (
-            <TransferRow
-              key={transfer.id}
-              source={source}
-              transfer={transfer}
-              onError={onError}
-            />
-          ))
+          snapshot.transfers
+            .filter((transfer) => transfer.id === selected)
+            .map((transfer) => (
+              <TransferRow
+                key={transfer.id}
+                source={source}
+                transfer={transfer}
+                onError={onError}
+              />
+            ))
         )}
       </CardContent>
     </Card>
@@ -892,7 +1043,7 @@ function TransferRow({
 
   return (
     <div className="rounded-lg border border-border px-3 py-2">
-      <div className="flex items-start gap-3">
+      <div className="flex flex-wrap items-start gap-3">
         <span
           aria-hidden
           className="mt-0.5 text-muted-foreground"
@@ -918,7 +1069,7 @@ function TransferRow({
             </p>
           ) : null}
         </div>
-        <div className="flex shrink-0 gap-2">
+        <div className="flex shrink-0 flex-wrap gap-2">
           {isSavedHere(transfer) ? (
             // 只在文件夹里选中它，不打开：收到的东西要不要打开由用户自己决定。
             <Button
@@ -974,7 +1125,12 @@ function TransferRow({
 }
 
 /** 云盘：账户在服务端的文件。从这台电脑存进去的，别的设备也取得到。 */
-function DriveCard({ source, snapshot, onError }: CardProps) {
+function DriveCard({
+  source,
+  snapshot,
+  onError,
+  selected,
+}: CardProps & { selected: string | null }) {
   const [pending, setPending] = useState(false);
   const [confirming, setConfirming] = useState<string | null>(null);
   // 名单由 Rust 在连上服务时去拿；万一没拿到（比如刚登录时断了一下），这里补要一次。
@@ -1039,20 +1195,38 @@ function DriveCard({ source, snapshot, onError }: CardProps) {
             value={(drive.usedBytes / drive.limitBytes) * 100}
           />
           {drive.items.length === 0 ? (
-            <p className="text-sm text-muted-foreground">云盘里还没有文件。</p>
+            <Empty>
+              <EmptyHeader>
+                <EmptyTitle>云盘里还没有文件。</EmptyTitle>
+                <EmptyDescription>
+                  上传文件后，同一账户的其他设备也能取回。
+                </EmptyDescription>
+              </EmptyHeader>
+            </Empty>
+          ) : selected === null ? (
+            <Empty>
+              <EmptyHeader>
+                <EmptyTitle>没有选中的文件</EmptyTitle>
+                <EmptyDescription>
+                  在列表中搜索或选择一个文件。
+                </EmptyDescription>
+              </EmptyHeader>
+            </Empty>
           ) : (
-            drive.items.map((file) => (
-              <DriveRow
-                key={file.id}
-                source={source}
-                file={file}
-                confirming={confirming === file.id}
-                pending={pending}
-                onConfirm={() => setConfirming(file.id)}
-                onCancel={() => setConfirming(null)}
-                act={act}
-              />
-            ))
+            drive.items
+              .filter((file) => file.id === selected)
+              .map((file) => (
+                <DriveRow
+                  key={file.id}
+                  source={source}
+                  file={file}
+                  confirming={confirming === file.id}
+                  pending={pending}
+                  onConfirm={() => setConfirming(file.id)}
+                  onCancel={() => setConfirming(null)}
+                  act={act}
+                />
+              ))
           )}
         </CardContent>
       ) : null}
@@ -1078,7 +1252,7 @@ function DriveRow({
   act: (what: () => Promise<unknown>) => Promise<void>;
 }) {
   return (
-    <div className="flex items-start gap-3 rounded-lg border border-border px-3 py-2">
+    <div className="flex flex-wrap items-start gap-3 rounded-lg border border-border px-3 py-2">
       <div className="min-w-0 flex-1">
         <p className="truncate text-sm font-medium" title={file.name}>
           {file.name}
@@ -1087,7 +1261,7 @@ function DriveRow({
           {formatSize(file.size)} · {file.createdAt.slice(0, 10)}
         </p>
       </div>
-      <div className="flex shrink-0 gap-2">
+      <div className="flex shrink-0 flex-wrap gap-2">
         {confirming ? (
           <>
             <Button
@@ -1142,7 +1316,12 @@ const LAUNCH_HINTS: Record<LaunchState, string | null> = {
 /** 默认的接收位置。它是一个固定的系统位置，不是哪个具体文件夹的路径。 */
 const DEFAULT_RECEIVE = "下载/Assemble";
 
-function LaunchCard({ source, snapshot, onError }: CardProps) {
+function LaunchCard({
+  source,
+  snapshot,
+  onError,
+  selected,
+}: CardProps & { selected: string | null }) {
   const [pending, setPending] = useState(false);
   const state: LaunchState = snapshot?.launchAtLogin ?? "unknown";
   const hint = LAUNCH_HINTS[state];
@@ -1181,8 +1360,10 @@ function LaunchCard({ source, snapshot, onError }: CardProps) {
     <Card>
       <CardHeader>
         <CardTitle>本机</CardTitle>
-        <CardDescription>开机启动</CardDescription>
-        <CardAction>
+        <CardDescription>
+          {selected === "startup" ? "开机启动" : "系统设置"}
+        </CardDescription>
+        <CardAction hidden={selected !== "startup"}>
           <Switch
             aria-label="开机启动"
             checked={state === "enabled"}
@@ -1194,8 +1375,13 @@ function LaunchCard({ source, snapshot, onError }: CardProps) {
         </CardAction>
       </CardHeader>
       <CardContent className="flex flex-col gap-3">
-        {hint ? <p className="text-sm text-muted-foreground">{hint}</p> : null}
-        <div className="flex items-center justify-between gap-3 border-t border-border pt-3">
+        {hint && selected === "startup" ? (
+          <p className="text-sm text-muted-foreground">{hint}</p>
+        ) : null}
+        <div
+          hidden={selected !== "receive"}
+          className="flex flex-wrap items-center justify-between gap-3 pt-3"
+        >
           <div className="min-w-0">
             <p className="text-sm font-medium">接收位置</p>
             <p
@@ -1210,7 +1396,7 @@ function LaunchCard({ source, snapshot, onError }: CardProps) {
                   : `「${customFolder}」文件夹`)}
             </p>
           </div>
-          <div className="flex shrink-0 gap-2">
+          <div className="flex shrink-0 flex-wrap gap-2">
             <Button
               size="sm"
               variant="outline"
@@ -1232,8 +1418,9 @@ function LaunchCard({ source, snapshot, onError }: CardProps) {
           </div>
         </div>
         {/* 提醒有没有用，要看登录没登录：没登录就收不到，这一项也不必摆出来。 */}
-        {snapshot?.session.phase === "signedIn" ? (
-          <div className="flex items-center justify-between gap-3 border-t border-border pt-3">
+        {snapshot?.session.phase === "signedIn" &&
+        selected === "notifications" ? (
+          <div className="flex flex-wrap items-center justify-between gap-3 pt-3">
             <div className="min-w-0">
               <p className="text-sm font-medium">到点提醒</p>
               <p className="text-sm text-muted-foreground">
@@ -1252,7 +1439,7 @@ function LaunchCard({ source, snapshot, onError }: CardProps) {
             />
           </div>
         ) : null}
-        {sendMenu === "unsupported" ? null : (
+        {sendMenu === "unsupported" || selected !== "sendMenu" ? null : (
           <div className="flex items-center justify-between gap-3 border-t border-border pt-3">
             <div className="min-w-0">
               <p className="text-sm font-medium">右键菜单</p>

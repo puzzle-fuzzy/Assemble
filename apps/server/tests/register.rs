@@ -506,7 +506,12 @@ async fn github_verified_email_registers_once_and_later_email_changes_do_not_mov
         .fetch_all(&f.server.state.pool)
         .await
         .unwrap();
-    assert_eq!(actions, ["account.registered", "web.login"]);
+    assert_eq!(actions, ["account.registered", "web.login", "web.login"]);
+    let methods: Vec<String> = sqlx::query_scalar("SELECT method FROM login_events ORDER BY id")
+        .fetch_all(&f.server.state.pool)
+        .await
+        .unwrap();
+    assert_eq!(methods, ["github", "github"]);
     assert_eq!(
         identity::by_email(&f.server.state.pool, "github@example.test")
             .await

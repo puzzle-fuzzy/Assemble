@@ -34,12 +34,14 @@ describe("主窗口导航", () => {
     expect(view.host.querySelector('[data-slot="popover-content"]')).toBeNull();
     for (const name of ["文件传输", "云盘", "日程与提醒", "本机设置"]) {
       const trigger = button(view.host, name);
-      expect(trigger?.textContent).toBe("");
+      expect(trigger?.querySelector(".sr-only")?.textContent).toBe(name);
       await click(trigger);
       expect(current()).toBe(trigger ?? null);
-      expect(view.host.querySelectorAll('[aria-current="page"]')).toHaveLength(
-        1,
-      );
+      expect(
+        view.host.querySelectorAll(
+          'nav[aria-label="主功能"] [aria-current="page"]',
+        ),
+      ).toHaveLength(1);
       expect(
         view.host
           .querySelector("section[id^=view-]:not([hidden])")

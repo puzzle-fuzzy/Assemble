@@ -15,6 +15,7 @@
 #![cfg_attr(test, allow(clippy::pedantic))]
 
 pub mod account;
+pub mod admin;
 pub mod device;
 pub mod drive;
 pub mod error;

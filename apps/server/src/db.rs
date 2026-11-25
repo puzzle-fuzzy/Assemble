@@ -100,6 +100,7 @@ mod tests {
                 "email_actions",
                 "email_rate_limits",
                 "github_identities",
+                "login_events",
                 "notifications",
                 "planner_mutations",
                 "reminders",
@@ -117,7 +118,7 @@ mod tests {
             .fetch_one(&again)
             .await
             .unwrap();
-        assert_eq!(applied, 3);
+        assert_eq!(applied, 4);
     }
 
     #[tokio::test]
@@ -162,6 +163,12 @@ mod tests {
                 .await
                 .unwrap();
         assert_eq!(account.as_deref(), Some("alex"));
+        let admin_defaults: (bool, Option<i64>) =
+            sqlx::query_as("SELECT is_super_admin, last_login_at FROM accounts WHERE id = 'a1'")
+                .fetch_one(&upgraded)
+                .await
+                .unwrap();
+        assert_eq!(admin_defaults, (false, None));
         let tables: i64 = sqlx::query_scalar(
             "SELECT count(*) FROM sqlite_master WHERE type = 'table'              AND name IN ('schedules', 'reminders', 'notifications', 'planner_mutations')",
         )

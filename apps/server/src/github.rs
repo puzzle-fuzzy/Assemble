@@ -494,15 +494,15 @@ async fn finish_callback(
             if update_avatar(state, &id, &profile).await.is_err() {
                 return unavailable();
             }
-            crate::audit::record(
-                &state.pool,
-                Some(&id),
-                None,
-                crate::audit::actions::WEB_LOGIN,
-                None,
+            web::signed_in(
+                state,
+                &id,
+                &next,
+                "已登录",
+                "可以返回 Assemble。",
+                assemble_protocol::admin::LoginMethod::Github,
             )
-            .await;
-            web::signed_in(state, &id, &next, "已登录", "可以返回 Assemble。").await
+            .await
         }
         Ok(None) => {
             let Ok(ticket) = random_token() else {
@@ -670,6 +670,7 @@ async fn profile_submit(
             &complete.next,
             "注册成功",
             "可以返回 Assemble。",
+            assemble_protocol::admin::LoginMethod::Github,
         )
         .await
     } else {

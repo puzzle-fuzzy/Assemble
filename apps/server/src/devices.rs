@@ -31,7 +31,7 @@ pub struct DeviceRow {
 
 /// 库里的平台名只会由 [`Platform`] 写入。出现别的值说明数据被改过：
 /// 如实报错，而不是悄悄猜一个。
-fn platform_from(stored: &str) -> Result<Platform, ApiError> {
+pub(crate) fn platform_from(stored: &str) -> Result<Platform, ApiError> {
     match stored {
         "windows" => Ok(Platform::Windows),
         "macos" => Ok(Platform::Macos),

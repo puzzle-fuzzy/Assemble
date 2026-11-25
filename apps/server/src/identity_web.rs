@@ -517,6 +517,11 @@ async fn verify_submit(
         },
         "邮箱已验证",
         "可以返回 Assemble。",
+        if complete.kind == "github" {
+            assemble_protocol::admin::LoginMethod::Github
+        } else {
+            assemble_protocol::admin::LoginMethod::Email
+        },
     )
     .await
 }

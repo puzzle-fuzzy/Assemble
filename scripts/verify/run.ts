@@ -45,7 +45,7 @@ const STEPS: Step[] = [
   },
   {
     name: "前端构建",
-    command: ["bun", "run", "--filter", "@assemble/desktop", "build:frontend"],
+    command: ["bun", "run", "build:frontend"],
   },
   { name: "Rust 格式", command: ["bun", "run", "rust:fmt"] },
   { name: "Rust 静态检查", command: ["bun", "run", "rust:clippy"] },

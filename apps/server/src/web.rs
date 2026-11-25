@@ -15,6 +15,7 @@ use std::collections::HashMap;
 use std::sync::{Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
+use assemble_protocol::admin::LoginMethod;
 use assemble_store::secret::SecretString;
 use axum::extract::Form;
 use axum::extract::State;
@@ -125,11 +126,11 @@ pub fn query_param(uri: &Uri, name: &str) -> Option<String> {
         .map(|(_, value)| value.into_owned())
 }
 
-/// 登录之后可以去的地方：只能是本站以 `/desktop/authorize` 开头的路径，或者账户页本身。
+/// 登录之后可以去的地方：桌面授权、账户页或管理端固定入口。
 ///
 /// 不放开任意地址：否则登录链接本身可以被做成"登录后跳到别的站点"。
 pub fn safe_next(raw: &str) -> Option<&str> {
-    let acceptable = (raw.starts_with("/desktop/authorize") || raw == "/web/account")
+    let acceptable = (raw.starts_with("/desktop/authorize") || matches!(raw, "/web/account" | "/admin" | "/admin/"))
         && !raw.starts_with("//")
         && !raw.contains(['\\', '\r', '\n'])
         // 不允许 `/desktop/authorize/../..` 这种会被浏览器规整到别处的写法。
@@ -323,14 +324,6 @@ pub async fn login_submit(
         );
     };
 
-    audit::record(
-        &state.pool,
-        Some(&account.id),
-        None,
-        actions::WEB_LOGIN,
-        None,
-    )
-    .await;
     tracing::info!(account = %account.username, "web login succeeded");
     signed_in(
         &state,
@@ -338,6 +331,7 @@ pub async fn login_submit(
         &next,
         "已登录",
         "可以关闭此页面，回到 Assemble。",
+        LoginMethod::Email,
     )
     .await
 }
@@ -350,14 +344,23 @@ pub(crate) async fn signed_in(
     next: &str,
     title: &str,
     body: &str,
+    method: LoginMethod,
 ) -> Response {
-    let session = match create_session(state, account_id).await {
+    let session = match create_session(state, account_id, method).await {
         Ok(session) => session,
         Err(error) => {
             tracing::error!(%error, "a web session could not be saved");
             return unavailable();
         }
     };
+    audit::record(
+        &state.pool,
+        Some(account_id),
+        None,
+        actions::WEB_LOGIN,
+        None,
+    )
+    .await;
     let cookie = session_cookie(
         state.config.public_origin.is_secure(),
         session.token.expose(),
@@ -375,12 +378,17 @@ pub(crate) async fn signed_in(
 }
 
 /// 新建一条网页会话。令牌只在这一个函数里以明文存在。
-async fn create_session(state: &Shared, account_id: &str) -> Result<Session, CreateSessionError> {
+async fn create_session(
+    state: &Shared,
+    account_id: &str,
+    method: LoginMethod,
+) -> Result<Session, CreateSessionError> {
     let token = random_token()?;
     let csrf = random_token()?;
     let id = random_id()?;
     let now = assemble_protocol::primitives::Timestamp::now();
     let expires_at = now + state.config.web_session_ttl;
+    let mut tx = state.pool.begin().await?;
     sqlx::query(
         "INSERT INTO web_sessions (id, account_id, token_hash, csrf_token, created_at, expires_at) \
          VALUES (?, ?, ?, ?, ?, ?)",
@@ -391,8 +399,17 @@ async fn create_session(state: &Shared, account_id: &str) -> Result<Session, Cre
     .bind(csrf.expose())
     .bind(now.as_millis())
     .bind(expires_at.as_millis())
-    .execute(&state.pool)
+    .execute(&mut *tx)
     .await?;
+    crate::admin::record_login(
+        &mut tx,
+        account_id,
+        method,
+        now,
+        state.config.super_admin_email.as_deref(),
+    )
+    .await?;
+    tx.commit().await?;
     Ok(Session { token })
 }
 
@@ -459,7 +476,12 @@ mod tests {
         );
         // 账户页本身可以去，它的子路径与相近的写法不行。
         assert_eq!(safe_next("/web/account").unwrap(), "/web/account");
+        assert_eq!(safe_next("/admin").unwrap(), "/admin");
+        assert_eq!(safe_next("/admin/").unwrap(), "/admin/");
         for rejected in [
+            "/administrator",
+            "/admin/users",
+            "/admin/?redirect=https://evil.example",
             "/web/account/",
             "/web/accounts",
             "/web/account/../logout",
