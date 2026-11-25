@@ -1,10 +1,11 @@
-/** 安装包的构建身份，与连接哪一套服务相互独立。 */
+/** 安装包的构建身份，以及本次构建对应的官网地址。 */
 export type BuildChannel = "stable" | "preview" | "local";
 
 export interface BuildInfo {
   channel: BuildChannel;
   version: string;
   commit: string;
+  website: string;
 }
 
 const CHANNEL_NAMES: Record<BuildChannel, string> = {

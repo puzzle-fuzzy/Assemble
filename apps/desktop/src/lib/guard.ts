@@ -287,6 +287,8 @@ export function isSnapshot(value: unknown): value is Snapshot {
     isRecord(value.receive) &&
     (value.receive.customFolder === null ||
       typeof value.receive.customFolder === "string") &&
+    (value.receive.displayPath === null ||
+      typeof value.receive.displayPath === "string") &&
     isLaunchState(value.launchAtLogin) &&
     (value.notice === null || isNotice(value.notice)) &&
     (value.planner === null || isPlannerView(value.planner)) &&

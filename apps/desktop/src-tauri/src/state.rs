@@ -1,8 +1,8 @@
 //! 应用状态：服务是否可达、会话处在哪个阶段、有哪些设备，
 //! 以及这些状态如何交给界面。收发的记录在 [`crate::registry`]。
 //!
-//! 界面只能看到这里定义的 [`Snapshot`]。凭据、路径与系统诊断都不在其中：
-//! 文件在本机的哪里，只记在 Rust 里，界面拿到的是它的名字。
+//! 界面只能看到这里定义的 [`Snapshot`]。凭据与系统诊断不在其中；
+//! Windows 接收目录仅作为只读显示文字给出，文件操作的路径始终留在 Rust 里。
 //!
 //! 状态的改动都经过 [`AppState::update`]：改完若与之前不同，就自动推送给界面。
 //! 这样既不会漏推，也不会为一次没有变化的改动惊动界面。
@@ -204,24 +204,54 @@ impl Notice {
     }
 }
 
-/// 收到的文件存在哪里。界面只知道是在默认位置还是用户选的文件夹，
-/// 以及那个文件夹叫什么；完整的位置不经过界面。
+/// 接收位置的显示信息。Windows 按用户要求显示完整目录，其他平台保留简称。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ReceiveView {
     /// 用户选的文件夹的名字；用默认位置（下载/Assemble）时为 `None`。
     pub custom_folder: Option<String>,
+    /// 仅供 Windows 的“接收位置”展示；界面不能把它作为文件操作参数传回。
+    pub display_path: Option<String>,
 }
 
 impl ReceiveView {
-    /// 一个接收文件夹在界面上的样子：只说得出它的名字。
-    fn for_folder(folder: Option<&std::path::Path>) -> Self {
+    fn for_folder(folder: Option<&std::path::Path>, downloads: &std::path::Path) -> Self {
+        Self::for_platform(folder, downloads, cfg!(windows))
+    }
+
+    fn for_platform(
+        folder: Option<&std::path::Path>,
+        downloads: &std::path::Path,
+        windows: bool,
+    ) -> Self {
         Self {
             custom_folder: folder
                 .and_then(std::path::Path::file_name)
                 .map(|name| name.to_string_lossy().into_owned()),
+            display_path: windows.then(|| {
+                let directory = folder.map_or_else(
+                    || assemble_device::receive::default_directory(downloads),
+                    std::path::Path::to_path_buf,
+                );
+                receive_path_text(&directory)
+            }),
         }
     }
+}
+
+/// 规范化会给 Windows 路径加 verbatim 前缀；展示时换回用户熟悉、可复制的写法。
+/// 只生成文字，实际读写继续使用 Rust 保存的原始路径。
+fn receive_path_text(path: &std::path::Path) -> String {
+    let text = path.to_string_lossy();
+    if let Some(rest) = text.strip_prefix(r"\\?\UNC\") {
+        return format!(r"\\{rest}");
+    }
+    if let Some(rest) = text.strip_prefix(r"\\?\")
+        && rest.get(1..3) == Some(":\\")
+    {
+        return rest.to_owned();
+    }
+    text.into_owned()
 }
 
 /// 界面在任一时刻能看到的全部状态。
@@ -378,8 +408,12 @@ pub struct View {
 }
 
 impl View {
-    fn with_receive_folder(mut self, folder: Option<&std::path::Path>) -> Self {
-        self.receive = ReceiveView::for_folder(folder);
+    fn with_receive_folder(
+        mut self,
+        folder: Option<&std::path::Path>,
+        downloads: &std::path::Path,
+    ) -> Self {
+        self.receive = ReceiveView::for_folder(folder, downloads);
         self
     }
 
@@ -427,6 +461,7 @@ impl View {
             send_menu: SendMenuState::Unsupported,
             receive: ReceiveView {
                 custom_folder: None,
+                display_path: None,
             },
             notice: None,
             planner: None,
@@ -478,7 +513,7 @@ impl<R: tauri::Runtime> AppState<R> {
         let (session_epoch, _) = tokio::sync::watch::channel(0);
         let view = Mutex::new(
             View::initial(client.origin())
-                .with_receive_folder(settings.receive_directory.as_deref())
+                .with_receive_folder(settings.receive_directory.as_deref(), &downloads)
                 .with_send_menu(crate::send_menu::state(&settings))
                 .with_planner_muted(settings.planner_muted),
         );
@@ -678,7 +713,8 @@ impl<R: tauri::Runtime> AppState<R> {
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .receive_directory = folder.map(ToOwned::to_owned);
-        self.update(|view| view.receive = ReceiveView::for_folder(folder));
+        let receive = ReceiveView::for_folder(folder, &self.downloads);
+        self.update(|view| view.receive = receive);
     }
 
     /// 右键菜单的状态变了（用户在设置里开关了它）。
@@ -1236,19 +1272,56 @@ mod tests {
     }
 
     #[test]
-    fn the_interface_only_learns_a_receive_folders_name() {
+    fn mac_receive_locations_keep_the_existing_abbreviation() {
         use std::path::Path;
 
-        assert_eq!(ReceiveView::for_folder(None).custom_folder, None);
+        let downloads = Path::new("/Users/example/Downloads");
+        let default = ReceiveView::for_platform(None, downloads, false);
+        assert_eq!(default.custom_folder, None);
+        assert_eq!(default.display_path, None);
+        let custom =
+            ReceiveView::for_platform(Some(Path::new("/Users/example/工作资料")), downloads, false);
+        assert_eq!(custom.custom_folder, Some("工作资料".to_owned()));
+        assert_eq!(custom.display_path, None);
         assert_eq!(
-            ReceiveView::for_folder(Some(Path::new("/Users/example/工作资料"))).custom_folder,
-            Some("工作资料".to_owned())
-        );
-        // 选到磁盘根目录时说不出名字，而不是把一串分隔符交给界面。
-        assert_eq!(
-            ReceiveView::for_folder(Some(Path::new("/"))).custom_folder,
+            ReceiveView::for_platform(Some(Path::new("/")), downloads, false).custom_folder,
             None
         );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_receive_locations_use_the_system_downloads_or_selected_directory() {
+        use std::path::Path;
+
+        let downloads = Path::new(r"D:\系统下载");
+        assert_eq!(
+            ReceiveView::for_folder(None, downloads)
+                .display_path
+                .as_deref(),
+            Some(r"D:\系统下载\Assemble")
+        );
+        let custom = ReceiveView::for_folder(Some(Path::new(r"\\?\E:\工作资料\收件")), downloads);
+        assert_eq!(custom.custom_folder.as_deref(), Some("收件"));
+        assert_eq!(custom.display_path.as_deref(), Some(r"E:\工作资料\收件"));
+    }
+
+    #[test]
+    fn receive_path_text_preserves_drive_and_network_locations() {
+        use std::path::Path;
+
+        for (path, expected) in [
+            (
+                r"C:\Users\example\Downloads\Assemble",
+                r"C:\Users\example\Downloads\Assemble",
+            ),
+            (r"\\?\D:\工作资料", r"D:\工作资料"),
+            (r"\\?\UNC\server\share\收件", r"\\server\share\收件"),
+            (r"\\server\share\收件", r"\\server\share\收件"),
+            (r"\\?\C:\", r"C:\"),
+        ] {
+            assert_eq!(receive_path_text(Path::new(path)), expected);
+        }
     }
 
     #[test]

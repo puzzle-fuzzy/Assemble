@@ -14,7 +14,8 @@
     "drive": null,
     "sendMenu": "unsupported",
     "receive": {
-      "customFolder": null
+      "customFolder": null,
+      "displayPath": null
     },
     "launchAtLogin": "unsupported",
     "notice": null,
@@ -36,7 +37,8 @@
     "drive": null,
     "sendMenu": "unsupported",
     "receive": {
-      "customFolder": null
+      "customFolder": null,
+      "displayPath": null
     },
     "launchAtLogin": "disabled",
     "notice": null,
@@ -82,7 +84,8 @@
     "drive": null,
     "sendMenu": "enabled",
     "receive": {
-      "customFolder": null
+      "customFolder": null,
+      "displayPath": null
     },
     "launchAtLogin": "enabled",
     "notice": null,
@@ -196,7 +199,8 @@
     "drive": null,
     "sendMenu": "unsupported",
     "receive": {
-      "customFolder": null
+      "customFolder": null,
+      "displayPath": null
     },
     "launchAtLogin": "unknown",
     "notice": {
@@ -221,7 +225,8 @@
     "drive": null,
     "sendMenu": "unsupported",
     "receive": {
-      "customFolder": null
+      "customFolder": null,
+      "displayPath": null
     },
     "launchAtLogin": "enabled",
     "notice": {
@@ -270,7 +275,8 @@
     "drive": null,
     "sendMenu": "unsupported",
     "receive": {
-      "customFolder": null
+      "customFolder": null,
+      "displayPath": null
     },
     "launchAtLogin": "enabled",
     "notice": null,
@@ -322,7 +328,8 @@
     "drive": null,
     "sendMenu": "unsupported",
     "receive": {
-      "customFolder": null
+      "customFolder": null,
+      "displayPath": null
     },
     "launchAtLogin": "enabled",
     "notice": null,
@@ -539,7 +546,8 @@
     "drive": null,
     "sendMenu": "disabled",
     "receive": {
-      "customFolder": null
+      "customFolder": null,
+      "displayPath": null
     },
     "launchAtLogin": "enabled",
     "notice": null,
@@ -691,7 +699,8 @@
     "drive": null,
     "sendMenu": "unsupported",
     "receive": {
-      "customFolder": "工作资料"
+      "customFolder": "工作资料",
+      "displayPath": null
     },
     "launchAtLogin": "disabled",
     "notice": null,
@@ -757,7 +766,8 @@
     "drive": null,
     "sendMenu": "unsupported",
     "receive": {
-      "customFolder": null
+      "customFolder": null,
+      "displayPath": null
     },
     "launchAtLogin": "enabled",
     "notice": null,
@@ -909,7 +919,8 @@
     },
     "sendMenu": "unsupported",
     "receive": {
-      "customFolder": null
+      "customFolder": null,
+      "displayPath": null
     },
     "launchAtLogin": "enabled",
     "notice": null,
@@ -1029,7 +1040,8 @@
       }
     },
     "receive": {
-      "customFolder": null
+      "customFolder": null,
+      "displayPath": null
     },
     "launchAtLogin": "enabled",
     "notice": null,
@@ -1373,7 +1385,8 @@
     },
     "sendMenu": "unsupported",
     "receive": {
-      "customFolder": null
+      "customFolder": null,
+      "displayPath": null
     },
     "launchAtLogin": "enabled",
     "notice": null,
@@ -1470,6 +1483,52 @@
       "focus": null,
       "compose": null
     },
+    "plannerMuted": false
+  },
+  {
+    "service": {
+      "target": "development",
+      "reachable": null,
+      "stream": "off"
+    },
+    "session": {
+      "phase": "signedOut"
+    },
+    "devices": [],
+    "transfers": [],
+    "draft": null,
+    "drive": null,
+    "sendMenu": "enabled",
+    "receive": {
+      "customFolder": null,
+      "displayPath": "C:\\Users\\example\\Downloads\\Assemble"
+    },
+    "launchAtLogin": "unsupported",
+    "notice": null,
+    "planner": null,
+    "plannerMuted": false
+  },
+  {
+    "service": {
+      "target": "development",
+      "reachable": null,
+      "stream": "off"
+    },
+    "session": {
+      "phase": "signedOut"
+    },
+    "devices": [],
+    "transfers": [],
+    "draft": null,
+    "drive": null,
+    "sendMenu": "enabled",
+    "receive": {
+      "customFolder": "工作资料",
+      "displayPath": "E:\\工作资料"
+    },
+    "launchAtLogin": "unsupported",
+    "notice": null,
+    "planner": null,
     "plannerMuted": false
   }
 ]

@@ -35,11 +35,11 @@ import type {
   LaunchState,
   Notice,
   Platform,
-  ServiceTarget,
   ServiceView,
   Snapshot,
   TransferView,
 } from "@/lib/types";
+import { cn } from "@/lib/utils";
 import { PlannerCard } from "@/PlannerCard";
 
 export interface AppProps {
@@ -113,20 +113,17 @@ export function App({ bridge: source = bridge }: AppProps) {
           onError={setActionError}
         />
         <footer className="pt-2 text-center text-xs text-muted-foreground">
-          {formatBuildInfo(__ASSEMBLE_BUILD__)}
+          <p>{formatBuildInfo(__ASSEMBLE_BUILD__)}</p>
+          <p className="mt-1 break-all select-text">
+            官网：{__ASSEMBLE_BUILD__.website}
+          </p>
         </footer>
       </main>
     </>
   );
 }
 
-/** 服务的显示名。文案属于界面，Rust 只给出连接的是哪一套服务。 */
-const SERVICE_NAMES: Record<ServiceTarget, string> = {
-  production: "正式服务",
-  development: "本地开发服务",
-};
-
-/** 服务是否可达、事件流是否连着。还没探测出来时如实显示"正在检测"，不猜。 */
+/** 官网地址由页脚展示；这里仅保留检测、断网与登录后的连接状态。 */
 function ServiceStatus({
   service,
   signedIn,
@@ -137,11 +134,10 @@ function ServiceStatus({
   if (!service || service.reachable === null) {
     return <p className="text-sm text-muted-foreground">正在检测连接</p>;
   }
-  const name = SERVICE_NAMES[service.target];
   if (!service.reachable) {
     return (
       <p className="text-sm text-destructive">
-        {signedIn ? "连接已断开，正在重连" : `${name}暂不可达`}
+        {signedIn ? "连接已断开，正在重连" : "暂时无法连接服务器"}
       </p>
     );
   }
@@ -157,7 +153,7 @@ function ServiceStatus({
       </p>
     );
   }
-  return <p className="text-sm text-muted-foreground">{name}</p>;
+  return null;
 }
 
 /** 提示是 Rust 给的一句话；收起来只要告诉它一声。 */
@@ -864,6 +860,7 @@ function LaunchCard({ source, snapshot, onError }: CardProps) {
   const state: LaunchState = snapshot?.launchAtLogin ?? "unknown";
   const hint = LAUNCH_HINTS[state];
   const customFolder = snapshot?.receive.customFolder ?? null;
+  const receivePath = snapshot?.receive.displayPath ?? null;
   // 只有 Windows 上的打包运行才有右键菜单这一项。
   const sendMenu = snapshot?.sendMenu ?? "unsupported";
 
@@ -914,10 +911,16 @@ function LaunchCard({ source, snapshot, onError }: CardProps) {
         <div className="flex items-center justify-between gap-3 border-t border-border pt-3">
           <div className="min-w-0">
             <p className="text-sm font-medium">接收位置</p>
-            <p className="truncate text-sm text-muted-foreground">
-              {customFolder === null
-                ? DEFAULT_RECEIVE
-                : `「${customFolder}」文件夹`}
+            <p
+              className={cn(
+                "text-sm text-muted-foreground",
+                receivePath === null ? "truncate" : "break-all select-text",
+              )}
+            >
+              {receivePath ??
+                (customFolder === null
+                  ? DEFAULT_RECEIVE
+                  : `「${customFolder}」文件夹`)}
             </p>
           </div>
           <div className="flex shrink-0 gap-2">

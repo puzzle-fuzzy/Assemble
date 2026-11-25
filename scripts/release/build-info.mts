@@ -1,4 +1,4 @@
-// 构建时只向界面注入这三个公开字段，避免把构建机的环境变量带进安装包。
+// 构建时只向界面注入公开的构建身份和官网来源，避免把环境变量带进安装包。
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -6,28 +6,79 @@ import type { BuildInfo } from "../../apps/desktop/src/lib/build-info.ts";
 
 type Environment = Record<string, string | undefined>;
 
+const LOCAL_ORIGIN = "http://127.0.0.1:8787";
+const PRODUCTION_ORIGIN = "https://as.yxswy.com";
+
+function websiteOrigin(value: string): URL {
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    throw new Error("ASSEMBLE_SERVER_ORIGIN must be a valid origin");
+  }
+  const loopback = ["127.0.0.1", "localhost", "[::1]"].includes(url.hostname);
+  if (
+    (url.protocol !== "https:" && !(url.protocol === "http:" && loopback)) ||
+    url.username ||
+    url.password ||
+    url.pathname !== "/" ||
+    url.search ||
+    url.hash
+  ) {
+    throw new Error(
+      "ASSEMBLE_SERVER_ORIGIN must be an HTTPS origin or HTTP loopback origin without credentials",
+    );
+  }
+  return url;
+}
+
+function isLocalWebsite(url: URL): boolean {
+  if (["localhost", "[::1]"].includes(url.hostname)) return true;
+  const parts = url.hostname.split(".").map(Number);
+  if (parts.length !== 4 || !parts.every(Number.isInteger)) return false;
+  return (
+    parts[0] === 127 ||
+    parts[0] === 10 ||
+    (parts[0] === 192 && parts[1] === 168) ||
+    (parts[0] === 172 &&
+      parts[1] !== undefined &&
+      parts[1] >= 16 &&
+      parts[1] <= 31)
+  );
+}
+
 export function resolveBuildInfo(
   version: string,
   commit: string,
   environment: Environment = {},
 ): BuildInfo {
+  const website = websiteOrigin(
+    environment.ASSEMBLE_SERVER_ORIGIN?.trim() || LOCAL_ORIGIN,
+  );
   const configured = environment.ASSEMBLE_BUILD_CHANNEL?.trim();
-  const channel =
-    configured ||
-    (environment.GITHUB_ACTIONS === "true"
-      ? environment.GITHUB_REF_TYPE === "tag" &&
-        environment.GITHUB_REF_NAME === `v${version}` &&
-        /^\d+\.\d+\.\d+$/.test(version)
-        ? "stable"
-        : "preview"
-      : "local");
+  const detectedChannel = isLocalWebsite(website)
+    ? "local"
+    : website.origin === PRODUCTION_ORIGIN
+      ? "stable"
+      : "preview";
+  const channel = configured || detectedChannel;
   if (channel !== "stable" && channel !== "preview" && channel !== "local") {
     throw new Error("ASSEMBLE_BUILD_CHANNEL must be stable, preview, or local");
+  }
+  if (channel !== detectedChannel) {
+    throw new Error(
+      "ASSEMBLE_BUILD_CHANNEL must match the website environment",
+    );
   }
   if (!/^[0-9a-f]{7,64}$/i.test(commit.trim())) {
     throw new Error("The build commit must be a Git commit hash");
   }
-  return { channel, version, commit: commit.trim().slice(0, 7).toLowerCase() };
+  return {
+    channel,
+    version,
+    commit: commit.trim().slice(0, 7).toLowerCase(),
+    website: website.origin,
+  };
 }
 
 export function readBuildInfo(

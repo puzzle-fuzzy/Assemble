@@ -13,7 +13,7 @@
 ```text
 ┌──────────────────────────── apps/desktop（Tauri 2）────────────────────────────┐
 │  界面（React）：主窗口 · 发送面板                                              │
-│    只调用具名命令、接收状态事件；没有凭据，不联网，拿不到文件路径                │
+│    只调用具名命令、接收状态事件；没有凭据，不联网，路径操作仍由 Rust 负责        │
 │      │ invoke（具名命令）                              ▲ 事件（完整状态快照）  │
 │  应用壳（Rust，src-tauri）                                                     │
 │    会话 · 后台任务（收、发、对账）· 传输记录表 · 日程名单                      │
@@ -140,15 +140,23 @@
 
 展示格式固定为“版本类型 - 版本号.commit号”，例如 `正式版本 - 0.1.0.98557c3`。版本类型只有三种：
 
-| 构建类型  | 显示名称 | 默认识别方式                                                                |
-| --------- | -------- | --------------------------------------------------------------------------- |
-| `stable`  | 正式版本 | GitHub Actions 中，与应用版本一致的稳定标签，例如应用 `0.1.0` 对应 `v0.1.0` |
-| `preview` | 预览版本 | GitHub Actions 中的其他构建，含手动构建与预发布标签                         |
-| `local`   | 本地测试 | 本机启动或构建                                                              |
+| 构建类型  | 显示名称 | 对应的官网地址                                               |
+| --------- | -------- | ------------------------------------------------------------ |
+| `stable`  | 正式版本 | 正式地址 `https://as.yxswy.com`                              |
+| `preview` | 预览版本 | 构建时配置的其他公网 HTTPS 服务地址；不猜测预览域名          |
+| `local`   | 本地测试 | 构建时配置的回环或内网地址；开发默认 `http://127.0.0.1:8787` |
 
-构建时可用 `ASSEMBLE_BUILD_CHANNEL=stable|preview|local` 明确指定类型。类型与服务地址独立：本机打出的包即使连接正式服务，也默认显示“本地测试”；右上角仍负责显示服务与连接状态。
+用户随后反馈“正式服务”含义不清，要求在版本下面展示对应环境的官网。因此版本类型改为与实际服务环境一致：统一读取构建时的 `ASSEMBLE_SERVER_ORIGIN`；本机编译但连接线上服务时也显示“正式版本”。`ASSEMBLE_BUILD_CHANNEL=stable|preview|local` 可显式声明类型，但必须与该地址对应，矛盾时拒绝构建。官网行始终位于版本行下面，给出不含凭据、路径、查询或片段的完整来源地址；HTTP 仍只允许回环地址，既有网络限制不变。
+
+右上角在正常可达且未登录时不再显示“正式服务”或“本地开发服务”。检测、不可达与登录后的连接、重连状态仍保留，帮助判断实际连接问题。
 
 版本号读取 `apps/desktop/src-tauri/tauri.conf.json` 的应用版本，commit 号取构建时 Git HEAD 的前七位小写哈希。没有 Git 元数据的源码包须显式提供 `ASSEMBLE_BUILD_COMMIT`；类型不合法或拿不到真实哈希就拒绝构建，不能用占位值冒充身份。版本信息是 Vite 编译时注入的公开常量，不改变 Rust 状态快照、不读取本机运行时凭据，也不调用服务端。
+
+### 接收位置按平台展示
+
+2026-11-25 用户明确要求：Mac 默认显示“下载/Assemble”，Windows 显示具体的文件夹位置。为此 `ReceiveView.displayPath` 是原有路径边界的一个窄例外：仅 Windows 给出接收目录的只读展示文字，Mac 为 `null`，保留默认位置与自选文件夹的简称。
+
+默认目录由 Rust 使用系统的“下载”位置加上 `Assemble` 生成，支持系统已重定向的下载目录；自选目录来自既有系统选择器。更改与恢复默认后，状态与界面同时更新。Windows 规范路径的 verbatim 前缀转换为常见盘符或 UNC 写法，长路径换行并可选中文字。原始规范路径仍留在 Rust，展示文字不作为命令参数，也不上传；接收目录校验、落盘规则与自选目录暂不可用时的回退行为不变。
 
 ### 一次传输怎么走
 
@@ -242,7 +250,7 @@ target/release/assemble-mcp print-config zcode --name "ZCode 的助手"
 
 - **界面。** 两个窗口的能力清单都只有 `core:event:allow-listen` 与 `allow-unlisten`。内容安全策略限定脚本与样式只来自应用自身，连接只允许 IPC。对话框、通知、文件定位都只从 Rust 这边用。
 - **命令。** 界面能调用的只有这 42 个：`snapshot`、`sign_in`、`cancel_sign_in`、`sign_out`、`launch_at_login`、`set_launch_at_login`、`rename_device`、`remove_device`、`choose_receive_folder`、`reset_receive_folder`、`reveal_received`、`start_send`、`send_to_device`、`send_to_drive`、`close_send_panel`、`open_main`、`cancel_transfer`、`retry_transfer`、`drive_refresh`、`drive_upload`、`drive_download`、`drive_delete`、`set_send_menu`、`dismiss_notice`、`planner_refresh`、`schedule_create`、`schedule_update`、`schedule_complete`、`schedule_cancel`、`schedule_reopen`、`schedule_delete`、`reminder_create`、`reminder_update`、`reminder_dismiss`、`reminder_cancel`、`reminder_delete`、`notifications_read`、`notifications_read_all`、`planner_focus`、`planner_compose`、`set_planner_muted`。命令失败只返回稳定错误码。
-- **标识，不是路径。** 界面引用一条传输、一个云盘文件、一台设备、一条日程、一条提醒、一条通知，用的都是标识。文件的位置由系统选择器、右键菜单或拖放直接交给 Rust；状态里有文件名、文件夹名，没有路径。
+- **标识，不是操作路径。** 界面引用一条传输、一个云盘文件、一台设备、一条日程、一条提醒、一条通知，用的都是标识。文件的位置由系统选择器、右键菜单或拖放直接交给 Rust；唯一的显示例外是 Windows 的接收目录文字，不能把它传回作为文件操作参数。
 - **助手。** `assemble-mcp` 只有上面那十个具名工具，全部围着日程、提醒与通知；没有文件、云盘，也没有"随便调一个接口"的工具。新增能力时在 `apps/mcp` 里加工具并补测试。它不碰窗口，也不接收文件路径。
 - **凭据。** 设备令牌存在系统钥匙串里，条目名按服务来源区分；助手的登录是另一条条目，账号位是助手的名字，不会顶掉桌面应用的。令牌、Cookie、密码与邀请码不进界面、日志、命令返回值与状态（邀请码在配置里只留摘要）；写操作的网页表单都要来自本站，并带着与 Cookie 或会话成对的随机值；`assemble-mcp status` 与工具的返回值里都不出现令牌，它的标准输出上只有协议消息，日志一律写标准错误。
 - **联网。** 客户端只访问构建时确定的那个来源，不跟随重定向；标识符与路径在拼进请求之前先校验。

@@ -53,7 +53,7 @@ bun run mcp          # 构建给助手用的入口 target/release/assemble-mcp�
 
 `bun run verify` 依次执行 Biome、类型检查、界面与工具脚本的测试、前端构建、Rust 格式、Rust 静态检查与全部 Rust 测试（含服务端与助手入口）。装了 Windows 的 Rust 目标时（`rust-toolchain.toml` 里列了它），它还会给能在本机上检查的五个基础库做一次针对 Windows 目标的静态检查。客户端与服务端带着 TLS 与 SQLite 的本机依赖，从 macOS 上检查不了 Windows 目标，依赖它们的助手入口也一样，桌面应用壳更是一次都没在这台 Mac 上为 Windows 编译过——那是持续集成里 Windows 那一栏的事。
 
-主窗口的卡片下方固定显示“正式版本 / 预览版本 / 本地测试 - 版本号.commit号”。本机默认是本地测试，GitHub 上匹配应用版本的稳定标签为正式版本，其他持续集成构建为预览版本；可以用 `ASSEMBLE_BUILD_CHANNEL=stable|preview|local` 明确指定。版本号与 Git 提交号自动读取，与连接哪套服务独立；完整约定见[架构说明](docs/architecture.md#主窗口固定展示构建身份)。
+主窗口的卡片下方固定显示“正式版本 / 预览版本 / 本地测试 - 版本号.commit号”，下一行显示对应环境的官网地址。版本号与 Git 提交号自动读取；类型与官网统一按构建时的服务地址识别，正常连接时右上角不再重复显示“正式服务”。Windows 的接收位置显示完整目录，Mac 保留“下载/Assemble”等简称；完整约定见[架构说明](docs/architecture.md#主窗口固定展示构建身份)。
 
 ### 持续集成与安装包
 

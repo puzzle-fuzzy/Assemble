@@ -16,7 +16,7 @@ const VALID: Snapshot = {
   draft: null,
   drive: null,
   sendMenu: "unsupported",
-  receive: { customFolder: null },
+  receive: { customFolder: null, displayPath: null },
   launchAtLogin: "disabled",
   notice: null,
   planner: null,
@@ -222,6 +222,8 @@ describe("状态守卫", () => {
       { ...VALID, receive: undefined },
       { ...VALID, receive: {} },
       { ...VALID, receive: { customFolder: 42 } },
+      { ...VALID, receive: { customFolder: null, displayPath: 42 } },
+      { ...VALID, receive: { customFolder: null } },
       { ...VALID, drive: {} },
       { ...VALID, drive: { items: [], usedBytes: 1 } },
       {
@@ -254,7 +256,7 @@ describe("状态守卫", () => {
         ...VALID,
         session: { phase: "signedIn", account: ACCOUNT, device: DEVICE },
         transfers,
-        receive: { customFolder: "工作资料" },
+        receive: { customFolder: "工作资料", displayPath: null },
       }),
     ).toBe(true);
     // 传输记录只带标识与文件名：样本里从来不出现本机路径。

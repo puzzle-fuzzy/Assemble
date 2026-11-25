@@ -243,8 +243,24 @@ describe("状态契约样本", () => {
     ).toBe(true);
   });
 
-  test("样本里不出现任何凭据或本机路径", () => {
-    const text = JSON.stringify(checked());
+  test("仅 Windows 接收目录能以只读文字给出，其他字段不出现凭据或本机路径", () => {
+    const samples = checked();
+    expect(samples.some((s) => s.receive.displayPath === null)).toBe(true);
+    expect(samples.some((s) => s.receive.displayPath?.startsWith("C:\\"))).toBe(
+      true,
+    );
+    expect(
+      samples.some(
+        (s) =>
+          s.receive.customFolder !== null && s.receive.displayPath !== null,
+      ),
+    ).toBe(true);
+    const text = JSON.stringify(
+      samples.map((s) => ({
+        ...s,
+        receive: { ...s.receive, displayPath: null },
+      })),
+    );
     for (const forbidden of [
       "token",
       "Bearer",
@@ -254,5 +270,6 @@ describe("状态契约样本", () => {
     ]) {
       expect(text.includes(forbidden)).toBe(false);
     }
+    expect(text).not.toMatch(/[A-Za-z]:\\\\/);
   });
 });

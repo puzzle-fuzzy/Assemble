@@ -5,7 +5,12 @@ GlobalRegistrator.register({ width: 1024, height: 768 });
 
 // 测试不经过 Vite，用固定构建身份验证展示；真实元数据由工具脚本的测试核对。
 Object.assign(globalThis, {
-  __ASSEMBLE_BUILD__: { channel: "local", version: "0.1.0", commit: "1234567" },
+  __ASSEMBLE_BUILD__: {
+    channel: "local",
+    version: "0.1.0",
+    commit: "1234567",
+    website: "http://127.0.0.1:8787",
+  },
 });
 
 (

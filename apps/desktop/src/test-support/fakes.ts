@@ -184,7 +184,7 @@ export function snapshot(overrides: Overrides = {}): Snapshot {
     drive: phase === "signedIn" ? DRIVE : null,
     // 测试跑在 macOS 的开发构建上：右键菜单在这里不存在。
     sendMenu: "unsupported",
-    receive: { customFolder: null },
+    receive: { customFolder: null, displayPath: null },
     launchAtLogin: "disabled",
     notice: null,
     // 登录之后连上服务时，Rust 会把日程名单拿回来。

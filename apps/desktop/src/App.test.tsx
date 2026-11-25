@@ -52,7 +52,12 @@ describe("版本信息", () => {
       const view = await render(<App bridge={new FakeBridge(current)} />);
       await settle();
       const footer = view.host.querySelector("footer");
-      expect(footer?.textContent).toBe("本地测试 - 0.1.0.1234567");
+      expect(footer?.querySelector("p")?.textContent).toBe(
+        "本地测试 - 0.1.0.1234567",
+      );
+      expect(footer?.querySelectorAll("p")[1]?.textContent).toBe(
+        "官网：http://127.0.0.1:8787",
+      );
       expect(view.host.querySelector("main")?.lastElementChild).toBe(footer);
       await view.unmount();
     }
@@ -60,7 +65,7 @@ describe("版本信息", () => {
 });
 
 describe("连接状态", () => {
-  test("探测出结果前显示正在检测，之后显示服务名", async () => {
+  test("探测期间提示检测，正常连接后不再显示含糊的服务类型", async () => {
     const source = new FakeBridge(
       snapshot({
         service: service({ target: "development", reachable: null }),
@@ -77,7 +82,8 @@ describe("连接状态", () => {
         }),
       );
     });
-    expect(text(view.host)).toContain("本地开发服务");
+    expect(text(view.host)).not.toContain("本地开发服务");
+    expect(text(view.host)).not.toContain("正式服务");
     expect(text(view.host)).not.toContain("正在检测连接");
     expect(text(view.host)).not.toContain("暂不可达");
   });
@@ -90,7 +96,7 @@ describe("连接状态", () => {
     );
     const view = await render(<App bridge={source} />);
     await settle();
-    expect(text(view.host)).toContain("正式服务暂不可达");
+    expect(text(view.host)).toContain("暂时无法连接服务器");
   });
 
   test("登录后显示事件流的连接情况", async () => {
@@ -859,7 +865,7 @@ describe("接收位置", () => {
 
   test("选了文件夹之后只显示它的名字，可以恢复默认", async () => {
     const source = new FakeBridge(
-      snapshot({ receive: { customFolder: "工作资料" } }),
+      snapshot({ receive: { customFolder: "工作资料", displayPath: null } }),
     );
     const view = await render(<App bridge={source} />);
     await settle();
@@ -890,6 +896,42 @@ describe("接收位置", () => {
       "这个文件夹不能用来保存收到的文件，请换一个。",
     );
     expect(text(view.host)).not.toContain("NotDirectory");
+  });
+
+  test("Windows 展示系统给出的完整目录，更改和恢复默认后跟随状态更新", async () => {
+    const defaultPath = "D:\\系统下载\\Assemble";
+    const source = new FakeBridge(
+      snapshot({ receive: { customFolder: null, displayPath: defaultPath } }),
+    );
+    const view = await render(<App bridge={source} />);
+    await settle();
+    expect(text(card(view.host, "本机"))).toContain(defaultPath);
+    expect(text(card(view.host, "本机"))).not.toContain("下载/Assemble");
+    expect(button(view.host, "恢复默认")).toBeUndefined();
+
+    const customPath = "E:\\工作资料\\本年度归档资料\\收件文件夹";
+    await act(async () => {
+      source.push(
+        snapshot({
+          receive: { customFolder: "收件文件夹", displayPath: customPath },
+        }),
+      );
+    });
+    const location = [...view.host.querySelectorAll("p")].find(
+      (p) => p.textContent === customPath,
+    );
+    expect(location?.classList.contains("break-all")).toBe(true);
+    expect(location?.classList.contains("truncate")).toBe(false);
+    await click(button(view.host, "恢复默认"));
+    expect(source.calls).toEqual(["resetReceiveFolder"]);
+
+    await act(async () => {
+      source.push(
+        snapshot({ receive: { customFolder: null, displayPath: defaultPath } }),
+      );
+    });
+    expect(text(card(view.host, "本机"))).toContain(defaultPath);
+    expect(button(view.host, "恢复默认")).toBeUndefined();
   });
 });
 

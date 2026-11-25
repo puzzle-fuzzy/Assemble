@@ -15,7 +15,7 @@ const STATE: Snapshot = {
   draft: null,
   drive: null,
   sendMenu: "unsupported",
-  receive: { customFolder: null },
+  receive: { customFolder: null, displayPath: null },
   launchAtLogin: "disabled",
   notice: null,
   planner: null,

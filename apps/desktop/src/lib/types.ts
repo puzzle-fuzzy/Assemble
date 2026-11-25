@@ -2,7 +2,7 @@
 //
 // 两边的形状由同一份样本共同校验：TypeScript 在编译期检查样本符合这里的类型，
 // Rust 在测试里把同一样本读进来再原样写出去。任何一边改了形状，测试都会失败。
-// 凭据、路径与系统诊断永远不在这里出现。
+// 凭据与系统诊断不在这里出现；Windows 接收目录仅作为只读展示文字给出。
 
 /** 运行桌面端的平台，与服务端的拼法一致。 */
 export type Platform = "windows" | "macos" | "linux";
@@ -31,10 +31,12 @@ export type SessionView =
 
 export type LaunchState = "enabled" | "disabled" | "unsupported" | "unknown";
 
-/** 收到的文件存在哪里。只知道是默认位置还是用户选的文件夹，以及那个文件夹叫什么。 */
+/** 接收位置的显示信息：Windows 给出只读目录文字，Mac 保留简称。 */
 export interface ReceiveView {
   /** 用户选的文件夹的名字；用默认位置（下载/Assemble）时为 null。 */
   customFolder: string | null;
+  /** Windows 接收目录的显示文字；不作为任何文件操作的命令参数。 */
+  displayPath: string | null;
 }
 
 /** 一次传输的方向：`in` 是别的设备发来的，`out` 是这台设备发出去的。 */
