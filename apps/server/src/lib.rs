@@ -139,11 +139,19 @@ async fn wait_for_signal() {
 /// `check-config`：读取配置、连接数据库并迁移，然后给出一份报告。
 pub async fn check_config() -> Result<String, StartupError> {
     let (config, pool) = load().await?;
-    let accounts: i64 = sqlx::query_scalar("SELECT count(*) FROM accounts")
-        .fetch_one(&pool)
-        .await
-        .map_err(db::DbError::from)?;
+    // 报告要在连接池关掉之前做完：先把报告拿到手，再关。
+    let report = config_report(&config, &pool).await?;
     pool.close().await;
+    Ok(report)
+}
+
+/// 自检报告。只读数据库；连接池由调用方负责关闭。
+pub async fn config_report(config: &Config, pool: &SqlitePool) -> Result<String, StartupError> {
+    let (accounts, stopped): (i64, i64) =
+        sqlx::query_as("SELECT count(*), coalesce(sum(suspended_at IS NOT NULL), 0) FROM accounts")
+            .fetch_one(pool)
+            .await
+            .map_err(db::DbError::from)?;
     let registration = "公开（须验证邮箱）";
     let smtp = if config.smtp.is_some() {
         "已配置"
@@ -160,11 +168,6 @@ pub async fn check_config() -> Result<String, StartupError> {
         || "未配置，按来源的限额不生效".to_owned(),
         |header| format!("按来源的限额读 {} 头", header.as_str()),
     );
-    let stopped: i64 =
-        sqlx::query_scalar("SELECT count(*) FROM accounts WHERE suspended_at IS NOT NULL")
-            .fetch_one(&pool)
-            .await
-            .map_err(db::DbError::from)?;
     Ok(format!(
         "配置可用。\n  监听地址：{}\n  数据目录：{}\n  对外地址：{}\n  云盘上限：{} 字节\n  全站内容总量上限：{} 字节\n  账户数：{}（其中停用 {}）\n  网页注册：{registration}\n  SMTP：{smtp}\n  GitHub：{github}\n  请求来源：{source}",
         config.addr,
@@ -316,6 +319,55 @@ fn checked(password: String) -> Result<SecretString, PasswordError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// 自检报告是升级之后要看的东西：它自己必须一直能用。
+    /// 2026-11-26 有一回把一条查询放在了连接池关闭之后，正式服务上这个命令就报"数据库打不开"。
+    #[tokio::test]
+    async fn the_self_check_reports_the_budget_the_source_header_and_suspended_accounts() {
+        let dir = tempfile::tempdir().unwrap();
+        let pool = db::open(dir.path()).await.unwrap();
+        let mut config = Config::development(dir.path());
+        let report = config_report(&config, &pool).await.unwrap();
+        assert!(report.contains("账户数：0（其中停用 0）"), "{report}");
+        assert!(
+            report.contains(&format!(
+                "全站内容总量上限：{} 字节",
+                config::DEFAULT_STORAGE_BUDGET_BYTES
+            )),
+            "{report}"
+        );
+        assert!(
+            report.contains("请求来源：未配置，按来源的限额不生效"),
+            "{report}"
+        );
+
+        config.client_ip_header = Some(axum::http::HeaderName::from_static("x-real-ip"));
+        config.storage_budget_bytes = 1234;
+        let report = config_report(&config, &pool).await.unwrap();
+        assert!(report.contains("全站内容总量上限：1234 字节"), "{report}");
+        assert!(
+            report.contains("请求来源：按来源的限额读 x-real-ip 头"),
+            "{report}"
+        );
+
+        accounts::create(
+            &pool,
+            "alex",
+            "Alex Wang",
+            SecretString::new("a-long-enough-password".to_owned()),
+        )
+        .await
+        .unwrap();
+        sqlx::query("UPDATE accounts SET email = 'alex@example.test', email_verified_at = 1")
+            .execute(&pool)
+            .await
+            .unwrap();
+        admin::set_suspended(&pool, "alex@example.test", true)
+            .await
+            .unwrap();
+        let report = config_report(&config, &pool).await.unwrap();
+        assert!(report.contains("账户数：1（其中停用 1）"), "{report}");
+    }
 
     #[test]
     fn a_piped_password_is_one_line_without_its_line_ending() {

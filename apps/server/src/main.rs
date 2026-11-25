@@ -148,11 +148,11 @@ fn suspend(runtime: &tokio::runtime::Runtime, email: &str, suspended: bool) -> E
                 (true, true) => format!(
                     "已停用账户 {who}：它的网页登录状态已作废，电脑与助手上的 Assemble 会被拒绝。数据留着，要恢复用 resume-account。"
                 ),
-                (true, false) => format!("账户 {who} 本来就是停用的。"),
+                (true, false) => format!("账户 {who}本来就是停用的。"),
                 (false, true) => {
                     format!("已恢复账户 {who}：电脑与助手上的 Assemble 照旧能用，网页要重新登录。")
                 }
-                (false, false) => format!("账户 {who} 没有被停用。"),
+                (false, false) => format!("账户 {who}没有被停用。"),
             };
             println!("{said}");
             ExitCode::SUCCESS
