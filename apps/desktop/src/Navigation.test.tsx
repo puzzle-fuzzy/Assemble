@@ -11,7 +11,13 @@ import {
   settle,
   text,
 } from "@/test-support/dom";
-import { FakeBridge, PLANNER, snapshot } from "@/test-support/fakes";
+import {
+  ACCOUNT,
+  DEVICE,
+  FakeBridge,
+  PLANNER,
+  snapshot,
+} from "@/test-support/fakes";
 import { renderApp } from "@/test-support/render-app";
 
 beforeEach(() => document.body.replaceChildren());
@@ -82,6 +88,30 @@ describe("主窗口导航", () => {
     expect(field(view.host, "标题").value).toBe("周五带上合同");
     expect(field(view.host, "备注").value).toBe("先给同事确认");
   });
+
+  test.each([false, true])(
+    "账户更替后不显示上一账户的提醒草稿（经过退出：%s）",
+    async (signedOut) => {
+      const source = new FakeBridge(snapshot({ phase: "signedIn" }));
+      const view = await renderApp(source, "日程与提醒");
+      await click(button(card(view.host, "日程"), "新建提醒…"));
+      await fill(view.host, "标题", "原账户的私人草稿");
+      if (signedOut) await act(async () => source.push(snapshot()));
+      await act(async () =>
+        source.push({
+          ...snapshot({ phase: "signedIn" }),
+          session: {
+            phase: "signedIn",
+            account: { ...ACCOUNT, id: "account-2" },
+            device: { ...DEVICE, id: "device-2" },
+          },
+        }),
+      );
+      expect(button(view.host, "保存") === undefined).toBe(true);
+      await click(button(card(view.host, "日程"), "新建提醒…"));
+      expect(field(view.host, "标题").value).toBe("");
+    },
+  );
 
   test("托盘和通知会切到日程，切走后同一个入口仍可再次定位", async () => {
     const source = new FakeBridge(snapshot({ phase: "signedIn" }));

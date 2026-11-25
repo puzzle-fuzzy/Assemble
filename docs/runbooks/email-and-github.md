@@ -21,6 +21,20 @@ SMTP_FROM="Impact <your-account@163.com>"
 
 Linux：`.env` 属于部署用户，权限设为 `600`；备份同样保护。Windows 本地测试只放在已忽略的 `data/local/` 下，ACL 限制当前用户与 SYSTEM。不要把 SMTP 授权码粘进日志、截图或测试断言。`check-config` 只报告是否配好，不显示密码。
 
+### 容器使用密钥文件
+
+部署目录同时放入 `compose.yaml` 和 `compose.secrets.yaml`，在该目录下创建 `secrets/`。通过受保护的文件传输把授权码与 OAuth Secret 分别保存为 `secrets/smtp-password`、`secrets/github-client-secret`，不要在命令参数中输入内容。目录与文件属主均为 `10001:10001`，目录权限 `0700`、文件权限 `0400`。叠加配置以只读方式挂载整个目录；目录不存在时直接报错，不自动创建空目录。
+
+Linux 正式服务器的 `.env` 配置：
+
+```dotenv
+COMPOSE_FILE=compose.yaml:compose.secrets.yaml
+SMTP_PASS_FILE=/run/assemble-secrets/smtp-password
+GITHUB_CLIENT_SECRET_FILE=/run/assemble-secrets/github-client-secret
+```
+
+删除互斥的 `SMTP_PASS` 和 `GITHUB_CLIENT_SECRET`，其余连接参数照常填写。之后在该目录运行 `docker compose config --quiet`、`docker compose up -d`、`docker compose exec -T assemble assemble-server check-config`。`COMPOSE_FILE` 会让后续重建继续使用挂载；复制配置备份和回滚时也要保留对应文件。上述冒号分隔适用于 Linux；Windows 本机检查时明确使用 `-f compose.yaml -f compose.secrets.yaml`。
+
 ## 创建 GitHub OAuth App
 
 1. 在 GitHub 打开 [Developer settings → OAuth Apps](https://github.com/settings/developers)，选择 **New OAuth App**。

@@ -365,6 +365,7 @@ export function App({ bridge: source = bridge }: AppProps) {
                   hidden={section !== "planner"}
                 >
                   <PlannerCard
+                    key={account?.id ?? "signedOut"}
                     active={section === "planner"}
                     source={source}
                     snapshot={snapshot}
