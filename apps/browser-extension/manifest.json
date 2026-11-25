@@ -1,0 +1,36 @@
+{
+  "manifest_version": 3,
+  "name": "__MSG_extensionName__",
+  "description": "__MSG_extensionDescription__",
+  "default_locale": "zh_CN",
+  "version": "0.1.0",
+  "minimum_chrome_version": "116",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAs7mpEBigpVSz7lBgqPCMh66TU0CIDVmf3KIGVas++zm9YXUkSnVnW7N7fgkTXI2m4R5qBa7PmRI1aCF480xHwXMEwYrLlR4oG3CjZTPVOVrjaWoX1ZkgoToTJ7+wNy9nW9eHbpknF43CCdFPVpcW8aUXFhOquHmZqwJx1MHd6nOzcYN6I3BixGK9WXV4+nVO8GlswBQGZNs0w7q4UlL56eBH51vxwa5Lo6lUwZjNdsX7kqbP8Y7YvPYyIDoHSwCsnvsP3g6kgA8Wzf+5yx0uf+FkAdo2C1W2a0rmnmtXKOOVojUZYwm8FduikxTH54Ks+QxpU4xkhVwSfiohX96tmQIDAQAB",
+  "permissions": [
+    "activeTab",
+    "scripting",
+    "storage",
+    "webRequest",
+    "nativeMessaging"
+  ],
+  "optional_host_permissions": ["http://*/*", "https://*/*"],
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "__MSG_extensionName__",
+    "default_icon": {
+      "32": "icons/icon-32.png",
+      "128": "icons/icon-128.png"
+    }
+  },
+  "icons": {
+    "32": "icons/icon-32.png",
+    "128": "icons/icon-128.png"
+  },
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'none'; connect-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; base-uri 'none'"
+  }
+}

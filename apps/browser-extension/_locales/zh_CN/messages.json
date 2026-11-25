@@ -1,0 +1,6 @@
+{
+  "extensionName": { "message": "Assemble 视频下载" },
+  "extensionDescription": {
+    "message": "发现当前网页的视频与 M3U8，交给本机 Assemble 下载。"
+  }
+}

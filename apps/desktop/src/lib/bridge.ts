@@ -13,6 +13,11 @@ import type {
   ScheduleContent,
   Snapshot,
 } from "@/lib/types";
+import {
+  type DownloadInput,
+  type DownloadPreview,
+  isDownloadPreview,
+} from "./downloads";
 
 export type { UnlistenFn } from "@tauri-apps/api/event";
 
@@ -31,6 +36,17 @@ export class BridgeError extends Error {
 }
 
 export interface Bridge {
+  downloadPrepare(input: DownloadInput): Promise<DownloadPreview>;
+  downloadImportHls(
+    baseUrl: string | null,
+    pageUrl: string | null,
+  ): Promise<DownloadPreview | null>;
+  downloadStart(previewId: string, variantId: string): Promise<string>;
+  downloadCancel(taskId: string): Promise<void>;
+  downloadRetry(taskId: string): Promise<void>;
+  downloadChooseFolder(): Promise<void>;
+  downloadOpen(taskId: string): Promise<void>;
+  downloadReveal(taskId: string): Promise<void>;
   snapshot(): Promise<Snapshot>;
   /** 在系统浏览器里登录；命令在登录流程结束后返回。 */
   signIn(): Promise<Snapshot>;
@@ -114,6 +130,31 @@ export interface Bridge {
 }
 
 export const bridge: Bridge = {
+  downloadPrepare: async (input) =>
+    requireDownloadPreview(
+      await invoke<unknown>("download_prepare", { input }),
+    ),
+  downloadImportHls: async (baseUrl, pageUrl) => {
+    const value = await invoke<unknown>("download_import_hls", {
+      baseUrl,
+      pageUrl,
+    });
+    return value === null ? null : requireDownloadPreview(value);
+  },
+  downloadStart: async (previewId, variantId) => {
+    const value = await invoke<unknown>("download_start", {
+      previewId,
+      variantId,
+    });
+    if (typeof value !== "string" || !/^[a-f0-9]{32}$/.test(value))
+      throw new BridgeError("INVALID_RESPONSE", "invalid download identifier");
+    return value;
+  },
+  downloadCancel: (taskId) => invoke<void>("download_cancel", { taskId }),
+  downloadRetry: (taskId) => invoke<void>("download_retry", { taskId }),
+  downloadChooseFolder: () => invoke<void>("download_choose_folder"),
+  downloadOpen: (taskId) => invoke<void>("download_open", { taskId }),
+  downloadReveal: (taskId) => invoke<void>("download_reveal", { taskId }),
   snapshot: () => checked(() => invoke<unknown>("snapshot")),
   signIn: () => checked(() => invoke<unknown>("sign_in")),
   cancelSignIn: () => invoke<void>("cancel_sign_in"),
@@ -187,6 +228,12 @@ export const bridge: Bridge = {
       listener(requireSnapshot(event.payload));
     }),
 };
+
+function requireDownloadPreview(value: unknown): DownloadPreview {
+  if (!isDownloadPreview(value))
+    throw new BridgeError("INVALID_RESPONSE", "invalid download preview");
+  return value;
+}
 
 /** 取回一份状态，并在交界处核对它的形状。 */
 async function checked(load: () => Promise<unknown>): Promise<Snapshot> {

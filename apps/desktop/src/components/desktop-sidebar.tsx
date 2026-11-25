@@ -25,6 +25,7 @@ import {
   ArrowLeftRight,
   CalendarClock,
   Cloud,
+  Download,
   InfoIcon,
   LogOutIcon,
   MenuIcon,
@@ -32,6 +33,7 @@ import {
   UserRound,
 } from "lucide-react";
 import { useRef } from "react";
+import { downloadText } from "@/lib/download-i18n";
 import { uiText, useDesktopTranslation } from "@/lib/i18n";
 import type { SessionView } from "@/lib/types";
 
@@ -39,6 +41,7 @@ export function desktopModules() {
   return [
     { id: "transfers", label: uiText("fileTransfers"), icon: ArrowLeftRight },
     { id: "drive", label: uiText("cloudDrive"), icon: Cloud },
+    { id: "downloads", label: downloadText("title"), icon: Download },
     {
       id: "planner",
       label: uiText("schedulesAndReminders"),

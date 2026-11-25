@@ -1,0 +1,25 @@
+{
+  "requests": [
+    { "type": "hello" },
+    {
+      "type": "download",
+      "requestId": "request-1",
+      "input": {
+        "kind": "video",
+        "url": "https://example.test/video.mp4",
+        "pageUrl": "https://example.test/watch",
+        "title": "示例 <video>"
+      }
+    }
+  ],
+  "replies": [
+    { "version": 1, "ok": true, "taskId": null, "errorCode": null },
+    { "version": 1, "ok": true, "taskId": "task-1", "errorCode": null },
+    {
+      "version": 1,
+      "ok": false,
+      "taskId": null,
+      "errorCode": "BROWSER_NOT_CONNECTED"
+    }
+  ]
+}

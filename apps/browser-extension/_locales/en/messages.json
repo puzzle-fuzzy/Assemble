@@ -1,0 +1,6 @@
+{
+  "extensionName": { "message": "Assemble Video Downloader" },
+  "extensionDescription": {
+    "message": "Find videos and M3U8 on the current page and download them with Assemble on this computer."
+  }
+}

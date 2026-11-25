@@ -793,7 +793,12 @@ describe("云盘", () => {
         transfers: [
           toDrive({ id: "t5", phase: "queued" }),
           toDrive({ id: "t4", phase: "inProgress", progress: 0.6 }),
-          toDrive({ id: "t3", phase: "complete", progress: 1 }),
+          toDrive({
+            id: "t3",
+            name: "已上传的资料.pdf",
+            phase: "complete",
+            progress: 1,
+          }),
           toDrive({
             id: "t2",
             phase: "failed",
@@ -826,6 +831,15 @@ describe("云盘", () => {
     expect(page).toContain("没能存进云盘：云盘空间不够。");
     expect(page).toContain("取回失败：云盘里已经没有这个文件了。");
     expect(page).toContain("已取回");
+    const completed = view.host.querySelector<HTMLElement>(
+      'article[aria-label="已上传的资料.pdf"]',
+    );
+    expect(completed).not.toBeNull();
+    const completedText = completed ? text(completed) : "";
+    expect(completedText).toContain("已存到云盘 · 1.5 MB");
+    expect(completedText.match(/云盘/g)).toHaveLength(1);
+    expect(page).not.toContain("发给 云盘");
+    expect(page).not.toContain("来自 云盘");
     // 存进云盘的文件不经过接收位置：只有取回来的那个能"在文件夹中显示"。
     expect(buttons(view.host, "在文件夹中显示")).toHaveLength(1);
     expect(buttons(view.host, "重发")).toHaveLength(1);

@@ -7,6 +7,7 @@ use assemble_client::RequestOptions;
 use tauri::{AppHandle, Manager};
 use tauri_plugin_autostart::ManagerExt;
 use tauri_plugin_dialog::DialogExt;
+use tokio::io::AsyncReadExt;
 
 use crate::registry::Destination;
 use crate::session;
@@ -29,6 +30,116 @@ impl CommandError {
             message: message.into(),
         }
     }
+}
+
+impl From<assemble_download::DownloadError> for CommandError {
+    fn from(error: assemble_download::DownloadError) -> Self {
+        Self::local(error.code(), error.to_string())
+    }
+}
+
+#[tauri::command]
+pub async fn download_prepare(
+    app: AppHandle,
+    input: assemble_protocol::downloads::DownloadInput,
+) -> Result<assemble_protocol::downloads::DownloadPreview, CommandError> {
+    app.state::<std::sync::Arc<assemble_download::DownloadManager>>()
+        .prepare(input)
+        .await
+        .map_err(Into::into)
+}
+
+#[tauri::command]
+pub async fn download_import_hls(
+    app: AppHandle,
+    base_url: Option<String>,
+    page_url: Option<String>,
+) -> Result<Option<assemble_protocol::downloads::DownloadPreview>, CommandError> {
+    let (chosen, answer) = tokio::sync::oneshot::channel();
+    app.dialog()
+        .file()
+        .add_filter("M3U8", &["m3u8"])
+        .pick_file(move |file| {
+            let _ = chosen.send(file.and_then(|f| f.as_path().map(std::path::Path::to_path_buf)));
+        });
+    let Some(path) = answer.await.ok().flatten() else {
+        return Ok(None);
+    };
+    let file = tokio::fs::File::open(path)
+        .await
+        .map_err(|_| assemble_download::DownloadError::Storage)?;
+    let mut bytes = Vec::new();
+    file.take(4 * 1024 * 1024 + 1)
+        .read_to_end(&mut bytes)
+        .await
+        .map_err(|_| assemble_download::DownloadError::Storage)?;
+    app.state::<std::sync::Arc<assemble_download::DownloadManager>>()
+        .import_hls(bytes, base_url, page_url)
+        .await
+        .map(Some)
+        .map_err(Into::into)
+}
+
+#[tauri::command]
+pub async fn download_start(
+    app: AppHandle,
+    preview_id: String,
+    variant_id: String,
+) -> Result<String, CommandError> {
+    app.state::<std::sync::Arc<assemble_download::DownloadManager>>()
+        .start(&preview_id, &variant_id)
+        .await
+        .map_err(Into::into)
+}
+
+#[tauri::command]
+pub fn download_cancel(app: AppHandle, task_id: String) -> Result<(), CommandError> {
+    app.state::<std::sync::Arc<assemble_download::DownloadManager>>()
+        .cancel(&task_id)
+        .map_err(Into::into)
+}
+
+#[tauri::command]
+pub fn download_retry(app: AppHandle, task_id: String) -> Result<(), CommandError> {
+    app.state::<std::sync::Arc<assemble_download::DownloadManager>>()
+        .retry(&task_id)
+        .map_err(Into::into)
+}
+
+#[tauri::command]
+pub async fn download_choose_folder(app: AppHandle) -> Result<(), CommandError> {
+    let (chosen, answer) = tokio::sync::oneshot::channel();
+    app.dialog().file().pick_folder(move |folder| {
+        let _ = chosen.send(folder.and_then(|f| f.as_path().map(std::path::Path::to_path_buf)));
+    });
+    if let Some(folder) = answer.await.ok().flatten() {
+        app.state::<std::sync::Arc<assemble_download::DownloadManager>>()
+            .set_folder(folder)
+            .await?;
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn download_open(app: AppHandle, task_id: String) -> Result<(), CommandError> {
+    use tauri_plugin_opener::OpenerExt;
+    let path = app
+        .state::<std::sync::Arc<assemble_download::DownloadManager>>()
+        .completed_path(&task_id)
+        .await?;
+    app.opener()
+        .open_path(path.to_string_lossy(), None::<&str>)
+        .map_err(|_| CommandError::from(assemble_download::DownloadError::Storage))
+}
+
+#[tauri::command]
+pub async fn download_reveal(app: AppHandle, task_id: String) -> Result<(), CommandError> {
+    let path = app
+        .state::<std::sync::Arc<assemble_download::DownloadManager>>()
+        .completed_path(&task_id)
+        .await?;
+    crate::notify::reveal(&app, path);
+    Ok(())
 }
 
 impl From<&session::SessionError> for CommandError {

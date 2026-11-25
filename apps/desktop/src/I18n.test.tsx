@@ -127,6 +127,12 @@ describe("桌面语言切换", () => {
     const page = card(view.host, "Cloud drive");
     expect(text(page)).toContain("用户录像.mp4");
     expect(text(page)).toContain("Uploading to cloud drive 46%");
+    const uploadRow = page.querySelector<HTMLElement>(
+      'article[aria-label="用户录像.mp4"]',
+    );
+    const uploadText = uploadRow ? text(uploadRow) : "";
+    expect(uploadText).toContain("Uploading to cloud drive 46% · 1.5 MB");
+    expect(uploadText.match(/cloud drive/g)).toHaveLength(1);
     expect(
       page.querySelector('[role="progressbar"]')?.getAttribute("aria-valuenow"),
     ).toBe("46");

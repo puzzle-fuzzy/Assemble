@@ -72,6 +72,14 @@ pub fn run() -> Result<(), StartupError> {
         .plugin(tauri_plugin_notification::init())
         .invoke_handler(tauri::generate_handler![
             commands::snapshot,
+            commands::download_prepare,
+            commands::download_import_hls,
+            commands::download_start,
+            commands::download_cancel,
+            commands::download_retry,
+            commands::download_choose_folder,
+            commands::download_open,
+            commands::download_reveal,
             commands::sign_in,
             commands::cancel_sign_in,
             commands::sign_out,
@@ -138,12 +146,26 @@ pub fn run() -> Result<(), StartupError> {
         .map_err(StartupError::from)?
         .run(|app, event| {
             if let RunEvent::Exit = event {
-                // 结束所有后台任务。框架托管的状态在进程结束前未必会被释放，
-                // 不能指望析构来做这件事。
-                app.state::<AppState>().lifetime.cancel();
+                stop(app);
             }
         });
     Ok(())
+}
+
+/// 先停入口，再等待下载和原生宿主连接收尾，最后删除本实例的临时桥接凭据。
+fn stop(app: &tauri::AppHandle) {
+    app.state::<AppState>().lifetime.cancel();
+    let bridge = app.try_state::<Option<assemble_download::browser::BrowserServer>>();
+    if let Some(bridge) = bridge.as_ref().and_then(|state| state.inner().as_ref()) {
+        bridge.cancel();
+    }
+    tauri::async_runtime::block_on(
+        app.state::<Arc<assemble_download::DownloadManager>>()
+            .shutdown(),
+    );
+    if let Some(bridge) = bridge.as_ref().and_then(|state| state.inner().as_ref()) {
+        tauri::async_runtime::block_on(bridge.shutdown());
+    }
 }
 
 /// 应用启动：把状态装好、托盘与窗口立起来、后台任务跑起来。
@@ -160,6 +182,7 @@ fn start(
         .map(|store| Arc::new(store) as Arc<dyn SecretStore>);
     let settings = transfers::load_settings(&handle);
     let notifier = Arc::new(notify::SystemNotifier::new(handle.clone()));
+    let browser_secrets = secrets.clone();
     handle.manage(AppState::new(
         handle.clone(),
         client,
@@ -168,11 +191,35 @@ fn start(
         transfers::system_downloads_dir(&handle),
         notifier,
     ));
+    let downloads_handle = handle.clone();
+    let downloads = assemble_download::DownloadManager::open(
+        handle.path().app_data_dir()?.join("network-downloads.json"),
+        transfers::system_downloads_dir(&handle)
+            .join("Assemble")
+            .join("网络下载"),
+        assemble_download::MediaTools::discover(),
+        move |view| downloads_handle.state::<AppState>().set_downloads(view),
+    )?;
+    handle.state::<AppState>().set_downloads(downloads.view());
+    handle.manage(Arc::clone(&downloads));
 
     tray::build(&handle)?;
     // 点通知的处理要早于第一条通知登记好，否则点了也报不上来。
     notify::install(&handle);
     open_main_window(&handle, !background)?;
+    // 窗口成功建立后才公布原生入口，避免启动中途失败留下可连接的桥接。
+    let browser_window = handle.clone();
+    let browser = browser_secrets.and_then(|store| {
+        tauri::async_runtime::block_on(assemble_download::browser::BrowserServer::start(
+            downloads,
+            store,
+            &handle.config().identifier,
+            move || state::show_main(&browser_window),
+        ))
+        .ok()
+    });
+    handle.manage(browser);
+
     runtime::start(&handle);
     // 让 Windows 的右键菜单指向这个可执行文件（别的运行方式下什么都不做）。
     send_menu::sync(&handle.state::<AppState>().settings());

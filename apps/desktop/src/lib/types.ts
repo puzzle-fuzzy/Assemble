@@ -240,6 +240,7 @@ export interface ServiceView {
 }
 
 export interface Snapshot {
+  downloads: import("./downloads").DownloadsView;
   service: ServiceView;
   session: SessionView;
   /** 账户里的全部设备，包括这台自己。没登录时为空。 */

@@ -28,5 +28,6 @@
   "editor.lineNumbers": "interval",
   "github.copilot.enable": {
     "*": false
-  }
+  },
+  "tailwindCSS.lint.suggestCanonicalClasses": "ignore"
 }

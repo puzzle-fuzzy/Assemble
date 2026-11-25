@@ -12,6 +12,7 @@ publish = false
 [workspace.dependencies]
 assemble-client = { path = "crates/assemble-client" }
 assemble-device = { path = "crates/assemble-device" }
+assemble-download = { path = "crates/assemble-download" }
 assemble-protocol = { path = "crates/assemble-protocol" }
 assemble-schedule = { path = "crates/assemble-schedule" }
 assemble-server = { path = "apps/server" }
@@ -42,7 +43,10 @@ futures-util = { version = "0.3", default-features = false, features = [
   "std",
 ] }
 getrandom = "0.4"
+hmac = "0.13.0"
 mime_guess = "2.0.5"
+m3u8-rs = "6.0.1"
+md-5 = "0.11.0"
 # system-proxy：公司网络里常有系统级代理设置，桌面端应当遵从它。
 rpassword = "7.5.5"
 # MCP 的官方 Rust SDK。它发版很勤（四周里六个版本），所以钉死：升级必须是有意的，
@@ -101,6 +105,7 @@ tokio = { version = "1.54.1", features = [
   "io-util",
   "macros",
   "net",
+  "process",
   "rt",
   "rt-multi-thread",
   "signal",

@@ -10,6 +10,7 @@ WORKDIR /src
 COPY package.json bun.lock bunfig.toml ./
 COPY apps/desktop/package.json apps/desktop/package.json
 COPY apps/admin/package.json apps/admin/package.json
+COPY apps/browser-extension/package.json apps/browser-extension/package.json
 COPY packages/ui/package.json packages/ui/package.json
 COPY packages/display/package.json packages/display/package.json
 RUN bun install --frozen-lockfile

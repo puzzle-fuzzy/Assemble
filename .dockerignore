@@ -26,6 +26,8 @@
 !apps/mcp/**
 !apps/admin/
 !apps/admin/**
+!apps/browser-extension/
+!apps/browser-extension/package.json
 **/node_modules
 **/dist
 **/data

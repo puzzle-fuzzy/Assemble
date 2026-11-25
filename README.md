@@ -25,6 +25,8 @@ Assemble 是一个全新的、自带服务端的项目，用来完全替换 jarv
 
 哪些还没有在真实运行里验证过，逐条列在[运行手册](docs/runbooks/verify-macos-launch.md)的"还没有做过的"一节。
 
+网络文件下载已新增本机 M3U8、抖音单视频与 Chrome 开发插件入口，运行需要本机 FFmpeg/ffprobe。使用、格式限制和实际验证见[网络下载说明](docs/runbooks/network-downloads.md)与[插件说明](apps/browser-extension/README.md)；尚未捆绑正式安装包或上架商店。
+
 ## 环境要求
 
 - Bun 1.4.4 或更高（根目录 `package.json` 的 `packageManager`）
@@ -40,7 +42,9 @@ bun run acceptance   # 在 macOS 上真实验收：起好本机环境，等你�
 bun run server:dev   # 只要本地开发用的服务端：数据在 data/local/server，地址 http://127.0.0.1:8787
 bun run dev          # 桌面端的开发运行：Vite 热更新 + 调试构建，连本地开发服务
 bun run admin:dev    # 管理端开发页面：127.0.0.1:1421/admin/，复用本地服务端
-bun run build:frontend # 构建桌面与管理前端，管理资源随服务端镜像发布
+bun run build:frontend # 构建桌面、管理端与浏览器插件；管理资源随服务端镜像发布
+bun run browser:build # 构建可加载到 Chrome 的开发插件
+bun run browser:host  # 单独构建本机 Chrome 连接宿主；登记步骤见插件说明
 bun run mcp          # 构建给助手用的入口 target/release/assemble-mcp，连正式服务
 ```
 

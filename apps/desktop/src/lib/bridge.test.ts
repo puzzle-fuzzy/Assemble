@@ -8,6 +8,12 @@ import type { Snapshot } from "@/lib/types";
 type InvokeCall = { command: string; args: Record<string, unknown> };
 
 const STATE: Snapshot = {
+  downloads: {
+    browserTaskId: null,
+    folderName: "",
+    toolsAvailable: false,
+    tasks: [],
+  },
   service: { target: "production", reachable: true, stream: "off" },
   session: { phase: "signedOut" },
   devices: [],
@@ -54,6 +60,51 @@ const { SNAPSHOT_EVENT, BridgeError, bridge, run, toBridgeError } =
 const { messageFor } = await import("@/lib/messages");
 
 describe("桥接", () => {
+  test("下载只通过具名命令传来源，文件操作只传任务标识", async () => {
+    const preview = {
+      id: "p",
+      kind: "hls",
+      title: "HLS",
+      sourceHost: "example.com",
+      durationSeconds: null,
+      variants: [{ id: "v0", width: null, height: null, bandwidth: null }],
+    };
+    respondWith = preview;
+    const input = {
+      kind: "hls" as const,
+      url: "https://example.com/a.m3u8",
+      pageUrl: null,
+    };
+    await bridge.downloadPrepare(input);
+    await bridge.downloadImportHls(null, null);
+    respondWith = "a".repeat(32);
+    await bridge.downloadStart("p", "v0");
+    await bridge.downloadCancel("task");
+    await bridge.downloadRetry("task");
+    await bridge.downloadChooseFolder();
+    await bridge.downloadOpen("task");
+    await bridge.downloadReveal("task");
+    expect(calls).toEqual([
+      { command: "download_prepare", args: { input } },
+      {
+        command: "download_import_hls",
+        args: { baseUrl: null, pageUrl: null },
+      },
+      { command: "download_start", args: { previewId: "p", variantId: "v0" } },
+      { command: "download_cancel", args: { taskId: "task" } },
+      { command: "download_retry", args: { taskId: "task" } },
+      { command: "download_choose_folder", args: {} },
+      { command: "download_open", args: { taskId: "task" } },
+      { command: "download_reveal", args: { taskId: "task" } },
+    ]);
+    respondWith = {
+      ...preview,
+      variants: [{ id: "v0", width: null, height: null, bandwidth: NaN }],
+    };
+    await expect(bridge.downloadPrepare(input)).rejects.toMatchObject({
+      code: "INVALID_RESPONSE",
+    });
+  });
   beforeEach(() => {
     calls.length = 0;
     listeners.clear();

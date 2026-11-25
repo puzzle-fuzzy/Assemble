@@ -16,7 +16,9 @@
 
 pub mod account;
 pub mod admin;
+pub mod browser;
 pub mod device;
+pub mod downloads;
 pub mod drive;
 pub mod error;
 pub mod events;

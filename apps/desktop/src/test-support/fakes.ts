@@ -178,6 +178,12 @@ export function snapshot(overrides: Overrides = {}): Snapshot {
         : { phase: "signedOut" };
   return {
     service: service(),
+    downloads: {
+      browserTaskId: null,
+      folderName: "网络下载",
+      toolsAvailable: true,
+      tasks: [],
+    },
     session,
     // 没登录时 Rust 不会给出设备列表，也不会留着传输记录、草稿或云盘名单。
     // 登录之后连上服务时，Rust 会把云盘名单拿回来。
@@ -217,6 +223,45 @@ export function transfer(overrides: Partial<TransferView> = {}): TransferView {
 
 /** 记录调用、可注入失败的替身桥接。 */
 export class FakeBridge implements Bridge {
+  downloadPreview: import("@/lib/downloads").DownloadPreview = {
+    id: "preview",
+    kind: "hls",
+    title: "HLS",
+    sourceHost: "example.com",
+    durationSeconds: 10,
+    variants: [{ id: "v0", width: null, height: null, bandwidth: null }],
+  };
+  async downloadPrepare(input: import("@/lib/downloads").DownloadInput) {
+    this.calls.push("downloadPrepare");
+    await this.gate();
+    if (this.failWith) throw this.failWith;
+    this.downloadInput = input;
+    return this.downloadPreview;
+  }
+  downloadInput: import("@/lib/downloads").DownloadInput | null = null;
+  async downloadImportHls(_base: string | null, _page: string | null) {
+    this.calls.push("downloadImportHls");
+    return this.downloadPreview;
+  }
+  async downloadStart(_preview: string, _variant: string) {
+    this.calls.push("downloadStart");
+    return "a".repeat(32);
+  }
+  async downloadCancel(_id: string) {
+    this.calls.push("downloadCancel");
+  }
+  async downloadRetry(_id: string) {
+    this.calls.push("downloadRetry");
+  }
+  async downloadChooseFolder() {
+    this.calls.push("downloadChooseFolder");
+  }
+  async downloadOpen(_id: string) {
+    this.calls.push("downloadOpen");
+  }
+  async downloadReveal(_id: string) {
+    this.calls.push("downloadReveal");
+  }
   current: Snapshot;
   calls: string[] = [];
   failWith: BridgeError | null = null;

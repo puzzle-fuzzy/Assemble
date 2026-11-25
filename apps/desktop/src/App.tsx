@@ -46,6 +46,7 @@ import { Separator } from "@/components/ui/separator";
 import { SidebarProvider } from "@/components/ui/sidebar";
 import { Toaster } from "@/components/ui/sonner";
 import { Switch } from "@/components/ui/switch";
+import { DownloadsPage } from "@/DownloadsPage";
 import { useSnapshot } from "@/hooks/use-snapshot";
 import { type Bridge, bridge, toBridgeError } from "@/lib/bridge";
 import { formatBuildInfo } from "@/lib/build-info";
@@ -95,6 +96,10 @@ export function App({ bridge: source = bridge }: AppProps) {
   const previousSection = useRef(section);
   const compose = snapshot?.planner?.compose ?? null;
   const focused = snapshot?.planner?.focus ?? null;
+  const browserTaskId = snapshot?.downloads.browserTaskId ?? null;
+  useEffect(() => {
+    if (browserTaskId !== null) setSection("downloads");
+  }, [browserTaskId]);
 
   useEffect(() => {
     if (previousAccount.current === accountId) return;
@@ -232,6 +237,7 @@ export function App({ bridge: source = bridge }: AppProps) {
               ) : null}
               {phase !== "signedIn" &&
               section !== "settings" &&
+              section !== "downloads" &&
               section !== "account" &&
               section !== "about" ? (
                 <Empty className="min-h-64">
@@ -259,6 +265,15 @@ export function App({ bridge: source = bridge }: AppProps) {
                 </Empty>
               ) : null}
               {/* 只隐藏非当前页面，同一账户的草稿与进行中的操作继续保留。 */}
+              <section
+                id="view-downloads"
+                aria-label={
+                  SECTIONS().find((item) => item.id === "downloads")?.label
+                }
+                hidden={section !== "downloads"}
+              >
+                <DownloadsPage source={source} view={snapshot?.downloads} />
+              </section>
               <section
                 id="view-transfers"
                 aria-label={uiText("fileTransfers")}
@@ -921,6 +936,8 @@ function TransferRow({
   const [pending, setPending] = useState(false);
   const failed = transfer.phase === "failed";
   const receiving = transfer.direction === "in";
+  const cloudTransfer = transfer.target === "drive";
+  const status = transferStatus(transfer);
 
   // 一条记录上的几个按钮做的是同一类事：交出标识，等 Rust 办完。
   async function act(what: () => Promise<unknown>) {
@@ -955,10 +972,19 @@ function TransferRow({
           <p className="truncate text-sm font-medium" title={transfer.name}>
             {transfer.name}
           </p>
-          <p className="text-xs text-muted-foreground">
-            {showPeer
-              ? `${receiving ? uiText("from") : uiText("to")} ${transfer.target === "drive" ? uiText("cloudDrive") : transfer.peer} · `
-              : ""}
+          <p
+            role={cloudTransfer && failed ? "alert" : undefined}
+            className={
+              cloudTransfer && failed
+                ? "text-xs text-destructive"
+                : "text-xs text-muted-foreground"
+            }
+          >
+            {cloudTransfer
+              ? `${status} · `
+              : showPeer
+                ? `${receiving ? uiText("from") : uiText("to")} ${transfer.peer} · `
+                : ""}
             {formatSize(transfer.size)}
           </p>
           {transfer.savedAs ? (
@@ -1010,19 +1036,21 @@ function TransferRow({
               ? 0
               : Math.floor(transfer.progress * 100)
           }
-          getValueLabel={() => transferStatus(transfer)}
+          getValueLabel={() => status}
         />
       ) : null}
-      <p
-        role={failed ? "alert" : undefined}
-        className={
-          failed
-            ? "mt-1 text-xs text-destructive"
-            : "mt-1 text-xs text-muted-foreground"
-        }
-      >
-        {transferStatus(transfer)}
-      </p>
+      {!cloudTransfer ? (
+        <p
+          role={failed ? "alert" : undefined}
+          className={
+            failed
+              ? "mt-1 text-xs text-destructive"
+              : "mt-1 text-xs text-muted-foreground"
+          }
+        >
+          {status}
+        </p>
+      ) : null}
     </article>
   );
 }

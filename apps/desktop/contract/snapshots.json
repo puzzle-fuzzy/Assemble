@@ -20,7 +20,32 @@
     "launchAtLogin": "unsupported",
     "notice": null,
     "planner": null,
-    "plannerMuted": false
+    "plannerMuted": false,
+    "downloads": {
+      "browserTaskId": null,
+      "folderName": "网络下载",
+      "toolsAvailable": true,
+      "tasks": [
+        {
+          "id": "download-1",
+          "kind": "hls",
+          "title": "示例视频 <2026>",
+          "fileName": "示例视频 _2026_.mp4",
+          "sourceHost": "example.test",
+          "phase": "completed",
+          "receivedBytes": 1200000,
+          "totalBytes": null,
+          "completedSegments": 3,
+          "totalSegments": 3,
+          "bytesPerSecond": 0,
+          "mediaSeconds": null,
+          "durationSeconds": 3.5,
+          "errorCode": null,
+          "retryable": false,
+          "createdAt": "2026-11-25T08:00:00.000Z"
+        }
+      ]
+    }
   },
   {
     "service": {
@@ -43,7 +68,13 @@
     "launchAtLogin": "disabled",
     "notice": null,
     "planner": null,
-    "plannerMuted": false
+    "plannerMuted": false,
+    "downloads": {
+      "browserTaskId": null,
+      "folderName": "",
+      "toolsAvailable": false,
+      "tasks": []
+    }
   },
   {
     "service": {
@@ -184,7 +215,13 @@
       "focus": null,
       "compose": null
     },
-    "plannerMuted": false
+    "plannerMuted": false,
+    "downloads": {
+      "browserTaskId": null,
+      "folderName": "",
+      "toolsAvailable": false,
+      "tasks": []
+    }
   },
   {
     "service": {
@@ -210,7 +247,13 @@
       "message": "等待浏览器登录超时，请重试。"
     },
     "planner": null,
-    "plannerMuted": false
+    "plannerMuted": false,
+    "downloads": {
+      "browserTaskId": null,
+      "folderName": "",
+      "toolsAvailable": false,
+      "tasks": []
+    }
   },
   {
     "service": {
@@ -236,7 +279,13 @@
       "message": "登录已失效，请重新登录。"
     },
     "planner": null,
-    "plannerMuted": false
+    "plannerMuted": false,
+    "downloads": {
+      "browserTaskId": null,
+      "folderName": "",
+      "toolsAvailable": false,
+      "tasks": []
+    }
   },
   {
     "service": {
@@ -291,7 +340,13 @@
       "focus": null,
       "compose": "reminder"
     },
-    "plannerMuted": false
+    "plannerMuted": false,
+    "downloads": {
+      "browserTaskId": null,
+      "folderName": "",
+      "toolsAvailable": false,
+      "tasks": []
+    }
   },
   {
     "service": {
@@ -432,7 +487,13 @@
       "focus": "n-remi-1",
       "compose": null
     },
-    "plannerMuted": false
+    "plannerMuted": false,
+    "downloads": {
+      "browserTaskId": null,
+      "folderName": "",
+      "toolsAvailable": false,
+      "tasks": []
+    }
   },
   {
     "service": {
@@ -652,7 +713,13 @@
       "focus": null,
       "compose": null
     },
-    "plannerMuted": false
+    "plannerMuted": false,
+    "downloads": {
+      "browserTaskId": null,
+      "folderName": "",
+      "toolsAvailable": false,
+      "tasks": []
+    }
   },
   {
     "service": {
@@ -721,7 +788,13 @@
       "focus": null,
       "compose": null
     },
-    "plannerMuted": true
+    "plannerMuted": true,
+    "downloads": {
+      "browserTaskId": null,
+      "folderName": "",
+      "toolsAvailable": false,
+      "tasks": []
+    }
   },
   {
     "service": {
@@ -808,7 +881,13 @@
       "focus": null,
       "compose": null
     },
-    "plannerMuted": false
+    "plannerMuted": false,
+    "downloads": {
+      "browserTaskId": null,
+      "folderName": "",
+      "toolsAvailable": false,
+      "tasks": []
+    }
   },
   {
     "service": {
@@ -1031,7 +1110,13 @@
       "focus": null,
       "compose": null
     },
-    "plannerMuted": false
+    "plannerMuted": false,
+    "downloads": {
+      "browserTaskId": null,
+      "folderName": "",
+      "toolsAvailable": false,
+      "tasks": []
+    }
   },
   {
     "service": {
@@ -1264,7 +1349,13 @@
       "focus": null,
       "compose": null
     },
-    "plannerMuted": false
+    "plannerMuted": false,
+    "downloads": {
+      "browserTaskId": null,
+      "folderName": "",
+      "toolsAvailable": false,
+      "tasks": []
+    }
   },
   {
     "service": {
@@ -1501,7 +1592,13 @@
       "focus": null,
       "compose": null
     },
-    "plannerMuted": false
+    "plannerMuted": false,
+    "downloads": {
+      "browserTaskId": null,
+      "folderName": "",
+      "toolsAvailable": false,
+      "tasks": []
+    }
   },
   {
     "service": {
@@ -1524,7 +1621,13 @@
     "launchAtLogin": "unsupported",
     "notice": null,
     "planner": null,
-    "plannerMuted": false
+    "plannerMuted": false,
+    "downloads": {
+      "browserTaskId": null,
+      "folderName": "",
+      "toolsAvailable": false,
+      "tasks": []
+    }
   },
   {
     "service": {
@@ -1547,6 +1650,12 @@
     "launchAtLogin": "unsupported",
     "notice": null,
     "planner": null,
-    "plannerMuted": false
+    "plannerMuted": false,
+    "downloads": {
+      "browserTaskId": null,
+      "folderName": "",
+      "toolsAvailable": false,
+      "tasks": []
+    }
   }
 ]

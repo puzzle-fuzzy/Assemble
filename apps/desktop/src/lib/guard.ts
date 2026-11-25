@@ -274,11 +274,14 @@ export function isSessionView(value: unknown): value is SessionView {
   }
 }
 
+import { isDownloadsView } from "./downloads";
+
 export function isSnapshot(value: unknown): value is Snapshot {
   if (!isRecord(value)) return false;
   const service = value.service;
   return (
     isRecord(service) &&
+    isDownloadsView(value.downloads) &&
     isServiceTarget(service.target) &&
     (service.reachable === null || typeof service.reachable === "boolean") &&
     isStreamState(service.stream) &&

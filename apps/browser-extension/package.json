@@ -1,0 +1,27 @@
+{
+  "name": "@assemble/browser-extension",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "build": "bun scripts/build.ts"
+  },
+  "dependencies": {
+    "@assemble/display": "workspace:*",
+    "@assemble/ui": "workspace:*",
+    "react": "19.3.1",
+    "react-dom": "19.3.1",
+    "lucide-react": "1.78.0"
+  },
+  "devDependencies": {
+    "@types/chrome": "0.3.8",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "@types/bun": "1.4.4",
+    "@tailwindcss/vite": "4.3.5",
+    "@vitejs/plugin-react": "6.3.0",
+    "vite": "8.3.8",
+    "typescript": "7.0.2"
+  }
+}

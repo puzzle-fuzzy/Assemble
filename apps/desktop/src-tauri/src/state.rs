@@ -262,6 +262,7 @@ fn receive_path_text(path: &std::path::Path) -> String {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Snapshot {
+    pub downloads: assemble_protocol::downloads::DownloadsView,
     pub service: ServiceView,
     pub session: SessionView,
     /// 账户里的全部设备，包括这台自己，按注册先后排列。没登录时为空。
@@ -387,6 +388,7 @@ pub struct Stored {
 /// 界面能看到的那部分状态。改动都经过 [`AppState::update`]。
 #[derive(Debug, Clone, PartialEq)]
 pub struct View {
+    downloads: assemble_protocol::downloads::DownloadsView,
     service: ServiceView,
     session: SessionView,
     devices: Vec<DeviceView>,
@@ -434,6 +436,7 @@ impl View {
     /// 这份状态交给界面的样子。`launch_at_login` 由调用方提供：它要问系统，不该在持锁时问。
     fn snapshot(&self, launch_at_login: LaunchState) -> Snapshot {
         Snapshot {
+            downloads: self.downloads.clone(),
             service: self.service.clone(),
             session: self.session.clone(),
             devices: self.devices.clone(),
@@ -453,6 +456,7 @@ impl View {
 
     fn initial(origin: &ServerOrigin) -> Self {
         Self {
+            downloads: assemble_protocol::downloads::DownloadsView::default(),
             service: ServiceView {
                 target: ServiceTarget::for_origin(origin),
                 reachable: None,
@@ -595,6 +599,10 @@ impl<R: tauri::Runtime> AppState<R> {
 
     pub fn set_notice(&self, notice: Option<Notice>) {
         self.update(|view| view.notice = notice);
+    }
+
+    pub fn set_downloads(&self, downloads: assemble_protocol::downloads::DownloadsView) {
+        self.update(|view| view.downloads = downloads);
     }
 
     /// 账户里的一台设备。

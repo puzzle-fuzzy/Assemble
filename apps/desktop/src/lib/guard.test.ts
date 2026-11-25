@@ -32,6 +32,12 @@ test("头像只接受已知 GitHub 数字身份地址", () => {
 });
 
 const VALID: Snapshot = {
+  downloads: {
+    browserTaskId: null,
+    folderName: "",
+    toolsAvailable: false,
+    tasks: [],
+  },
   service: { target: "production", reachable: true, stream: "off" },
   session: { phase: "signedOut" },
   devices: [],
