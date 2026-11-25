@@ -60,5 +60,5 @@ Assemble 是一个全新的、自带服务端的项目，用来完全替换 jarv
 
 - TypeScript 侧只使用 Bun：根目录唯一的 `bun.lock`，不引入其它包管理器。
 - 格式与 lint 只使用 Biome；Biome 也会格式化 Markdown 表格。
-- 前端组件使用 shadcn 生成的 `apps/desktop/src/components/ui`，图标使用 Lucide。
+- 前端组件使用 shadcn 生成的 `apps/desktop/src/components/ui`，缺少的组件通过 shadcn CLI 拉取，不自行编写同类基础控件；图标使用 Lucide。
 - Rust 依赖只用稳定版。本机 `cargo info` 会把预发布版本排在最前，选版本前用 crates.io 的接口核对。

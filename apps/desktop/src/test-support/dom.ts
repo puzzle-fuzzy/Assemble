@@ -55,7 +55,12 @@ export async function wait(milliseconds: number) {
 }
 
 export function text(host: HTMLElement) {
-  return host.textContent ?? "";
+  const visible = host.cloneNode(true) as HTMLElement;
+  for (const hidden of visible.querySelectorAll(
+    "[hidden], [aria-hidden='true'], .sr-only, style",
+  ))
+    hidden.remove();
+  return visible.textContent ?? "";
 }
 
 /** 标题是这个名字的那张卡片：只在它里面找东西，免得和别的卡片里同名的按钮弄混。 */
@@ -64,6 +69,7 @@ export function card(host: HTMLElement, title: string): HTMLElement {
     ...host.querySelectorAll<HTMLElement>('[data-slot="card"]'),
   ].find(
     (candidate) =>
+      !candidate.closest("[hidden]") &&
       candidate
         .querySelector('[data-slot="card-title"]')
         ?.textContent?.trim() === title,
@@ -102,7 +108,10 @@ function named(
   selector: string,
 ): HTMLButtonElement[] {
   return [...host.querySelectorAll<HTMLButtonElement>(selector)].filter(
-    (candidate) => candidate.textContent?.trim() === name,
+    (candidate) =>
+      !candidate.closest("[hidden]") &&
+      (candidate.getAttribute("aria-label") === name ||
+        candidate.textContent?.trim() === name),
   );
 }
 

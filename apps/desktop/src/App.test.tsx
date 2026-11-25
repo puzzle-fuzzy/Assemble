@@ -3,8 +3,6 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { act } from "react";
 import { toast } from "sonner";
-
-import { App } from "@/App";
 import { BridgeError } from "@/lib/bridge";
 import type { TransferView } from "@/lib/types";
 import {
@@ -15,7 +13,6 @@ import {
   click,
   launchSwitch,
   press,
-  render,
   settle,
   text,
   textField,
@@ -32,6 +29,7 @@ import {
   snapshot,
   transfer,
 } from "@/test-support/fakes";
+import { renderApp } from "@/test-support/render-app";
 
 beforeEach(() => {
   document.body.replaceChildren();
@@ -49,7 +47,7 @@ describe("版本信息", () => {
       snapshot({ phase: "signedIn" }),
       snapshot({ service: service({ reachable: false }) }),
     ]) {
-      const view = await render(<App bridge={new FakeBridge(current)} />);
+      const view = await renderApp(new FakeBridge(current));
       await settle();
       const footer = view.host.querySelector("footer");
       expect(footer?.querySelector("p")?.textContent).toBe(
@@ -71,7 +69,7 @@ describe("连接状态", () => {
         service: service({ target: "development", reachable: null }),
       }),
     );
-    const view = await render(<App bridge={source} />);
+    const view = await renderApp(source);
     await settle();
     expect(text(view.host)).toContain("正在检测连接");
 
@@ -94,7 +92,7 @@ describe("连接状态", () => {
         service: service({ target: "production", reachable: false }),
       }),
     );
-    const view = await render(<App bridge={source} />);
+    const view = await renderApp(source);
     await settle();
     expect(text(view.host)).toContain("暂时无法连接服务器");
   });
@@ -106,7 +104,7 @@ describe("连接状态", () => {
         service: service({ stream: "connecting" }),
       }),
     );
-    const view = await render(<App bridge={source} />);
+    const view = await renderApp(source);
     await settle();
     // 事件流还在建立：不能说成"已连接"。
     expect(text(view.host)).toContain("正在连接…");
@@ -146,7 +144,7 @@ describe("连接状态", () => {
 describe("账户", () => {
   test("未登录时可以发起登录，进行中不重复触发", async () => {
     const source = new FakeBridge(snapshot());
-    const view = await render(<App bridge={source} />);
+    const view = await renderApp(source, "账户");
     await settle();
 
     const signIn = button(view.host, "使用浏览器登录");
@@ -171,7 +169,7 @@ describe("账户", () => {
         service: service({ target: "production", reachable: false }),
       }),
     );
-    const view = await render(<App bridge={source} />);
+    const view = await renderApp(source, "账户");
     await settle();
 
     expect(button(view.host, "使用浏览器登录")?.disabled).toBe(true);
@@ -181,7 +179,7 @@ describe("账户", () => {
 
   test("登录进行中可以取消", async () => {
     const source = new FakeBridge(snapshot({ phase: "signingIn" }));
-    const view = await render(<App bridge={source} />);
+    const view = await renderApp(source, "账户");
     await settle();
 
     expect(text(view.host)).toContain(
@@ -193,7 +191,7 @@ describe("账户", () => {
 
   test("已登录时显示账户并可以退出", async () => {
     const source = new FakeBridge(snapshot({ phase: "signedIn" }));
-    const view = await render(<App bridge={source} />);
+    const view = await renderApp(source, "账户");
     await settle();
 
     expect(text(view.host)).toContain("Example（example）");
@@ -207,7 +205,7 @@ describe("账户", () => {
       ...source.current,
       session: signedIn({ ...ACCOUNT, displayName: "example" }),
     };
-    const view = await render(<App bridge={source} />);
+    const view = await renderApp(source, "账户");
     await settle();
     expect(text(view.host)).toContain("example");
     expect(text(view.host)).not.toContain("（example）");
@@ -219,15 +217,19 @@ describe("账户", () => {
       ...source.current,
       session: signedIn({ ...ACCOUNT, email: "user@example.test" }),
     };
-    const view = await render(<App bridge={source} />);
+    const view = await renderApp(source, "账户");
     await settle();
     expect(text(view.host)).toContain("Example（user@example.test）");
-    expect(view.host.querySelector('[aria-label="默认头像"]')).not.toBeNull();
+    expect(
+      view.host.querySelector(
+        '[data-slot="sidebar-footer"] [data-slot="avatar-fallback"]',
+      ),
+    ).not.toBeNull();
   });
 
   test("已登录时显示这台设备在账户里的名字", async () => {
     const source = new FakeBridge(snapshot({ phase: "signedIn" }));
-    const view = await render(<App bridge={source} />);
+    const view = await renderApp(source, "账户");
     await settle();
 
     expect(text(view.host)).toContain("这台设备：MacBook-Pro");
@@ -254,7 +256,7 @@ describe("账户", () => {
       "UNREACHABLE",
       "connect tcp 10.0.0.1:3300: refused",
     );
-    const view = await render(<App bridge={source} />);
+    const view = await renderApp(source, "账户");
     await settle();
 
     await click(button(view.host, "退出登录"));
@@ -270,7 +272,7 @@ describe("提示", () => {
         notice: { kind: "error", message: "等待浏览器登录超时，请重试。" },
       }),
     );
-    const view = await render(<App bridge={source} />);
+    const view = await renderApp(source);
     await settle();
 
     const timeout = "等待浏览器登录超时，请重试。";
@@ -297,7 +299,7 @@ describe("提示", () => {
       message: "等待浏览器登录超时，请重试。",
     } as const;
     const source = new FakeBridge(snapshot({ notice: timeout }));
-    const view = await render(<App bridge={source} />);
+    const view = await renderApp(source);
     await settle();
 
     const close = view.host.querySelector<HTMLButtonElement>(
@@ -330,7 +332,7 @@ describe("提示", () => {
       );
       throw new BridgeError("LOGIN_CALLBACK_FAILED", "login timed out");
     };
-    const view = await render(<App bridge={source} />);
+    const view = await renderApp(source, "账户");
     await settle();
     await click(button(view.host, "使用浏览器登录"));
     expect(
@@ -350,7 +352,7 @@ describe("提示", () => {
         notice: { kind: "error", message: "请先登录，再发送文件。" },
       }),
     );
-    const view = await render(<App bridge={source} />);
+    const view = await renderApp(source);
     await settle();
     expect(
       view.host.querySelector('main [role="alert"]')?.textContent,
@@ -364,7 +366,7 @@ describe("提示", () => {
         notice: { kind: "info", message: "登录已失效，请重新登录。" },
       }),
     );
-    const view = await render(<App bridge={source} />);
+    const view = await renderApp(source);
     await settle();
 
     await click(button(view.host, "知道了"));
@@ -377,7 +379,7 @@ describe("提示", () => {
         notice: { kind: "info", message: "登录已失效，请重新登录。" },
       }),
     );
-    const view = await render(<App bridge={source} />);
+    const view = await renderApp(source);
     await settle();
     expect(text(view.host)).toContain("登录已失效，请重新登录。");
 
@@ -391,7 +393,7 @@ describe("提示", () => {
 describe("开机启动", () => {
   test("开关反映系统里的实际状态，点击后才请求修改", async () => {
     const source = new FakeBridge(snapshot({ launchAtLogin: "disabled" }));
-    const view = await render(<App bridge={source} />);
+    const view = await renderApp(source, "本机设置");
     await settle();
 
     expect(launchSwitch(view.host).getAttribute("aria-checked")).toBe("false");
@@ -410,7 +412,7 @@ describe("开机启动", () => {
 
   test("不支持时禁用并说明原因", async () => {
     const source = new FakeBridge(snapshot({ launchAtLogin: "unsupported" }));
-    const view = await render(<App bridge={source} />);
+    const view = await renderApp(source, "本机设置");
     await settle();
 
     expect(launchSwitch(view.host).disabled).toBe(true);
@@ -419,7 +421,7 @@ describe("开机启动", () => {
 
   test("等待系统批准时不显示为已开启", async () => {
     const source = new FakeBridge(snapshot({ launchAtLogin: "unknown" }));
-    const view = await render(<App bridge={source} />);
+    const view = await renderApp(source, "本机设置");
     await settle();
 
     expect(launchSwitch(view.host).getAttribute("aria-checked")).toBe("false");
@@ -429,7 +431,7 @@ describe("开机启动", () => {
   test("系统拒绝修改时显示提示", async () => {
     const source = new FakeBridge(snapshot({ launchAtLogin: "disabled" }));
     source.failWith = new BridgeError("SYSTEM_REJECTED", "os error 5");
-    const view = await render(<App bridge={source} />);
+    const view = await renderApp(source, "本机设置");
     await settle();
 
     await click(launchSwitch(view.host));
@@ -440,12 +442,12 @@ describe("开机启动", () => {
 
 describe("传输", () => {
   test("没登录时没有这一块；登录后没有记录时如实说还没有", async () => {
-    const signedOut = await render(<App bridge={new FakeBridge(snapshot())} />);
+    const signedOut = await renderApp(new FakeBridge(snapshot()));
     await settle();
     expect(text(signedOut.host)).not.toContain("传输");
 
-    const view = await render(
-      <App bridge={new FakeBridge(snapshot({ phase: "signedIn" }))} />,
+    const view = await renderApp(
+      new FakeBridge(snapshot({ phase: "signedIn" })),
     );
     await settle();
     expect(text(view.host)).toContain("还没有收发过文件。");
@@ -491,7 +493,7 @@ describe("传输", () => {
         ],
       }),
     );
-    const view = await render(<App bridge={source} />);
+    const view = await renderApp(source);
     await settle();
 
     const page = text(view.host);
@@ -522,7 +524,7 @@ describe("传输", () => {
           transfers: [transfer({ phase: "failed", progress: 0, failure })],
         }),
       );
-      const view = await render(<App bridge={source} />);
+      const view = await renderApp(source);
       await settle();
       expect(text(view.host)).toContain(`接收失败：${words}。`);
       await view.unmount();
@@ -545,7 +547,7 @@ describe("传输", () => {
         ],
       }),
     );
-    const view = await render(<App bridge={source} />);
+    const view = await renderApp(source);
     await settle();
 
     expect(buttons(view.host, "在文件夹中显示")).toHaveLength(1);
@@ -558,7 +560,7 @@ describe("传输", () => {
       snapshot({ phase: "signedIn", transfers: [transfer()] }),
     );
     source.failWith = new BridgeError("NOT_SAVED", "no file for t1 on disk");
-    const view = await render(<App bridge={source} />);
+    const view = await renderApp(source);
     await settle();
 
     await click(button(view.host, "在文件夹中显示"));
@@ -573,7 +575,7 @@ describe("传输", () => {
         transfers: [transfer({ phase: "inProgress", progress: 0.2 })],
       }),
     );
-    const view = await render(<App bridge={source} />);
+    const view = await renderApp(source);
     await settle();
     expect(text(view.host)).toContain("正在接收 20%");
     expect(button(view.host, "在文件夹中显示")).toBeUndefined();
@@ -610,7 +612,7 @@ describe("传输", () => {
         ],
       }),
     );
-    const view = await render(<App bridge={source} />);
+    const view = await renderApp(source);
     await settle();
 
     const page = text(view.host);
@@ -653,7 +655,7 @@ describe("传输", () => {
         ],
       }),
     );
-    const view = await render(<App bridge={source} />);
+    const view = await renderApp(source);
     await settle();
 
     // 两个按钮各属于各自的那条记录。
@@ -665,7 +667,7 @@ describe("传输", () => {
 
   test("点「发送文件…」交给系统选择器；挑的文件读不出来时说明原因", async () => {
     const source = new FakeBridge(snapshot({ phase: "signedIn" }));
-    const view = await render(<App bridge={source} />);
+    const view = await renderApp(source);
     await settle();
 
     await click(button(view.host, "发送文件…"));
@@ -682,12 +684,12 @@ describe("传输", () => {
 
 describe("云盘", () => {
   test("列出云盘里的文件与已用空间；没登录时没有这一块", async () => {
-    const signedOut = await render(<App bridge={new FakeBridge(snapshot())} />);
+    const signedOut = await renderApp(new FakeBridge(snapshot()), "云盘");
     await settle();
     expect(text(signedOut.host)).not.toContain("云盘");
 
     const source = new FakeBridge(snapshot({ phase: "signedIn" }));
-    const view = await render(<App bridge={source} />);
+    const view = await renderApp(source, "云盘");
     await settle();
     const page = text(view.host);
     expect(page).toContain("已用 1.5 MB，共 2.0 GB");
@@ -699,7 +701,7 @@ describe("云盘", () => {
 
   test("名单还没拿回来时向 Rust 要一次，不反复要", async () => {
     const source = new FakeBridge(snapshot({ phase: "signedIn", drive: null }));
-    const view = await render(<App bridge={source} />);
+    const view = await renderApp(source, "云盘");
     await settle();
     expect(source.calls).toEqual(["driveRefresh"]);
     expect(text(view.host)).toContain("正在读取云盘…");
@@ -714,7 +716,7 @@ describe("云盘", () => {
 
   test("上传交给系统选择器；取回只交出文件的标识", async () => {
     const source = new FakeBridge(snapshot({ phase: "signedIn" }));
-    const view = await render(<App bridge={source} />);
+    const view = await renderApp(source, "云盘");
     await settle();
 
     await click(button(view.host, "上传…"));
@@ -724,7 +726,7 @@ describe("云盘", () => {
 
   test("删除要先确认，取消就什么都不做", async () => {
     const source = new FakeBridge(snapshot({ phase: "signedIn" }));
-    const view = await render(<App bridge={source} />);
+    const view = await renderApp(source, "云盘");
     await settle();
 
     await click(button(view.host, "删除"));
@@ -779,7 +781,7 @@ describe("云盘", () => {
         ],
       }),
     );
-    const view = await render(<App bridge={source} />);
+    const view = await renderApp(source, "文件传输");
     await settle();
     const page = text(view.host);
     expect(page).toContain("等待上传…");
@@ -801,7 +803,7 @@ describe("云盘", () => {
         drive: { ...DRIVE, items: [], usedBytes: 0 },
       }),
     );
-    const view = await render(<App bridge={source} />);
+    const view = await renderApp(source, "云盘");
     await settle();
     expect(text(view.host)).toContain("云盘里还没有文件。");
     expect(text(view.host)).toContain("已用 0 B，共 2.0 GB");
@@ -811,7 +813,7 @@ describe("云盘", () => {
 describe("右键菜单", () => {
   test("不是 Windows 的打包运行时没有这一项", async () => {
     const source = new FakeBridge(snapshot({ sendMenu: "unsupported" }));
-    const view = await render(<App bridge={source} />);
+    const view = await renderApp(source, "本机设置");
     await settle();
     expect(text(view.host)).not.toContain("右键菜单");
     expect(text(view.host)).toContain("接收位置");
@@ -819,7 +821,7 @@ describe("右键菜单", () => {
 
   test("开着时说明它在哪儿，点开关只把要改成什么交给 Rust", async () => {
     const source = new FakeBridge(snapshot({ sendMenu: "enabled" }));
-    const view = await render(<App bridge={source} />);
+    const view = await renderApp(source, "本机设置");
     await settle();
     expect(text(view.host)).toContain("右键菜单");
     expect(text(view.host)).toContain(
@@ -840,7 +842,7 @@ describe("右键菜单", () => {
 
   test("关掉时如实说菜单里没有它", async () => {
     const source = new FakeBridge(snapshot({ sendMenu: "disabled" }));
-    const view = await render(<App bridge={source} />);
+    const view = await renderApp(source, "本机设置");
     await settle();
     expect(text(view.host)).toContain(
       "文件的右键菜单里没有「用 Assemble 发送」",
@@ -850,7 +852,7 @@ describe("右键菜单", () => {
   test("系统不让改时显示固定文案", async () => {
     const source = new FakeBridge(snapshot({ sendMenu: "disabled" }));
     source.failWith = new BridgeError("SYSTEM_REJECTED", "os error 5");
-    const view = await render(<App bridge={source} />);
+    const view = await renderApp(source, "本机设置");
     await settle();
     const toggle = view.host.querySelector<HTMLButtonElement>(
       '[aria-label="右键菜单里的“用 Assemble 发送”"]',
@@ -865,7 +867,7 @@ describe("右键菜单", () => {
 describe("接收位置", () => {
   test("默认是下载/Assemble，点「更改」由系统选择器来挑", async () => {
     const source = new FakeBridge(snapshot());
-    const view = await render(<App bridge={source} />);
+    const view = await renderApp(source, "本机设置");
     await settle();
 
     expect(text(view.host)).toContain("下载/Assemble");
@@ -879,7 +881,7 @@ describe("接收位置", () => {
     const source = new FakeBridge(
       snapshot({ receive: { customFolder: "工作资料", displayPath: null } }),
     );
-    const view = await render(<App bridge={source} />);
+    const view = await renderApp(source, "本机设置");
     await settle();
 
     expect(text(view.host)).toContain("「工作资料」文件夹");
@@ -900,7 +902,7 @@ describe("接收位置", () => {
   test("选的文件夹不能用时说明原因", async () => {
     const source = new FakeBridge(snapshot());
     source.failWith = new BridgeError("INVALID_RECEIVE_FOLDER", "NotDirectory");
-    const view = await render(<App bridge={source} />);
+    const view = await renderApp(source, "本机设置");
     await settle();
 
     await click(button(view.host, "更改…"));
@@ -915,7 +917,7 @@ describe("接收位置", () => {
     const source = new FakeBridge(
       snapshot({ receive: { customFolder: null, displayPath: defaultPath } }),
     );
-    const view = await render(<App bridge={source} />);
+    const view = await renderApp(source, "本机设置");
     await settle();
     expect(text(card(view.host, "本机"))).toContain(defaultPath);
     expect(text(card(view.host, "本机"))).not.toContain("下载/Assemble");
@@ -950,7 +952,7 @@ describe("接收位置", () => {
 describe("订阅生命周期", () => {
   test("卸载后不再接收状态", async () => {
     const source = new FakeBridge(snapshot());
-    const view = await render(<App bridge={source} />);
+    const view = await renderApp(source);
     await settle();
     expect(source.listenerCount).toBe(1);
 
@@ -968,7 +970,7 @@ describe("设备", () => {
     const source = new FakeBridge(
       snapshot({ phase: "signedIn", devices: [{ ...DEVICE }, { ...OTHER }] }),
     );
-    const view = await render(<App bridge={source} />);
+    const view = await renderApp(source, "账户");
     await settle();
 
     const page = text(view.host);
@@ -984,7 +986,7 @@ describe("设备", () => {
 
   test("没登录时不显示设备，哪怕状态里残留着设备", async () => {
     const source = new FakeBridge(snapshot({ devices: [{ ...OTHER }] }));
-    const view = await render(<App bridge={source} />);
+    const view = await renderApp(source, "账户");
     await settle();
     expect(text(view.host)).not.toContain("工作电脑");
     expect(text(view.host)).not.toContain("设备");
@@ -994,7 +996,7 @@ describe("设备", () => {
     const source = new FakeBridge(
       snapshot({ phase: "signedIn", devices: [{ ...DEVICE }, { ...OTHER }] }),
     );
-    const view = await render(<App bridge={source} />);
+    const view = await renderApp(source, "账户");
     await settle();
     expect(text(view.host)).toContain("Windows · 离线");
 
@@ -1013,7 +1015,7 @@ describe("设备", () => {
     const source = new FakeBridge(
       snapshot({ phase: "signedIn", devices: [{ ...DEVICE }, { ...OTHER }] }),
     );
-    const view = await render(<App bridge={source} />);
+    const view = await renderApp(source, "账户");
     await settle();
 
     await click(button(view.host, "改名"));
@@ -1029,7 +1031,7 @@ describe("设备", () => {
     const source = new FakeBridge(
       snapshot({ phase: "signedIn", devices: [{ ...DEVICE }, { ...OTHER }] }),
     );
-    const view = await render(<App bridge={source} />);
+    const view = await renderApp(source, "账户");
     await settle();
 
     await click(button(view.host, "改名"));
@@ -1050,7 +1052,7 @@ describe("设备", () => {
     const source = new FakeBridge(
       snapshot({ phase: "signedIn", devices: [{ ...DEVICE }, { ...OTHER }] }),
     );
-    const view = await render(<App bridge={source} />);
+    const view = await renderApp(source, "账户");
     await settle();
 
     await click(button(view.host, "移除"));
@@ -1069,7 +1071,7 @@ describe("设备", () => {
       snapshot({ phase: "signedIn", devices: [{ ...DEVICE }, { ...OTHER }] }),
     );
     source.failWith = new BridgeError("NOT_FOUND", "devices/abc row not found");
-    const view = await render(<App bridge={source} />);
+    const view = await renderApp(source, "账户");
     await settle();
 
     await click(button(view.host, "移除"));

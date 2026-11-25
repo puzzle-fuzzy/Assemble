@@ -36,12 +36,18 @@ export interface PlannerCardProps {
   source: Bridge;
   snapshot: Snapshot | null;
   onError: (message: string | null) => void;
+  active?: boolean;
 }
 
 /** 这些错误码的意思都是"你看到的是旧的"：表单里留着旧值只会再错一次，不如收起来看最新的。 */
 const STALE = new Set(["VERSION_CONFLICT", "INVALID_STATE"]);
 
-export function PlannerCard({ source, snapshot, onError }: PlannerCardProps) {
+export function PlannerCard({
+  source,
+  snapshot,
+  onError,
+  active = true,
+}: PlannerCardProps) {
   const [pending, setPending] = useState(false);
   const [form, setForm] = useState<Form | null>(null);
   // 名单由 Rust 在连上服务时去拿；万一没拿到（比如刚登录时断了一下），这里补要一次。
@@ -69,13 +75,13 @@ export function PlannerCard({ source, snapshot, onError }: PlannerCardProps) {
   const focused = useRef<HTMLLIElement | null>(null);
   const focus = planner?.focus ?? null;
   useEffect(() => {
-    if (focus === null) return;
+    if (focus === null || !active) return;
     const row = focused.current;
     // 测试用的 DOM 实现没有这个方法。
     if (row && typeof row.scrollIntoView === "function") {
       row.scrollIntoView({ block: "center" });
     }
-  }, [focus]);
+  }, [focus, active]);
 
   if (snapshot == null || snapshot.session.phase !== "signedIn") return null;
   const deviceName = snapshot.session.device.name;

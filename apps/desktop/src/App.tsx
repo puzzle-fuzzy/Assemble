@@ -2,8 +2,17 @@
 //
 // 现在有六类真实内容：账户与连接、账户里的设备、文件传输、日程与提醒、云盘、本机设置。
 
-import { ArrowDownToLine, ArrowUpToLine } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import {
+  ArrowDownToLine,
+  ArrowLeftRight,
+  ArrowUpToLine,
+  CalendarClock,
+  Cloud,
+  Settings2,
+  UserRound,
+  X,
+} from "lucide-react";
+import { type CSSProperties, useEffect, useId, useRef, useState } from "react";
 import { toast } from "sonner";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
@@ -16,10 +25,42 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import {
+  Empty,
+  EmptyContent,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+} from "@/components/ui/empty";
 import { Input } from "@/components/ui/input";
+import {
+  Popover,
+  PopoverContent,
+  PopoverHeader,
+  PopoverTitle,
+  PopoverTrigger,
+} from "@/components/ui/popover";
 import { Progress } from "@/components/ui/progress";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { Separator } from "@/components/ui/separator";
+import {
+  Sidebar,
+  SidebarContent,
+  SidebarFooter,
+  SidebarInset,
+  SidebarMenu,
+  SidebarMenuItem,
+  SidebarProvider,
+} from "@/components/ui/sidebar";
 import { Toaster } from "@/components/ui/sonner";
 import { Switch } from "@/components/ui/switch";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { useSnapshot } from "@/hooks/use-snapshot";
 import { type Bridge, bridge, toBridgeError } from "@/lib/bridge";
 import { formatBuildInfo } from "@/lib/build-info";
@@ -50,76 +91,319 @@ export interface AppProps {
 
 const LOGIN_TIMEOUT_MESSAGE = "等待浏览器登录超时，请重试。";
 
+const SECTIONS = [
+  { id: "transfers", label: "文件传输", icon: ArrowLeftRight },
+  { id: "drive", label: "云盘", icon: Cloud },
+  { id: "planner", label: "日程与提醒", icon: CalendarClock },
+  { id: "settings", label: "本机设置", icon: Settings2 },
+] as const;
+type Section = (typeof SECTIONS)[number]["id"];
+
 export function App({ bridge: source = bridge }: AppProps) {
   const { snapshot, loadError } = useSnapshot(source);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [section, setSection] = useState<Section>("transfers");
+  const [accountOpen, setAccountOpen] = useState(false);
+  const accountTitleId = useId();
+  const account =
+    snapshot?.session.phase === "signedIn" ? snapshot.session.account : null;
+  const phase = snapshot?.session.phase;
+  const previousPhase = useRef(phase);
+  const compose = snapshot?.planner?.compose ?? null;
+  const focused = snapshot?.planner?.focus ?? null;
+
+  // 托盘与系统通知仍能直接到达目标；普通后台刷新不会抢走用户正在看的页面。
+  useEffect(() => {
+    if (compose !== null || focused !== null) setSection("planner");
+  }, [compose, focused]);
+
+  useEffect(() => {
+    if (phase === "signedIn" && previousPhase.current === "signingIn")
+      setAccountOpen(false);
+    previousPhase.current = phase;
+  }, [phase]);
+
+  useEffect(() => {
+    document.title = `${SECTIONS.find((item) => item.id === section)?.label} · Assemble`;
+  }, [section]);
+
+  function navigate(next: Section) {
+    setSection(next);
+    setAccountOpen(false);
+    setActionError(null);
+    // 让下一次点击同一条系统通知、同一种托盘入口也能再次触发导航。
+    if (next !== "planner") {
+      if (compose !== null)
+        void source
+          .plannerCompose(null)
+          .catch((error: unknown) =>
+            setActionError(messageFor(toBridgeError(error))),
+          );
+      if (focused !== null)
+        void source
+          .plannerFocus(null)
+          .catch((error: unknown) =>
+            setActionError(messageFor(toBridgeError(error))),
+          );
+    }
+  }
 
   return (
     <>
       <Toaster closeButton containerAriaLabel="登录提示" />
-      <main className="mx-auto flex min-h-screen w-full max-w-xl flex-col gap-4 bg-background px-6 py-6 text-foreground">
-        <header className="flex items-center justify-between gap-4 border-b pb-3">
-          <h1 className="text-base leading-none font-semibold">Assemble</h1>
-          <ServiceStatus
-            service={snapshot?.service}
-            signedIn={snapshot?.session.phase === "signedIn"}
-          />
-        </header>
+      <TooltipProvider delayDuration={250}>
+        <SidebarProvider
+          open={false}
+          className="h-svh min-h-0 overflow-hidden"
+          style={{ "--sidebar-width": "4rem" } as CSSProperties}
+        >
+          {/* 桌面窗口窄于网页的移动断点时，也必须保留这条固定图标栏。 */}
+          <Sidebar
+            collapsible="none"
+            className="shrink-0 border-r"
+            aria-label="功能侧栏"
+            role="complementary"
+          >
+            <SidebarContent className="px-3 py-5">
+              <nav aria-label="主功能">
+                <SidebarMenu className="gap-3">
+                  {SECTIONS.filter((item) => item.id !== "settings").map(
+                    ({ id, label, icon: Icon }) => (
+                      <SidebarMenuItem key={id} className="flex justify-center">
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <Button
+                              type="button"
+                              size="icon-lg"
+                              variant={section === id ? "default" : "ghost"}
+                              aria-label={label}
+                              aria-current={section === id ? "page" : undefined}
+                              aria-controls={`view-${id}`}
+                              onClick={() => navigate(id)}
+                            >
+                              <Icon aria-hidden="true" />
+                            </Button>
+                          </TooltipTrigger>
+                          <TooltipContent side="right" sideOffset={12}>
+                            {label}
+                          </TooltipContent>
+                        </Tooltip>
+                      </SidebarMenuItem>
+                    ),
+                  )}
+                </SidebarMenu>
+              </nav>
+            </SidebarContent>
+            <SidebarFooter className="items-center gap-3 px-3 pb-4">
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    type="button"
+                    size="icon-lg"
+                    variant={section === "settings" ? "default" : "ghost"}
+                    aria-label="本机设置"
+                    aria-current={section === "settings" ? "page" : undefined}
+                    aria-controls="view-settings"
+                    onClick={() => navigate("settings")}
+                  >
+                    <Settings2 aria-hidden="true" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent side="right" sideOffset={12}>
+                  本机设置
+                </TooltipContent>
+              </Tooltip>
+              <Separator />
+              <Popover open={accountOpen} onOpenChange={setAccountOpen}>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <PopoverTrigger asChild>
+                      <Button
+                        type="button"
+                        size="icon-lg"
+                        variant={accountOpen ? "secondary" : "ghost"}
+                        className="rounded-full"
+                        aria-label="账户"
+                      >
+                        <Avatar>
+                          {account?.avatarUrl ? (
+                            <AvatarImage
+                              src={account.avatarUrl}
+                              alt=""
+                              referrerPolicy="no-referrer"
+                            />
+                          ) : null}
+                          <AvatarFallback>
+                            {account ? (
+                              Array.from(
+                                account.displayName,
+                              )[0]?.toUpperCase() || "A"
+                            ) : (
+                              <UserRound aria-hidden="true" />
+                            )}
+                          </AvatarFallback>
+                        </Avatar>
+                      </Button>
+                    </PopoverTrigger>
+                  </TooltipTrigger>
+                  <TooltipContent side="right" sideOffset={12}>
+                    账户
+                  </TooltipContent>
+                </Tooltip>
+                <PopoverContent
+                  side="right"
+                  align="end"
+                  sideOffset={12}
+                  collisionPadding={12}
+                  aria-labelledby={accountTitleId}
+                  className="max-h-[calc(100svh-2rem)] w-[min(26rem,calc(100vw-5.5rem))] gap-4 overflow-y-auto p-4 motion-reduce:animate-none"
+                >
+                  <PopoverHeader className="flex-row items-center justify-between">
+                    <PopoverTitle id={accountTitleId}>
+                      {account ? "账户与设备" : "账户"}
+                    </PopoverTitle>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon-xs"
+                      aria-label="关闭账户面板"
+                      onClick={() => setAccountOpen(false)}
+                    >
+                      <X aria-hidden="true" />
+                    </Button>
+                  </PopoverHeader>
+                  {actionError && accountOpen ? (
+                    <p role="alert" className="text-sm text-destructive">
+                      {actionError}
+                    </p>
+                  ) : null}
+                  {loadError ? (
+                    <p role="alert" className="text-sm text-destructive">
+                      {loadError}
+                    </p>
+                  ) : null}
+                  <SessionCard
+                    source={source}
+                    snapshot={snapshot}
+                    onError={setActionError}
+                  />
+                  <DevicesCard
+                    source={source}
+                    snapshot={snapshot}
+                    onError={setActionError}
+                  />
+                </PopoverContent>
+              </Popover>
+            </SidebarFooter>
+          </Sidebar>
+          <SidebarInset className="h-full min-h-0 min-w-0 bg-background text-foreground">
+            <header className="flex shrink-0 items-center justify-between gap-4 border-b px-5 py-5">
+              <h1 className="text-base leading-none font-semibold">Assemble</h1>
+              <ServiceStatus
+                service={snapshot?.service}
+                signedIn={snapshot?.session.phase === "signedIn"}
+              />
+            </header>
 
-        {loadError ? (
-          <p role="alert" className="text-sm text-destructive">
-            {loadError}
-          </p>
-        ) : null}
-        {snapshot?.notice ? (
-          <NoticeLine
-            notice={snapshot.notice}
-            onDismiss={() => void dismiss(source)}
-          />
-        ) : null}
-        {actionError ? (
-          <p role="alert" className="text-sm text-destructive">
-            {actionError}
-          </p>
-        ) : null}
+            <ScrollArea className="min-h-0 flex-1">
+              <div className="mx-auto flex w-full max-w-3xl flex-col gap-4 p-5">
+                {loadError ? (
+                  <p role="alert" className="text-sm text-destructive">
+                    {loadError}
+                  </p>
+                ) : null}
+                {snapshot?.notice ? (
+                  <NoticeLine
+                    notice={snapshot.notice}
+                    onDismiss={() => void dismiss(source)}
+                  />
+                ) : null}
+                {actionError && !accountOpen ? (
+                  <p role="alert" className="text-sm text-destructive">
+                    {actionError}
+                  </p>
+                ) : null}
 
-        <SessionCard
-          source={source}
-          snapshot={snapshot}
-          onError={setActionError}
-        />
-        <DevicesCard
-          source={source}
-          snapshot={snapshot}
-          onError={setActionError}
-        />
-        <TransfersCard
-          source={source}
-          snapshot={snapshot}
-          onError={setActionError}
-        />
-        <PlannerCard
-          source={source}
-          snapshot={snapshot}
-          onError={setActionError}
-        />
-        <DriveCard
-          source={source}
-          snapshot={snapshot}
-          onError={setActionError}
-        />
-        <LaunchCard
-          source={source}
-          snapshot={snapshot}
-          onError={setActionError}
-        />
-        <footer className="pt-2 text-center text-xs text-muted-foreground">
-          <p>{formatBuildInfo(__ASSEMBLE_BUILD__)}</p>
-          <p className="mt-1 break-all select-text">
-            官网：{__ASSEMBLE_BUILD__.website}
-          </p>
-        </footer>
-      </main>
+                {phase !== "signedIn" && section !== "settings" ? (
+                  <Empty className="min-h-64">
+                    <EmptyHeader>
+                      <EmptyMedia variant="icon">
+                        <UserRound aria-hidden="true" />
+                      </EmptyMedia>
+                      <EmptyTitle>
+                        {snapshot ? "登录 Assemble" : "正在读取本机状态…"}
+                      </EmptyTitle>
+                      <EmptyDescription>
+                        通过左下角头像打开账户面板，在系统浏览器里登录。
+                      </EmptyDescription>
+                    </EmptyHeader>
+                    <EmptyContent>
+                      <Button
+                        variant="outline"
+                        onClick={() => setAccountOpen(true)}
+                      >
+                        打开账户面板
+                      </Button>
+                    </EmptyContent>
+                  </Empty>
+                ) : null}
+                {/* 隐藏而不卸载，切换页面不会丢掉正在编辑的日程或中断已有操作。 */}
+                <section
+                  id="view-transfers"
+                  aria-label="文件传输"
+                  hidden={section !== "transfers"}
+                >
+                  <TransfersCard
+                    source={source}
+                    snapshot={snapshot}
+                    onError={setActionError}
+                  />
+                </section>
+                <section
+                  id="view-planner"
+                  aria-label="日程与提醒"
+                  hidden={section !== "planner"}
+                >
+                  <PlannerCard
+                    active={section === "planner"}
+                    source={source}
+                    snapshot={snapshot}
+                    onError={setActionError}
+                  />
+                </section>
+                <section
+                  id="view-drive"
+                  aria-label="云盘"
+                  hidden={section !== "drive"}
+                >
+                  <DriveCard
+                    source={source}
+                    snapshot={snapshot}
+                    onError={setActionError}
+                  />
+                </section>
+                <section
+                  id="view-settings"
+                  aria-label="本机设置"
+                  hidden={section !== "settings"}
+                >
+                  <LaunchCard
+                    source={source}
+                    snapshot={snapshot}
+                    onError={setActionError}
+                  />
+                </section>
+              </div>
+            </ScrollArea>
+            <footer className="shrink-0 border-t px-4 py-3 text-center text-xs text-muted-foreground">
+              <p>{formatBuildInfo(__ASSEMBLE_BUILD__)}</p>
+              <p className="mt-1 break-all select-text">
+                官网：{__ASSEMBLE_BUILD__.website}
+              </p>
+            </footer>
+          </SidebarInset>
+        </SidebarProvider>
+      </TooltipProvider>
     </>
   );
 }
@@ -281,24 +565,7 @@ function SessionCard({ source, snapshot, onError }: CardProps) {
   return (
     <Card>
       <CardHeader>
-        <CardTitle className="flex items-center gap-3">
-          {session?.phase === "signedIn" ? (
-            <Avatar>
-              {session.account.avatarUrl ? (
-                <AvatarImage
-                  src={session.account.avatarUrl}
-                  alt="账户头像"
-                  referrerPolicy="no-referrer"
-                />
-              ) : null}
-              <AvatarFallback aria-label="默认头像">
-                {Array.from(session.account.displayName)[0]?.toUpperCase() ||
-                  "A"}
-              </AvatarFallback>
-            </Avatar>
-          ) : null}
-          账户
-        </CardTitle>
+        <CardTitle>账户</CardTitle>
         <CardDescription>{describe(session, unreachable)}</CardDescription>
         <CardAction>{action}</CardAction>
       </CardHeader>

@@ -12,8 +12,6 @@ import {
   test,
 } from "bun:test";
 import { act } from "react";
-
-import { App } from "@/App";
 import { BridgeError } from "@/lib/bridge";
 import type { PlannerView } from "@/lib/types";
 import {
@@ -24,13 +22,13 @@ import {
   field,
   fill,
   listUnder,
-  render,
   rows,
   settle,
   switchNamed,
   text,
 } from "@/test-support/dom";
 import { DEVICE, FakeBridge, snapshot } from "@/test-support/fakes";
+import { renderApp } from "@/test-support/render-app";
 
 beforeEach(() => {
   document.body.replaceChildren();
@@ -193,7 +191,7 @@ function trackScrolling() {
 
 describe("日程", () => {
   test("没登录时没有这一块", async () => {
-    const view = await render(<App bridge={new FakeBridge(snapshot())} />);
+    const view = await renderApp(new FakeBridge(snapshot()), "日程与提醒");
     await settle();
     expect(text(view.host)).not.toContain("日程");
   });
@@ -202,7 +200,7 @@ describe("日程", () => {
     const source = new FakeBridge(
       snapshot({ phase: "signedIn", planner: listing() }),
     );
-    const view = await render(<App bridge={source} />);
+    const view = await renderApp(source, "日程与提醒");
     await settle();
     const page = card(view.host, "日程");
 
@@ -254,7 +252,7 @@ describe("日程", () => {
     const source = new FakeBridge(
       snapshot({ phase: "signedIn", planner: null }),
     );
-    const view = await render(<App bridge={source} />);
+    const view = await renderApp(source, "日程与提醒");
     await settle();
     expect(source.calls).toEqual(["plannerRefresh"]);
     expect(text(card(view.host, "日程"))).toContain("正在读取日程…");
@@ -276,7 +274,7 @@ describe("日程", () => {
     const source = new FakeBridge(
       snapshot({ phase: "signedIn", planner: empty }),
     );
-    const view = await render(<App bridge={source} />);
+    const view = await renderApp(source, "日程与提醒");
     await settle();
     const page = card(view.host, "日程");
     expect(text(page)).toContain("七天之内没有安排。");
@@ -288,7 +286,7 @@ describe("日程", () => {
     const source = new FakeBridge(
       snapshot({ phase: "signedIn", planner: listing() }),
     );
-    const view = await render(<App bridge={source} />);
+    const view = await renderApp(source, "日程与提醒");
     await settle();
     const page = card(view.host, "日程");
 
@@ -305,10 +303,9 @@ describe("日程", () => {
 
   test("只有一条通知时不摆“全部已读”", async () => {
     const one = listing({ notifications: [listing().notifications[0]] });
-    const view = await render(
-      <App
-        bridge={new FakeBridge(snapshot({ phase: "signedIn", planner: one }))}
-      />,
+    const view = await renderApp(
+      new FakeBridge(snapshot({ phase: "signedIn", planner: one })),
+      "日程与提醒",
     );
     await settle();
     expect(button(card(view.host, "日程"), "全部已读")).toBeUndefined();
@@ -323,7 +320,7 @@ describe("日程", () => {
           planner: listing({ focus: "note-meeting" }),
         }),
       );
-      const view = await render(<App bridge={source} />);
+      const view = await renderApp(source, "日程与提醒");
       await settle();
       const page = card(view.host, "日程");
       expect(scrolling.scrolled).toEqual([notice(page, "周会")]);
@@ -338,7 +335,7 @@ describe("日程", () => {
     const source = new FakeBridge(
       snapshot({ phase: "signedIn", planner: listing() }),
     );
-    const view = await render(<App bridge={source} />);
+    const view = await renderApp(source, "日程与提醒");
     await settle();
     const page = card(view.host, "日程");
 
@@ -361,7 +358,7 @@ describe("日程", () => {
     const source = new FakeBridge(
       snapshot({ phase: "signedIn", planner: listing() }),
     );
-    const view = await render(<App bridge={source} />);
+    const view = await renderApp(source, "日程与提醒");
     await settle();
     const page = card(view.host, "日程");
 
@@ -377,7 +374,7 @@ describe("日程", () => {
     const source = new FakeBridge(
       snapshot({ phase: "signedIn", planner: listing() }),
     );
-    const view = await render(<App bridge={source} />);
+    const view = await renderApp(source, "日程与提醒");
     await settle();
     let page = card(view.host, "日程");
 
@@ -410,7 +407,7 @@ describe("日程", () => {
     const source = new FakeBridge(
       snapshot({ phase: "signedIn", planner: listing() }),
     );
-    const view = await render(<App bridge={source} />);
+    const view = await renderApp(source, "日程与提醒");
     await settle();
     const page = card(view.host, "日程");
 
@@ -452,7 +449,7 @@ describe("日程", () => {
     const source = new FakeBridge(
       snapshot({ phase: "signedIn", planner: listing() }),
     );
-    const view = await render(<App bridge={source} />);
+    const view = await renderApp(source, "日程与提醒");
     await settle();
     const page = card(view.host, "日程");
 
@@ -473,7 +470,7 @@ describe("日程", () => {
     const source = new FakeBridge(
       snapshot({ phase: "signedIn", planner: listing({ schedules }) }),
     );
-    const view = await render(<App bridge={source} />);
+    const view = await renderApp(source, "日程与提醒");
     await settle();
     const page = card(view.host, "日程");
 
@@ -494,7 +491,7 @@ describe("日程", () => {
       "VERSION_CONFLICT",
       "version 3 is stale; the record is at 4",
     );
-    const view = await render(<App bridge={source} />);
+    const view = await renderApp(source, "日程与提醒");
     await settle();
     const page = card(view.host, "日程");
 
@@ -518,7 +515,7 @@ describe("日程", () => {
       "PLANNER_INPUT",
       "the schedule content is not acceptable",
     );
-    const view = await render(<App bridge={source} />);
+    const view = await renderApp(source, "日程与提醒");
     await settle();
     const page = card(view.host, "日程");
 
@@ -535,7 +532,7 @@ describe("日程", () => {
     const source = new FakeBridge(
       snapshot({ phase: "signedIn", planner: listing() }),
     );
-    const view = await render(<App bridge={source} />);
+    const view = await renderApp(source, "日程与提醒");
     await settle();
     let page = card(view.host, "日程");
 
@@ -560,7 +557,7 @@ describe("日程", () => {
         planner: listing({ compose: "reminder" }),
       }),
     );
-    const view = await render(<App bridge={source} />);
+    const view = await renderApp(source, "日程与提醒");
     await settle();
     let page = card(view.host, "日程");
     expect(text(page)).toContain("新建提醒");
@@ -595,7 +592,7 @@ describe("日程", () => {
         planner: listing({ compose: "reminder" }),
       }),
     );
-    const view = await render(<App bridge={source} />);
+    const view = await renderApp(source, "日程与提醒");
     await settle();
     const page = card(view.host, "日程");
     await click(button(page, "取消"));
@@ -607,7 +604,7 @@ describe("日程", () => {
 describe("到点提醒", () => {
   test("开关反映这台电脑的实际设置；点开关只把要改成什么交给 Rust", async () => {
     const source = new FakeBridge(snapshot({ phase: "signedIn" }));
-    const view = await render(<App bridge={source} />);
+    const view = await renderApp(source, "本机设置");
     await settle();
     const toggle = switchNamed(view.host, "到点时弹提醒");
     expect(toggle.getAttribute("aria-checked")).toBe("true");
@@ -628,7 +625,7 @@ describe("到点提醒", () => {
   });
 
   test("没登录时没有这一项", async () => {
-    const view = await render(<App bridge={new FakeBridge(snapshot())} />);
+    const view = await renderApp(new FakeBridge(snapshot()), "本机设置");
     await settle();
     expect(text(view.host)).not.toContain("到点提醒");
     expect(view.host.querySelector('[aria-label="到点时弹提醒"]')).toBeNull();
