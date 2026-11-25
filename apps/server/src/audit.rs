@@ -28,6 +28,11 @@ pub async fn record(
 /// 账户动作的名字。
 pub mod actions {
     pub const ACCOUNT_CREATED: &str = "account.created";
+    pub const ACCOUNT_REGISTERED: &str = "account.registered";
+    pub const REGISTER_FAILED: &str = "web.register_failed";
+    pub const PASSWORD_CHANGED: &str = "account.password_changed";
+    pub const PASSWORD_CHANGE_FAILED: &str = "account.password_change_failed";
+    pub const PASSWORD_RESET: &str = "account.password_reset";
     pub const WEB_LOGIN: &str = "web.login";
     pub const WEB_LOGIN_FAILED: &str = "web.login_failed";
     pub const WEB_LOGOUT: &str = "web.logout";

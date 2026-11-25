@@ -79,7 +79,7 @@ fn pkce_matches(challenge: &str, verifier: &str) -> bool {
     challenge.len() == computed.len() && bool::from(challenge.as_bytes().ct_eq(computed.as_bytes()))
 }
 
-fn account_label(session: &WebSession) -> String {
+pub(crate) fn account_label(session: &WebSession) -> String {
     if session.display_name == session.username {
         session.username.clone()
     } else {

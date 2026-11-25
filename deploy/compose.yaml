@@ -9,7 +9,7 @@
 #
 #   docker compose -f compose.yaml -f compose.build.yaml up -d --build
 #
-# 建第一个账户（密码在终端里输，不回显；账户只能从这里建，不开放注册）：
+# 建第一个账户（密码在终端里输，不回显）。之后的账户可以在网页上凭邀请码注册：见 .env 里的邀请码一项。
 #
 #   docker compose exec assemble assemble-server create-account <用户名>
 #

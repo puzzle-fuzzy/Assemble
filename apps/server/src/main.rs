@@ -24,7 +24,7 @@ enum Command {
     Serve,
     /// 只读取配置并连接数据库，报告结果后退出。部署前用它检查环境变量。
     CheckConfig,
-    /// 创建一个账户。不开放注册，账户只能从这里建。
+    /// 创建一个账户。网页上的注册要邀请码；这里不用。
     ///
     /// 密码从终端读两遍（不回显）；标准输入不是终端时（脚本、管道）只读一行。
     /// 密码永远不作为参数传入：参数会留在 shell 的历史里。
@@ -35,6 +35,9 @@ enum Command {
         #[arg(long)]
         display_name: Option<String>,
     },
+    /// 给一个已有的账户换密码，忘了密码的时候用。做完之后这个账户的网页登录状态全部作废；
+    /// 电脑与助手上的 Assemble 不受影响。密码的读法同 `create-account`。
+    SetPassword { username: String },
     /// 列出全部账户的用户名，每行一个。
     ListAccounts,
 }
@@ -70,17 +73,44 @@ fn explain(error: &CreateAccountError) -> String {
             "密码至少 {} 个字符。",
             assemble_server::accounts::PASSWORD_MIN_CHARS
         ),
+        CreateAccountError::Account(AccountError::PasswordTooLong) => "密码太长了。".to_owned(),
         CreateAccountError::Account(AccountError::DisplayName) => {
             "显示名不合法：不能是空白，也不能超过 60 个字符。".to_owned()
         }
-        CreateAccountError::Password(PasswordError::Mismatch) => {
-            "两次输入的密码不一致。".to_owned()
-        }
-        CreateAccountError::Password(PasswordError::Missing) => {
-            "没有读到密码：请在终端里输入，或经标准输入提供一行。".to_owned()
-        }
-        CreateAccountError::Password(PasswordError::TooLong) => "密码太长了。".to_owned(),
+        CreateAccountError::Password(error) => explain_password(error),
         CreateAccountError::Startup(StartupError::Config(config)) => explain_config(config),
+        other => other.to_string(),
+    }
+}
+
+/// 读密码时的失败：建账户与换密码说法相同。
+fn explain_password(error: &PasswordError) -> String {
+    match error {
+        PasswordError::Mismatch => "两次输入的密码不一致。".to_owned(),
+        PasswordError::Missing => "没有读到密码：请在终端里输入，或经标准输入提供一行。".to_owned(),
+        PasswordError::TooLong => "密码太长了。".to_owned(),
+        // 读不进来是终端或管道出了问题，保留原始说明。
+        other => other.to_string(),
+    }
+}
+
+/// 同上，给 `set-password` 用。
+fn explain_set(error: &assemble_server::SetPasswordError) -> String {
+    use assemble_server::SetPasswordError;
+    match error {
+        SetPasswordError::Username(reason) => format!("用户名不合法：{reason}。"),
+        SetPasswordError::NotFound => "没有这个用户名的账户。".to_owned(),
+        SetPasswordError::Account(assemble_server::accounts::ChangePasswordError::Rule(rule)) => {
+            match rule {
+                assemble_server::accounts::PasswordRule::TooShort => format!(
+                    "密码至少 {} 个字符。",
+                    assemble_server::accounts::PASSWORD_MIN_CHARS
+                ),
+                assemble_server::accounts::PasswordRule::TooLong => "密码太长了。".to_owned(),
+            }
+        }
+        SetPasswordError::Startup(StartupError::Config(config)) => explain_config(config),
+        SetPasswordError::Password(error) => explain_password(error),
         other => other.to_string(),
     }
 }
@@ -146,6 +176,26 @@ fn main() -> ExitCode {
                 ExitCode::FAILURE
             }
         },
+        Command::SetPassword { username } => {
+            let changed = read_password()
+                .map_err(assemble_server::SetPasswordError::from)
+                .and_then(|password| {
+                    runtime.block_on(assemble_server::set_password(&username, password))
+                });
+            match changed {
+                Ok(account) => {
+                    println!(
+                        "已给账户 {}（{}）换好密码，它的网页登录状态已全部作废。",
+                        account.display_name, account.username
+                    );
+                    ExitCode::SUCCESS
+                }
+                Err(error) => {
+                    eprintln!("{}", explain_set(&error));
+                    ExitCode::FAILURE
+                }
+            }
+        }
         Command::ListAccounts => match runtime.block_on(assemble_server::list_accounts()) {
             Ok(usernames) => {
                 for username in usernames {

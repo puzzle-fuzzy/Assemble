@@ -77,6 +77,8 @@ pub fn router(state: Shared) -> Router {
         .route(READY_PATH, get(ready))
         // 系统浏览器里的页面
         .merge(crate::web::routes())
+        .merge(crate::register::routes())
+        .merge(crate::account::routes())
         .merge(crate::desktop_login::routes())
         // 桌面端的接口
         .route(EXCHANGE_PATH, post(crate::desktop_login::exchange))

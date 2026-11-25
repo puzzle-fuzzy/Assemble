@@ -6,7 +6,7 @@
 
 - **服务端与桌面端都在这个仓库里。** 服务端是 Rust（axum + SQLite），桌面端是 Tauri 2；两者共用一份协议类型。Assemble 完全替换 jarvis，不迁移它的数据。
 - **优先级：文件传输与日程规划。** 文件传输已落地，正式服务已上线；日程规划的第一批（日程、提醒、到点通知）在服务端与桌面端都已写完，给助手用的对话入口（`assemble-mcp`）也写完了，都有自动化测试；手机上的提醒还没有做（[决策 0003](decisions/0003-schedule-first-batch-and-conversational-entry.md)）。宠物、壁纸排在最后。
-- **第一期的端：Windows 与 macOS 桌面端，加上给助手用的入口 `assemble-mcp`。** 网页端只提供登录页与授权确认页。日程要在手机上提醒：2026-11-25 定了做原生的 iPhone 应用，还没有做（[决策 0003](decisions/0003-schedule-first-batch-and-conversational-entry.md)）。
+- **第一期的端：Windows 与 macOS 桌面端，加上给助手用的入口 `assemble-mcp`。** 网页端只有几页服务端渲染的页面：登录、邀请码注册（配了邀请码才有）、授权确认、账户（改密码、退出登录）。日程要在手机上提醒：2026-11-25 定了做原生的 iPhone 应用，还没有做（[决策 0003](decisions/0003-schedule-first-batch-and-conversational-entry.md)）。
 
 ## 结构
 
@@ -42,7 +42,7 @@
 | `assemble-device`        | 这台电脑落盘的边界：接收目录、文件名收敛、同名加序号、一次接收的落盘规则、清扫中断留下的暂存文件；右键菜单的参数与注册表                     | 网络、窗口                         |
 | `assemble-store`         | 设置文件的原子私有写入；密钥存储抽象（系统钥匙串 / 内存）                                                                                    | 决定存什么                         |
 | `assemble-schedule`      | 日程出现规则的推算：一条日程在某段时间里出现在哪几场、某个时刻是不是它的一场。服务端的调度、桌面端的名单展开、助手看到的名单与撞车判断共用它 | 决定什么时候提醒、提醒谁           |
-| `apps/server`            | 账户、登录页、桌面授权、设备与在线状态、发送、云盘、日程与提醒的存取和到点调度、定时清理                                                     | 文件怎么存到用户的电脑上           |
+| `apps/server`            | 账户、登录页与邀请码注册、改密码、桌面授权、设备与在线状态、发送、云盘、日程与提醒的存取和到点调度、定时清理                                 | 文件怎么存到用户的电脑上           |
 | `apps/desktop/src-tauri` | 窗口、托盘、生命周期、会话、后台任务、传输记录、日程名单、通知、设置与具名命令                                                               | 把规则再写一遍                     |
 | `apps/mcp`               | 给助手用的入口 `assemble-mcp`：标准输入输出上的 MCP 服务端、十个日程与提醒的工具、以一台设备的身份登录、给助手看的名单与说法                 | 理解与排程（不含模型）、文件、窗口 |
 
@@ -61,8 +61,9 @@
 | `ASSEMBLE_SEND_TTL_HOURS`    | 未送达的发送保留多久                           | 24 小时          |
 | `ASSEMBLE_SEND_HISTORY_DAYS` | 发送记录保留多久                               | 30 天            |
 | `ASSEMBLE_WEB_SESSION_HOURS` | 网页登录状态保留多久                           | 12 小时          |
+| `ASSEMBLE_INVITE_CODE`       | 邀请码：填了才开放网页注册                     | 不填即不开放     |
 
-命令行有 `serve`、`check-config`（只读取配置并连接数据库，报告后退出）、`create-account`（密码从终端读两遍，永不当参数传入）和 `list-accounts`（每行一个用户名；账户只能从命令行建，不开放注册，有哪些账户也只能从这里看）。
+命令行有 `serve`、`check-config`（只读取配置并连接数据库，报告后退出；最后几行是账户数与网页注册开着没有）、`create-account`（密码从终端读两遍，永不当参数传入；网页上的注册要邀请码，这里不用）、`set-password`（给一个已有账户换密码，忘了密码时用）和 `list-accounts`（每行一个用户名；有哪些账户只能从这里看）。
 
 ### 部署
 
@@ -84,7 +85,7 @@
 | 分组       | 接口                                                                                                                                           | 说明                                                                                                                      |
 | ---------- | ---------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
 | 公开       | `GET /healthz`、`GET /readyz`                                                                                                                  | 探活                                                                                                                      |
-| 网页       | `GET /web/login`、`POST /web/logout`                                                                                                           | 系统浏览器里的登录页。服务端渲染，没有脚本                                                                                |
+| 网页       | `GET`、`POST /web/login`、`GET`、`POST /web/register`、`GET /web/account`、`POST /web/account/password`、`POST /web/logout`                    | 系统浏览器里的登录页、注册页、账户页。服务端渲染，没有脚本。注册页只在配了邀请码时存在                                    |
 | 桌面登录   | `GET /desktop/authorize`、`POST /v1/auth/desktop/exchange`                                                                                     | 确认页把单次授权码经回环地址交回桌面端或助手入口；换码时完成设备注册                                                      |
 | 账户与设备 | `GET /v1/me`、`POST /v1/auth/logout`、`GET /v1/devices`、`PATCH /v1/devices/{id}`、`DELETE /v1/devices/{id}`                                   | 设备令牌只存摘要，可以在任意设备上远程撤销                                                                                |
 | 事件流     | `GET /v1/events`                                                                                                                               | SSE。持有这条连接就是"在线"                                                                                               |
@@ -227,7 +228,7 @@ target/release/assemble-mcp print-config zcode --name "ZCode 的助手"
 - **命令。** 界面能调用的只有这 42 个：`snapshot`、`sign_in`、`cancel_sign_in`、`sign_out`、`launch_at_login`、`set_launch_at_login`、`rename_device`、`remove_device`、`choose_receive_folder`、`reset_receive_folder`、`reveal_received`、`start_send`、`send_to_device`、`send_to_drive`、`close_send_panel`、`open_main`、`cancel_transfer`、`retry_transfer`、`drive_refresh`、`drive_upload`、`drive_download`、`drive_delete`、`set_send_menu`、`dismiss_notice`、`planner_refresh`、`schedule_create`、`schedule_update`、`schedule_complete`、`schedule_cancel`、`schedule_reopen`、`schedule_delete`、`reminder_create`、`reminder_update`、`reminder_dismiss`、`reminder_cancel`、`reminder_delete`、`notifications_read`、`notifications_read_all`、`planner_focus`、`planner_compose`、`set_planner_muted`。命令失败只返回稳定错误码。
 - **标识，不是路径。** 界面引用一条传输、一个云盘文件、一台设备、一条日程、一条提醒、一条通知，用的都是标识。文件的位置由系统选择器、右键菜单或拖放直接交给 Rust；状态里有文件名、文件夹名，没有路径。
 - **助手。** `assemble-mcp` 只有上面那十个具名工具，全部围着日程、提醒与通知；没有文件、云盘，也没有"随便调一个接口"的工具。新增能力时在 `apps/mcp` 里加工具并补测试。它不碰窗口，也不接收文件路径。
-- **凭据。** 设备令牌存在系统钥匙串里，条目名按服务来源区分；助手的登录是另一条条目，账号位是助手的名字，不会顶掉桌面应用的。令牌、Cookie 与密码不进界面、日志、命令返回值与状态；`assemble-mcp status` 与工具的返回值里都不出现令牌，它的标准输出上只有协议消息，日志一律写标准错误。
+- **凭据。** 设备令牌存在系统钥匙串里，条目名按服务来源区分；助手的登录是另一条条目，账号位是助手的名字，不会顶掉桌面应用的。令牌、Cookie、密码与邀请码不进界面、日志、命令返回值与状态（邀请码在配置里只留摘要）；写操作的网页表单都要来自本站，并带着与 Cookie 或会话成对的随机值；`assemble-mcp status` 与工具的返回值里都不出现令牌，它的标准输出上只有协议消息，日志一律写标准错误。
 - **联网。** 客户端只访问构建时确定的那个来源，不跟随重定向；标识符与路径在拼进请求之前先校验。
 - **文件。** 接收目录只能来自默认位置或系统选择器，必须是真实的目录、不能是整块磁盘；文件名来自网络，收敛成单个在 Windows 上也合法的名字。发布之前再确认一次接收目录还是原来那个——下载途中目录被删、被换成链接，文件都不会落到别处。收到的内容按声明的长度与摘要核对，对不上就不出现。通知与"在文件夹中显示"只选中文件，不打开它。
 

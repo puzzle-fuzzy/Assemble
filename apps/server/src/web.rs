@@ -2,6 +2,8 @@
 //!
 //! 流程：打开登录页 → 填用户名和密码 → 服务端核对 → 发一枚只给浏览器用的
 //! 会话 Cookie → 跳到原来要去的页面（通常是桌面端的授权确认页）。
+//! 配了邀请码的话，登录页上还有去注册页的入口（[`crate::register`]）；
+//! 登录之后的账户页在 [`crate::account`]。
 //!
 //! 三道防线：
 //!
@@ -37,12 +39,21 @@ pub const LOGOUT_PATH: &str = "/web/logout";
 const CSRF_LIFETIME: Duration = Duration::from_hours(1);
 
 /// 失败的窗口与上限：同一个用户名 15 分钟内最多错 5 次。
-const WINDOW: Duration = Duration::from_mins(15);
+/// 注册时邀请码的失败也记在这张表里，用的是另一个键。
+pub(crate) const WINDOW: Duration = Duration::from_mins(15);
 const MAX_FAILURES: usize = 5;
 
 /// 登录页上说的话。失败的原因对外只有这一句。
 const WRONG_CREDENTIALS: &str = "用户名或密码不对。";
-const TOO_MANY_ATTEMPTS: &str = "尝试次数太多，请 15 分钟后再试。";
+pub(crate) const TOO_MANY_ATTEMPTS: &str = "尝试次数太多，请 15 分钟后再试。";
+
+/// 让被暂时拒绝的人知道过多久再来（秒）。
+pub(crate) fn retry_after(mut response: Response, seconds: u64) -> Response {
+    if let Ok(value) = HeaderValue::from_str(&seconds.to_string()) {
+        response.headers_mut().insert(header::RETRY_AFTER, value);
+    }
+    response
+}
 
 /// 连续失败的保护。只在内存里：服务端重启后清零，这对单机部署足够。
 #[derive(Debug)]
@@ -112,11 +123,11 @@ pub fn query_param(uri: &Uri, name: &str) -> Option<String> {
         .map(|(_, value)| value.into_owned())
 }
 
-/// 登录之后可以去的地方：只能是本站以 `/desktop/authorize` 开头的路径。
+/// 登录之后可以去的地方：只能是本站以 `/desktop/authorize` 开头的路径，或者账户页本身。
 ///
 /// 不放开任意地址：否则登录链接本身可以被做成"登录后跳到别的站点"。
 pub fn safe_next(raw: &str) -> Option<&str> {
-    let acceptable = raw.starts_with("/desktop/authorize")
+    let acceptable = (raw.starts_with("/desktop/authorize") || raw == "/web/account")
         && !raw.starts_with("//")
         && !raw.contains(['\\', '\r', '\n'])
         // 不允许 `/desktop/authorize/../..` 这种会被浏览器规整到别处的写法。
@@ -149,7 +160,7 @@ pub fn page(status: StatusCode, body: String) -> Response {
         .into_response()
 }
 
-fn with_cookies(
+pub(crate) fn with_cookies(
     mut response: Response,
     cookies: impl IntoIterator<Item = Cookie<'static>>,
 ) -> Response {
@@ -200,7 +211,7 @@ pub fn csrf_cookie(secure: bool, value: &str) -> Cookie<'static> {
 }
 
 /// 两个值必须一致，而且都不能是空的：两边都空着不算"配对"。
-fn same_secret(a: &str, b: &str) -> bool {
+pub(crate) fn same_secret(a: &str, b: &str) -> bool {
     !a.is_empty() && a.len() == b.len() && bool::from(a.as_bytes().ct_eq(b.as_bytes()))
 }
 
@@ -224,7 +235,12 @@ pub async fn login_form(State(state): State<Shared>, jar: CookieJar, uri: Uri) -
     with_cookies(
         page(
             StatusCode::OK,
-            templates::login_page(None, next.as_deref().unwrap_or_default(), csrf.expose()),
+            templates::login_page(
+                None,
+                next.as_deref().unwrap_or_default(),
+                csrf.expose(),
+                state.config.registration_open(),
+            ),
         ),
         [csrf_cookie(
             state.config.public_origin.is_secure(),
@@ -254,22 +270,20 @@ pub async fn login_submit(
     let next = safe_next(&form.next).unwrap_or_default().to_owned();
     let csrf = form.csrf.clone();
 
+    let registration_open = state.config.registration_open();
     let password = SecretString::new(std::mem::take(&mut form.password));
     let typed = form.username.trim();
     let username =
         crate::accounts::normalize_username(typed).unwrap_or_else(|_| typed.to_lowercase());
     let now = Instant::now();
     if state.throttle.is_blocked(&username, now) {
-        let mut response = page(
-            StatusCode::TOO_MANY_REQUESTS,
-            templates::login_page(Some(TOO_MANY_ATTEMPTS), &next, &csrf),
+        return retry_after(
+            page(
+                StatusCode::TOO_MANY_REQUESTS,
+                templates::login_page(Some(TOO_MANY_ATTEMPTS), &next, &csrf, registration_open),
+            ),
+            WINDOW.as_secs(),
         );
-        response.headers_mut().insert(
-            header::RETRY_AFTER,
-            HeaderValue::from_str(&WINDOW.as_secs().to_string())
-                .expect("a number is a valid header value"),
-        );
-        return response;
     }
 
     let account = crate::accounts::find_by_username(&state.pool, &username)
@@ -295,23 +309,15 @@ pub async fn login_submit(
         )
         .await;
         tracing::info!("web login failed");
-        let mut response = page(
-            StatusCode::UNAUTHORIZED,
-            templates::login_page(Some(WRONG_CREDENTIALS), &next, &csrf),
+        return retry_after(
+            page(
+                StatusCode::UNAUTHORIZED,
+                templates::login_page(Some(WRONG_CREDENTIALS), &next, &csrf, registration_open),
+            ),
+            1,
         );
-        response
-            .headers_mut()
-            .insert(header::RETRY_AFTER, HeaderValue::from_static("1"));
-        return response;
     };
 
-    let session = match create_session(&state, &account.id).await {
-        Ok(session) => session,
-        Err(error) => {
-            tracing::error!(%error, "a web session could not be saved");
-            return unavailable();
-        }
-    };
     audit::record(
         &state.pool,
         Some(&account.id),
@@ -321,7 +327,32 @@ pub async fn login_submit(
     )
     .await;
     tracing::info!(account = %account.username, "web login succeeded");
+    signed_in(
+        &state,
+        &account.id,
+        &next,
+        "已登录",
+        "可以关闭此页面，回到 Assemble。",
+    )
+    .await
+}
 
+/// 登录成功的收尾：建一条网页会话、发 Cookie，然后去要去的地方。
+/// 没有要去的地方，就给一句话的结果页（`title` 与 `body`）。注册成功时也走这里。
+pub(crate) async fn signed_in(
+    state: &Shared,
+    account_id: &str,
+    next: &str,
+    title: &str,
+    body: &str,
+) -> Response {
+    let session = match create_session(state, account_id).await {
+        Ok(session) => session,
+        Err(error) => {
+            tracing::error!(%error, "a web session could not be saved");
+            return unavailable();
+        }
+    };
     let cookie = session_cookie(
         state.config.public_origin.is_secure(),
         session.token.expose(),
@@ -329,12 +360,9 @@ pub async fn login_submit(
     );
     // 登录表单的防伪值用完即弃。
     let cookies = [cookie, cleared_cookie(CSRF_COOKIE)];
-    match next.as_str() {
+    match next {
         "" => with_cookies(
-            page(
-                StatusCode::OK,
-                templates::message_page("已登录", "可以关闭此页面，回到 Assemble。"),
-            ),
+            page(StatusCode::OK, templates::message_page(title, body)),
             cookies,
         ),
         next => with_cookies(Redirect::to(next).into_response(), cookies),
@@ -424,7 +452,13 @@ mod tests {
             safe_next("/desktop/authorize").unwrap(),
             "/desktop/authorize"
         );
+        // 账户页本身可以去，它的子路径与相近的写法不行。
+        assert_eq!(safe_next("/web/account").unwrap(), "/web/account");
         for rejected in [
+            "/web/account/",
+            "/web/accounts",
+            "/web/account/../logout",
+            "/web/account?x=1",
             "",
             "https://evil.example/",
             "//evil.example/desktop/authorize",

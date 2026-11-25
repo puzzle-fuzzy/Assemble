@@ -73,7 +73,7 @@
    ```
 
    注意 `docker compose exec` 后面要带可执行文件的名字：`assemble assemble-server <子命令>`，第一个 `assemble` 是服务名，第二个是程序名。
-7. **建第一个账户。** 账户只能从这里建，不开放注册；密码在终端里输两遍，不回显，也不作为参数传入。这一步由你自己做：
+7. **建第一个账户。** 密码在终端里输两遍，不回显，也不作为参数传入；这一步由你自己做。之后的账户可以在网页上凭邀请码注册（见下面"日常"里的"邀请码注册"）：
 
    ```sh
    ssh -t <服务器> 'cd /opt/assemble && docker compose exec assemble assemble-server create-account <用户名>'
@@ -92,6 +92,27 @@ docker compose exec -T assemble assemble-server list-accounts
 ```
 
 某台设备不用了，在桌面应用的"设备"卡片里移除它：它的令牌随即作废。
+
+忘了某个账户的密码，或者想让它所有的网页登录状态作废：
+
+```sh
+docker compose exec assemble assemble-server set-password <用户名>   # 密码在终端里输两遍
+```
+
+### 邀请码注册
+
+在 `.env` 的末尾加一行邀请码（不要加引号，前后不要有空格），再让容器重新读一次配置：
+
+```sh
+cd /opt/assemble
+cp -p .env .env.before-invite
+#   ASSEMBLE_INVITE_CODE=<8 到 128 个字符，不能有空白>
+chmod 600 .env
+docker compose up -d
+docker compose exec -T assemble assemble-server check-config   # 最后一行应是"网页注册：开放（要邀请码）"
+```
+
+之后 `https://<域名>/web/register` 就是注册页，登录页上也会多一个"注册"的入口。想换邀请码就改那一行再 `docker compose up -d`；清空它，注册页就没了（已经注册的账户不受影响）。从此 `.env` 里有一份要保管的秘密：服务器上的 root 看得到它，别把这个文件拷到别处。
 
 ### 升级
 

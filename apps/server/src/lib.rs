@@ -6,6 +6,7 @@
 // 测试代码以可读性优先，不套用库代码的严格检查。
 #![cfg_attr(test, allow(clippy::pedantic))]
 
+pub mod account;
 pub mod accounts;
 pub mod audit;
 pub mod auth;
@@ -21,6 +22,7 @@ pub mod http;
 pub mod maintenance;
 pub mod planner;
 pub mod presence;
+pub mod register;
 pub mod secrets;
 pub mod sends;
 pub mod templates;
@@ -129,8 +131,13 @@ pub async fn check_config() -> Result<String, StartupError> {
         .await
         .map_err(db::DbError::from)?;
     pool.close().await;
+    let registration = if config.registration_open() {
+        "开放（要邀请码）"
+    } else {
+        "关闭（没有配邀请码）"
+    };
     Ok(format!(
-        "配置可用。\n  监听地址：{}\n  数据目录：{}\n  对外地址：{}\n  云盘上限：{} 字节\n  账户数：{}",
+        "配置可用。\n  监听地址：{}\n  数据目录：{}\n  对外地址：{}\n  云盘上限：{} 字节\n  账户数：{}\n  网页注册：{registration}",
         config.addr,
         config.data_dir.display(),
         config.public_origin,
@@ -139,7 +146,7 @@ pub async fn check_config() -> Result<String, StartupError> {
     ))
 }
 
-/// `list-accounts`：列出全部账户的用户名，每行一个。不开放注册，账户有哪些只能从这里看。
+/// `list-accounts`：列出全部账户的用户名，每行一个。账户有哪些只能从这里看。
 pub async fn list_accounts() -> Result<Vec<String>, StartupError> {
     let (_config, pool) = load().await?;
     let usernames = accounts::list_usernames(&pool)
@@ -176,6 +183,50 @@ pub async fn create_account(
         Some(&account.id),
         None,
         audit::actions::ACCOUNT_CREATED,
+        None,
+    )
+    .await;
+    pool.close().await;
+    Ok(account)
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum SetPasswordError {
+    #[error("{0}")]
+    Username(&'static str),
+    #[error("the account does not exist")]
+    NotFound,
+    #[error(transparent)]
+    Startup(#[from] StartupError),
+    #[error(transparent)]
+    Password(#[from] PasswordError),
+    #[error(transparent)]
+    Account(#[from] accounts::ChangePasswordError),
+}
+
+/// `set-password`：给一个已有的账户换密码，忘了密码的时候用。不核对旧的密码，
+/// 所以只能从服务器的命令行上做；做完之后这个账户的网页登录状态全部作废。
+pub async fn set_password(
+    username: &str,
+    password: SecretString,
+) -> Result<accounts::AccountRow, SetPasswordError> {
+    // 用户名先校验再连库、再读密码：拼错了不该让人白输一遍密码。
+    let username = accounts::normalize_username(username).map_err(SetPasswordError::Username)?;
+    let (_config, pool) = load().await?;
+    // 查库与撤销登录状态的失败都算"数据库出了问题"，和其余子命令的说法一致。
+    let account = accounts::find_by_username(&pool, &username)
+        .await
+        .map_err(|error| StartupError::from(db::DbError::from(error)))?
+        .ok_or(SetPasswordError::NotFound)?;
+    accounts::set_password(&pool, &account.id, password).await?;
+    accounts::revoke_web_sessions(&pool, &account.id, None)
+        .await
+        .map_err(|error| StartupError::from(db::DbError::from(error)))?;
+    audit::record(
+        &pool,
+        Some(&account.id),
+        None,
+        audit::actions::PASSWORD_RESET,
         None,
     )
     .await;
