@@ -175,7 +175,53 @@ docker compose start
 
 备份里有：账户（密码的散列，没有明文）、设备令牌的摘要、发送记录、云盘与未送达的文件。令牌的摘要不能拿去登录，但云盘里的文件本身是想给谁看就给谁看的东西，备份要当敏感数据保管。
 
-恢复是反过来：停服务，把归档解进数据目录（属主要是 10001），再启动。备份在 2026-11-25 真的做过一次（停机 1 秒）；**恢复还没有演练过**。
+恢复是反过来：停服务，把归档解进数据目录（属主要是 10001），再启动。备份在 2026-11-25 真的做过多次；恢复在 2026-11-26 第一次演练过——在隔离的一次性容器里，不碰正式服务，做法见下面"恢复演练"。把恢复出来的数据真的换到正式位置上（连同换回旧镜像）还没有做过。
+
+### 恢复演练
+
+不必等出了事才知道备份能不能用。隔一阵就这样演练一次：在服务器上另起一个不接网络、不发布端口的容器，把备份恢复进去，看它能不能被同一个镜像打开、能不能启动。正式服务全程不受影响。
+
+```sh
+# 服务器上。备份目录只有 root 能进；image 换成现在在跑的那一个。
+image=$(grep '^ASSEMBLE_IMAGE=' /opt/assemble/.env | cut -d= -f2)
+drill=$(mktemp -d /var/backups/assemble/restore-drill-XXXXXX)
+cleanup() { docker rm -f assemble-restore-drill >/dev/null 2>&1 || true; rm -rf "$drill"; }
+trap cleanup EXIT
+mkdir "$drill/data"
+tar xzf /var/backups/assemble/<某一次备份>/data.tgz -C "$drill/data"
+chown -R 10001:10001 "$drill/data" && chmod 700 "$drill/data"
+
+# 一、用同一个镜像打开恢复出来的数据并自检。入口已经是那个程序，参数只写子命令。
+docker run --rm --network none -v "$drill/data":/var/lib/assemble \
+  -e ASSEMBLE_PUBLIC_ORIGIN=https://<域名> "$image" check-config
+
+# 二、真的启动，在容器里面问它几句（镜像里没有 curl，用 bash 自己的 /dev/tcp）。
+docker run -d --name assemble-restore-drill --network none -v "$drill/data":/var/lib/assemble \
+  -e ASSEMBLE_PUBLIC_ORIGIN=https://<域名> "$image"
+sleep 5
+docker exec assemble-restore-drill bash -ec "exec 3<>/dev/tcp/127.0.0.1/8787; \
+  printf 'GET /readyz HTTP/1.1\r\nHost: <域名>\r\nConnection: close\r\n\r\n' >&3; head -n 1 <&3"
+docker logs assemble-restore-drill
+
+# 三、核对：库里的每一份内容在磁盘上都在、大小都对；各项计数与备份前一致。
+python3 - "$drill/data" <<'SCRIPT'
+import sqlite3, os, sys
+root = sys.argv[1]
+con = sqlite3.connect(f"file:{root}/assemble.sqlite3?mode=ro", uri=True)
+blobs = con.execute("select sha256, size from blobs").fetchall()
+def path(sha): return os.path.join(root, "blobs", sha[:2], sha)
+print("缺", sum(not os.path.isfile(path(sha)) for sha, _ in blobs),
+      "大小不对", sum(os.path.isfile(path(sha)) and os.path.getsize(path(sha)) != size for sha, size in blobs),
+      "共", len(blobs))
+for table in ("accounts", "devices", "drive_files", "schedules", "reminders"):
+    print(table, con.execute(f"select count(*) from {table}").fetchone()[0])
+SCRIPT
+
+# 四、收尾：上面的 trap 会删掉演练容器和临时目录。看一眼确实没有残留。
+docker ps -a | grep restore-drill; ls -d /var/backups/assemble/restore-drill-*
+```
+
+要核对的东西：自检的退出码是 0、报告里的账户数对；`/readyz` 回 200、不带凭据的接口回 401、启动日志只有"监听"；缺 0、大小不对 0；计数和备份之前记下的（升级脚本存进备份目录的 `counts-before.txt`）逐项一致。演练容器没有 SMTP 与 GitHub 的配置，所以它发不出信、也连不上外面；正式的密钥目录没有挂进去。这一步验的是"归档完整、能被这一版镜像打开"，验不了登录——令牌只存摘要，密码在用户手里。
 
 ## 反向代理要注意的
 
@@ -257,7 +303,7 @@ docker compose start
 
 - **两台真实设备互传、云盘操作的完整真人验收**：Windows 已保留登录并读到原云盘列表，不能替代完整的上传、取回与两设备收发。
 - **经反向代理的大文件上传与事件流的长连接**。配置是按服务端的行为写的，没有对着真实设备跑过。
-- **从备份恢复真实数据。** 第四次升级已带着真实账户、设备和云盘做过备份与迁移；恢复仍没有演练过。
+- **把恢复出来的数据真的换到正式位置上。** 2026-11-26 在隔离的一次性容器里演练过恢复：归档完整、能被同一版镜像打开并启动到就绪、计数与内容逐项一致（见"做过的"里当天那一段）。真正停服务、替换正式的数据目录、必要时换回旧镜像，还没有做过。
 - **退回旧版本。** 步骤写了（恢复备份、换回标记），没有做过。
 - **公开注册与邮箱变更的真人完整流程、GitHub 真人授权。** 入口、SMTP 真发送与防线已核对，收信验证和身份绑定需要用户本人完成。
 - **在途上传时停止服务的表现**：第四次升级已量出停旧服务到新服务就绪为 0.85 秒，但没有用真实上传压停止等待。
@@ -273,3 +319,14 @@ docker compose start
 - 按用户授权只复制了 Jarvis 受保护的 TMDB 配置，未改 Jarvis 文件、业务数据或站点。主机直连在部署前曾超时；正式容器启用后，TMDB 与豆瓣的实际公网资料、海报请求均为 200，没有新增代理。
 - 沿用既有 nginx，切换前后 `nginx -t` 均通过；其他站点已有的重名与 MIME 警告未扩大处理。镜像经既有 SSH 传送脚本送达，没有要求服务器直拉 GitHub 镜像仓库。
 - Windows 正式来源的 NSIS 安装包已构建并单独交付；原生页面验收使用隔离预览，未替换正在运行的安装版或中断另一会话的下载调试。真人维护写入、跨设备影视更新与带影视数据的备份恢复尚未验收，不由页面可读和夹具测试替代。
+
+## 做过的（2026-11-26 凌晨）：补上限额与停用账户
+
+起因是一次只读审查（决策 0002 第 25 条）：公开注册之后，几处"全站共用一份"的额度谁都能用光，云盘也只按账户设限。代码是 `76b925a`，先升到它，再因为一处回归升到 `581d1832e009`。
+
+- **第一次（00:17，`76b925af6ca4`）。** 升级前核对：迁移 1～5 的校验和与仓库逐项相符；记下账户、设备、云盘文件、内容、会话、GitHub 绑定、日程、提醒的计数。停服务、打包（78 MB）、换标记、往 `.env` 追加 `ASSEMBLE_CLIENT_IP_HEADER=X-Real-IP` 与 `ASSEMBLE_STORAGE_BUDGET_BYTES=8589934592`（8 GiB：这台服务器还跑着别的站点），`docker compose up -d`。停机 4 秒。迁移只追加 `0006_account_suspension.sql`；容器 13 秒内健康，以专用账户运行，密钥目录仍然只读挂着；各项计数前后一致。
+- **从外网核对。** 健康检查、登录页、注册页、管理端、影视站都是 200，没带凭据的接口 401，HTTP 入口 301。按来源的限额真的生效：同一个地址连着请求 GitHub 登录的起点，前八次跳去 GitHub，第九、第十次是 503 并带 `Retry-After: 60`——nginx 写的 `X-Real-IP` 被服务端读到了。
+- **一处回归，随即修掉（00:28，`581d1832e009`）。** 升级后照手册跑 `check-config`，报"数据库打不开"：上一回往报告里加"停用的账户数"时，把查询放在了连接池关闭之后。服务本身不受影响。补上测试（`config_report`），把自检、建账户、停用、恢复几条命令对着一个一次性的数据目录真的跑了一遍，然后升了第二次，同样停机 4 秒，自检通过。教训记在决策 0002 第 26 条。
+- **自检报告多了三样**：全站内容总量上限、停用的账户数、请求来源读哪个头。现在线上是：总量上限 8 GiB，停用 0 个，按来源的限额读 `x-real-ip` 头。
+- **恢复演练，第一次真的做。** 用 00:28 那次升级前的真实备份，按上面"恢复演练"的做法：同一个镜像自检通过（退出码 0），真的启动到就绪（`/readyz` 200、登录页 200、不带凭据的接口 401），库里的内容在磁盘上都在、大小都对，各项计数与备份前逐项一致。演练用的容器与临时目录都清掉了，正式服务全程没动。
+- 升级前后的备份在 `/var/backups/assemble/2026-11-26-001731-guards/` 与 `2026-11-26-002849-selfcheck/`：各有一份数据归档、换之前的 `.env` 和计数。nginx 没有动，`nginx -t` 通过。
