@@ -264,6 +264,8 @@ gh run download <运行编号> -n assemble-windows-x64
 
 2026-11-24 实际跑过的情况：Windows 那一份构建成功，压缩包里是 `nsis/Assemble_0.1.0_x64-setup.exe` 与 `msi/Assemble_0.1.0_x64_en-US.msi`；macOS 那一份第一次被整个取消，原因是 GitHub 的 arm64 机器当天容量紧张，任务一直没被接走——遇到这种情况重新触发就行，不是我们的问题。当天晚些时候重新触发后两个平台都成功了（运行 45427137385）。2026-11-25 从带日程与提醒的版本又打了一次，两个平台都成功（运行 45462145699，提交 `6ea66e6`）：`gh run download 45462145699 -n assemble-windows-x64`，macOS 的换 `-n assemble-macos-arm64`。验证流程的 macOS 那一栏同样会被容量挤掉（显示为 cancelled、一步都没跑），用 `gh run rerun <编号> --failed` 重跑那一栏。
 
+2026-11-25 中午，这台 Mac 上第一次真正装上了正式版。本地 `ASSEMBLE_SERVER_ORIGIN=https://as.yxswy.com bun run build`（提交 `f6d76b3`，两分多钟），把 `target/release/bundle/macos/Assemble.app` 复制进 `/Applications`，替换掉 11 月 23 日的那一个（挪进了废纸篓）。本机构建的包没有隔离标记，打开不会被拦；签名是链接器给的临时签名，`codesign --verify` 会说"没有资源"，持续集成打出来的也是这样，不影响运行。应用里显示的是"正式版本 - 0.1.0.f6d76b3"。启动核对（没有登录）：进程从 `/Applications` 起来，三十秒后仍在，主线程停在正常的事件循环里；和正式服务有两条 HTTPS 连接；窗口里有"使用浏览器登录"。同一提交也让持续集成打了一遍，两个平台都成功（运行 45548852901，产物保留到 2027-02-23）：`gh run download 45548852901 -n assemble-windows-x64`，macOS 的换 `-n assemble-macos-arm64`。在应用里登录、两台机器收发文件，仍然要人来。
+
 ## Windows 真机验收清单
 
 Windows 上没法在这台 Mac 上自动验证。下面每一条都对应一段只做过类型检查的代码，请在 Windows 上逐条走：
