@@ -679,8 +679,12 @@ async fn staging_files_left_by_an_interrupted_run_are_swept_before_receiving_sta
     f.state().set_receive_folder(Some(&chosen));
 
     f.start_receiving();
-    until("the sweep to run", || !leftover.exists()).await;
-    assert!(!there.exists());
+    // 两个文件夹是先后清的：先默认位置，再用户设置的那个。等前一个清完就去看后一个，
+    // 机器一忙就赶在它前面——2026-11-25 持续集成的 macOS 那一栏就这样红过一次。
+    until("the sweep to run in both folders", || {
+        !leftover.exists() && !there.exists()
+    })
+    .await;
     assert_eq!(std::fs::read(inbox.join("笔记.txt")).unwrap(), b"mine");
     f.finish().await;
 }
