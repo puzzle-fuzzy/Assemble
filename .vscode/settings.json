@@ -1,0 +1,32 @@
+{
+  "files.exclude": {
+    "**/node_modules": true,
+    "**/target": true,
+    "**/.bun-version": true,
+    "**/.editorconfig": true,
+    "**/biome.json": true,
+    "**/bun.lock": true,
+    "**/Cargo.lock": true,
+    "**/bunfig.toml": true,
+    "**/Cargo.toml": true,
+    "**/tsconfig.json": true,
+    "**/.gitignore": true,
+    "**/.gitattributes": true,
+    "**/rust-toolchain.toml": true,
+    "**/.dockerignore": true,
+    "**/.github": true,
+    "**/.zcode": true,
+    "**/.biome-verification.local.json": true,
+    "**/scripts": true,
+    "**/deploy": true,
+    "**/data": true
+  },
+  "editor.cursorSmoothCaretAnimation": "on",
+  "workbench.tree.indent": 10,
+  "window.autoDetectColorScheme": false,
+  "workbench.tree.expandMode": "singleClick",
+  "editor.lineNumbers": "interval",
+  "github.copilot.enable": {
+    "*": false
+  }
+}
