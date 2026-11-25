@@ -3,9 +3,15 @@ import { fileURLToPath, URL } from "node:url";
 import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";
 import { defineConfig } from "vite";
+import { readBuildInfo } from "../../scripts/release/build-info.mts";
 
 // https://v2.tauri.app/start/frontend/vite/
 export default defineConfig({
+  define: {
+    __ASSEMBLE_BUILD__: JSON.stringify(
+      readBuildInfo(fileURLToPath(new URL("../../", import.meta.url))),
+    ),
+  },
   plugins: [react(), tailwindcss()],
   resolve: {
     alias: { "@": fileURLToPath(new URL("./src", import.meta.url)) },

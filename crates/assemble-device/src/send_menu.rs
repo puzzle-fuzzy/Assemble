@@ -12,7 +12,8 @@
 //! 该写什么，都写在这里，不依赖窗口，在任何平台上都能测试；真正读写注册表的那一小段
 //! 只在 Windows 上编译。
 //!
-//! Windows 11 上这类入口在"显示更多选项"里（Shift+F10 也能到）。要进第一层菜单，
+//! Windows 10 上直接出现在文件的右键菜单里；Windows 11 的默认菜单把它放在"显示更多选项"里。
+//! Windows 11 要进第一层菜单，
 //! 应用必须有包标识、COM 组件和受信任的签名，Tauri 2 打不出 MSIX，所以留到以后。
 
 use std::ffi::OsStr;
@@ -79,26 +80,27 @@ pub mod registry {
     use std::path::Path;
 
     use winreg::RegKey;
-    use winreg::enums::{HKEY_CURRENT_USER, KEY_READ, KEY_WRITE};
+    use winreg::enums::HKEY_CURRENT_USER;
 
     use super::{MENU_KEY, MENU_LABEL, menu_command};
 
     /// 当前用户的名义打开菜单所在的键。`write` 为假时只在它已存在时打开。
-    fn open(write: bool) -> io::Result<RegKey> {
-        let classes = RegKey::predef(HKEY_CURRENT_USER)
-            .open_subkey_with_flags("Software\\Classes", KEY_READ | KEY_WRITE)
-            // 没有写权限时（极少数受限账户）至少还能读。
-            .or_else(|_| RegKey::predef(HKEY_CURRENT_USER).open_subkey("Software\\Classes"))?;
+    fn open(root: &RegKey, write: bool) -> io::Result<RegKey> {
+        // MENU_KEY 已经从当前用户根键起算，不能再先打开一次 Software\Classes。
         if write {
-            classes.create_subkey(MENU_KEY).map(|(key, _)| key)
+            root.create_subkey(MENU_KEY).map(|(key, _)| key)
         } else {
-            classes.open_subkey(MENU_KEY)
+            root.open_subkey(MENU_KEY)
         }
     }
 
     /// 现在的菜单指向的是不是 `application`。
     pub fn points_to(application: &Path) -> bool {
-        let Ok(menu) = open(false) else {
+        points_to_in(&RegKey::predef(HKEY_CURRENT_USER), application)
+    }
+
+    fn points_to_in(root: &RegKey, application: &Path) -> bool {
+        let Ok(menu) = open(root, false) else {
             return false;
         };
         let Ok(command) = menu.open_subkey("command") else {
@@ -111,10 +113,14 @@ pub mod registry {
 
     /// 登记右键菜单。已经指向同一个应用时什么都不做。
     pub fn install(application: &Path) -> io::Result<()> {
-        if points_to(application) {
+        install_in(&RegKey::predef(HKEY_CURRENT_USER), application)
+    }
+
+    fn install_in(root: &RegKey, application: &Path) -> io::Result<()> {
+        if points_to_in(root, application) {
             return Ok(());
         }
-        let menu = open(true)?;
+        let menu = open(root, true)?;
         menu.set_value("", &MENU_LABEL)?;
         menu.set_value("Icon", &application.to_string_lossy().to_string())?;
         let (command, _) = menu.create_subkey("command")?;
@@ -124,15 +130,56 @@ pub mod registry {
 
     /// 去掉右键菜单。没有登记过时什么都不做。
     pub fn remove() -> io::Result<()> {
-        // 没有登记过：没什么可删的，也不去碰 `*` 下别的程序登记的菜单。
-        if open(false).is_err() {
-            return Ok(());
+        remove_from(&RegKey::predef(HKEY_CURRENT_USER))
+    }
+
+    fn remove_from(root: &RegKey) -> io::Result<()> {
+        // 只删自己的入口；没有登记过才算成功，权限等真实错误必须交回调用方。
+        match root.delete_subkey_all(MENU_KEY) {
+            Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
+            result => result,
         }
-        let classes = RegKey::predef(HKEY_CURRENT_USER).open_subkey("Software\\Classes")?;
-        // `*` 这一层可能还有别的程序登记的菜单，只删自己那一个。
-        let all = classes.open_subkey("*\\shell")?;
-        all.delete_subkey_all("AssembleSend")?;
-        Ok(())
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        #[test]
+        fn registration_uses_one_classes_path_and_removal_preserves_other_menus() {
+            // 使用隔离的根键走同一套读写，不能拿用户真正的右键菜单做测试。
+            let temporary = tempfile::tempdir().unwrap();
+            let test_key = format!(
+                "Software\\Assemble\\Tests\\{}",
+                temporary.path().file_name().unwrap().to_str().unwrap()
+            );
+            let user = RegKey::predef(HKEY_CURRENT_USER);
+            let (root, _) = user.create_subkey(&test_key).unwrap();
+            let application = Path::new(r"C:\Program Files\Assemble\assemble-desktop.exe");
+            let (other, _) = root
+                .create_subkey(r"Software\Classes\*\shell\AnotherApplication")
+                .unwrap();
+            other.set_value("", &"保留的菜单").unwrap();
+
+            install_in(&root, application).unwrap();
+            assert!(points_to_in(&root, application));
+            let menu = root.open_subkey(MENU_KEY).unwrap();
+            assert_eq!(menu.get_value::<String, _>("").unwrap(), MENU_LABEL);
+            assert!(
+                root.open_subkey(r"Software\Classes\Software\Classes\*\shell\AssembleSend")
+                    .is_err()
+            );
+            install_in(&root, application).unwrap();
+            remove_from(&root).unwrap();
+            assert!(!points_to_in(&root, application));
+            assert_eq!(other.get_value::<String, _>("").unwrap(), "保留的菜单");
+            remove_from(&root).unwrap();
+
+            drop(menu);
+            drop(other);
+            drop(root);
+            user.delete_subkey_all(test_key).unwrap();
+        }
     }
 }
 

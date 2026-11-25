@@ -4,6 +4,7 @@
 
 import { ArrowDownToLine, ArrowUpToLine } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
+import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -16,9 +17,11 @@ import {
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Progress } from "@/components/ui/progress";
+import { Toaster } from "@/components/ui/sonner";
 import { Switch } from "@/components/ui/switch";
 import { useSnapshot } from "@/hooks/use-snapshot";
 import { type Bridge, bridge, toBridgeError } from "@/lib/bridge";
+import { formatBuildInfo } from "@/lib/build-info";
 import { messageFor } from "@/lib/messages";
 import {
   formatSize,
@@ -44,64 +47,76 @@ export interface AppProps {
   bridge?: Bridge;
 }
 
+const LOGIN_TIMEOUT_MESSAGE = "等待浏览器登录超时，请重试。";
+
 export function App({ bridge: source = bridge }: AppProps) {
   const { snapshot, loadError } = useSnapshot(source);
   const [actionError, setActionError] = useState<string | null>(null);
 
   return (
-    <main className="mx-auto flex min-h-screen w-full max-w-xl flex-col gap-4 bg-background px-6 py-6 text-foreground">
-      <header className="flex items-center justify-between gap-4 border-b pb-3">
-        <h1 className="text-base leading-none font-semibold">Assemble</h1>
-        <ServiceStatus
-          service={snapshot?.service}
-          signedIn={snapshot?.session.phase === "signedIn"}
-        />
-      </header>
+    <>
+      <Toaster closeButton containerAriaLabel="登录提示" />
+      <main className="mx-auto flex min-h-screen w-full max-w-xl flex-col gap-4 bg-background px-6 py-6 text-foreground">
+        <header className="flex items-center justify-between gap-4 border-b pb-3">
+          <h1 className="text-base leading-none font-semibold">Assemble</h1>
+          <ServiceStatus
+            service={snapshot?.service}
+            signedIn={snapshot?.session.phase === "signedIn"}
+          />
+        </header>
 
-      {loadError ? (
-        <p role="alert" className="text-sm text-destructive">
-          {loadError}
-        </p>
-      ) : null}
-      {snapshot?.notice ? (
-        <NoticeLine
-          notice={snapshot.notice}
-          onDismiss={() => void dismiss(source)}
-        />
-      ) : null}
-      {actionError ? (
-        <p role="alert" className="text-sm text-destructive">
-          {actionError}
-        </p>
-      ) : null}
+        {loadError ? (
+          <p role="alert" className="text-sm text-destructive">
+            {loadError}
+          </p>
+        ) : null}
+        {snapshot?.notice ? (
+          <NoticeLine
+            notice={snapshot.notice}
+            onDismiss={() => void dismiss(source)}
+          />
+        ) : null}
+        {actionError ? (
+          <p role="alert" className="text-sm text-destructive">
+            {actionError}
+          </p>
+        ) : null}
 
-      <SessionCard
-        source={source}
-        snapshot={snapshot}
-        onError={setActionError}
-      />
-      <DevicesCard
-        source={source}
-        snapshot={snapshot}
-        onError={setActionError}
-      />
-      <TransfersCard
-        source={source}
-        snapshot={snapshot}
-        onError={setActionError}
-      />
-      <PlannerCard
-        source={source}
-        snapshot={snapshot}
-        onError={setActionError}
-      />
-      <DriveCard source={source} snapshot={snapshot} onError={setActionError} />
-      <LaunchCard
-        source={source}
-        snapshot={snapshot}
-        onError={setActionError}
-      />
-    </main>
+        <SessionCard
+          source={source}
+          snapshot={snapshot}
+          onError={setActionError}
+        />
+        <DevicesCard
+          source={source}
+          snapshot={snapshot}
+          onError={setActionError}
+        />
+        <TransfersCard
+          source={source}
+          snapshot={snapshot}
+          onError={setActionError}
+        />
+        <PlannerCard
+          source={source}
+          snapshot={snapshot}
+          onError={setActionError}
+        />
+        <DriveCard
+          source={source}
+          snapshot={snapshot}
+          onError={setActionError}
+        />
+        <LaunchCard
+          source={source}
+          snapshot={snapshot}
+          onError={setActionError}
+        />
+        <footer className="pt-2 text-center text-xs text-muted-foreground">
+          {formatBuildInfo(__ASSEMBLE_BUILD__)}
+        </footer>
+      </main>
+    </>
   );
 }
 
@@ -162,6 +177,9 @@ function NoticeLine({
   notice: Notice;
   onDismiss: () => void;
 }) {
+  if (notice.kind === "error" && notice.message === LOGIN_TIMEOUT_MESSAGE) {
+    return <LoginTimeoutToast onDismiss={onDismiss} />;
+  }
   const isError = notice.kind === "error";
   return (
     <div
@@ -184,6 +202,24 @@ function NoticeLine({
   );
 }
 
+function LoginTimeoutToast({ onDismiss }: { onDismiss: () => void }) {
+  const dismissRef = useRef(onDismiss);
+  dismissRef.current = onDismiss;
+
+  useEffect(() => {
+    const id = toast.error(LOGIN_TIMEOUT_MESSAGE, {
+      id: "login-timeout",
+      duration: Number.POSITIVE_INFINITY,
+      onDismiss: () => dismissRef.current(),
+    });
+    return () => {
+      toast.dismiss(id);
+    };
+  }, []);
+
+  return null;
+}
+
 interface CardProps {
   source: Bridge;
   snapshot: Snapshot | null;
@@ -201,7 +237,12 @@ function SessionCard({ source, snapshot, onError }: CardProps) {
     try {
       await action();
     } catch (error: unknown) {
-      onError(messageFor(toBridgeError(error)));
+      const failure = toBridgeError(error);
+      // 回调失败的具体提示由 Rust 的 notice 提供，取消或拒绝时则不提示。
+      // 不再叠上一条通用错误，否则超时 toast 之外页面里还会留着同一次失败。
+      if (failure.code !== "LOGIN_CALLBACK_FAILED") {
+        onError(messageFor(failure));
+      }
     } finally {
       setPending(false);
     }
@@ -927,8 +968,8 @@ function LaunchCard({ source, snapshot, onError }: CardProps) {
               <p className="text-sm font-medium">右键菜单</p>
               <p className="text-sm text-muted-foreground">
                 {sendMenu === "enabled"
-                  ? "在文件上点右键 →「显示更多选项」，就有「用 Assemble 发送」。"
-                  : "文件上点右键 →「显示更多选项」里没有「用 Assemble 发送」。"}
+                  ? "在文件上点右键，选择「用 Assemble 发送」。"
+                  : "文件的右键菜单里没有「用 Assemble 发送」。"}
               </p>
             </div>
             <Switch

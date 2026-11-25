@@ -2,6 +2,7 @@
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { act } from "react";
+import { toast } from "sonner";
 
 import { App } from "@/App";
 import { BridgeError } from "@/lib/bridge";
@@ -36,7 +37,27 @@ beforeEach(() => {
   document.body.replaceChildren();
 });
 
-afterEach(cleanup);
+afterEach(async () => {
+  toast.dismiss();
+  await cleanup();
+});
+
+describe("版本信息", () => {
+  test("固定在所有内容卡片之后，未登录、已登录或断网时都显示构建身份", async () => {
+    for (const current of [
+      snapshot(),
+      snapshot({ phase: "signedIn" }),
+      snapshot({ service: service({ reachable: false }) }),
+    ]) {
+      const view = await render(<App bridge={new FakeBridge(current)} />);
+      await settle();
+      const footer = view.host.querySelector("footer");
+      expect(footer?.textContent).toBe("本地测试 - 0.1.0.1234567");
+      expect(view.host.querySelector("main")?.lastElementChild).toBe(footer);
+      await view.unmount();
+    }
+  });
+});
 
 describe("连接状态", () => {
   test("探测出结果前显示正在检测，之后显示服务名", async () => {
@@ -225,7 +246,7 @@ describe("账户", () => {
 });
 
 describe("提示", () => {
-  test("错误提示以警示方式出现", async () => {
+  test("登录超时只在 toast 中提示，状态重复推送时不叠加", async () => {
     const source = new FakeBridge(
       snapshot({
         notice: { kind: "error", message: "等待浏览器登录超时，请重试。" },
@@ -234,8 +255,88 @@ describe("提示", () => {
     const view = await render(<App bridge={source} />);
     await settle();
 
-    const alert = view.host.querySelector('[role="alert"]');
-    expect(alert?.textContent).toContain("等待浏览器登录超时，请重试。");
+    const timeout = "等待浏览器登录超时，请重试。";
+    expect(
+      view.host.querySelector("[data-sonner-toast]")?.textContent,
+    ).toContain(timeout);
+    expect(view.host.querySelector("main")?.textContent).not.toContain(timeout);
+    expect(
+      view.host
+        .querySelector('[aria-live="polite"]')
+        ?.contains(view.host.querySelector("[data-sonner-toast]")),
+    ).toBe(true);
+
+    await act(async () => {
+      source.push({ ...source.current });
+    });
+    await settle();
+    expect(view.host.querySelectorAll("[data-sonner-toast]")).toHaveLength(1);
+  });
+
+  test("关闭超时 toast 会通知 Rust，重试后的超时仍能再次提示", async () => {
+    const timeout = {
+      kind: "error",
+      message: "等待浏览器登录超时，请重试。",
+    } as const;
+    const source = new FakeBridge(snapshot({ notice: timeout }));
+    const view = await render(<App bridge={source} />);
+    await settle();
+
+    const close = view.host.querySelector<HTMLButtonElement>(
+      'button[aria-label="关闭提示"]',
+    );
+    if (!close) throw new Error("没有找到 toast 关闭按钮");
+    await click(close);
+    expect(source.calls).toEqual(["dismissNotice"]);
+
+    await act(async () => {
+      source.push(snapshot({ notice: null }));
+    });
+    await act(async () => {
+      source.push(snapshot({ notice: timeout }));
+    });
+    await settle();
+    expect(view.host.querySelectorAll("[data-sonner-toast]")).toHaveLength(1);
+    expect(
+      view.host.querySelector("[data-sonner-toast]")?.textContent,
+    ).toContain(timeout.message);
+  });
+
+  test("登录超时的命令拒绝不再往页面叠加通用错误", async () => {
+    const source = new FakeBridge(snapshot());
+    source.signIn = async () => {
+      source.push(
+        snapshot({
+          notice: { kind: "error", message: "等待浏览器登录超时，请重试。" },
+        }),
+      );
+      throw new BridgeError("LOGIN_CALLBACK_FAILED", "login timed out");
+    };
+    const view = await render(<App bridge={source} />);
+    await settle();
+    await click(button(view.host, "使用浏览器登录"));
+    expect(
+      view.host.querySelector("[data-sonner-toast]")?.textContent,
+    ).toContain("等待浏览器登录超时，请重试。");
+    expect(view.host.querySelector("main")?.textContent).not.toContain(
+      "操作没有完成",
+    );
+    expect(view.host.querySelector("main")?.textContent).not.toContain(
+      "等待浏览器登录超时",
+    );
+  });
+
+  test("其他错误提示沿用页面原有呈现", async () => {
+    const source = new FakeBridge(
+      snapshot({
+        notice: { kind: "error", message: "请先登录，再发送文件。" },
+      }),
+    );
+    const view = await render(<App bridge={source} />);
+    await settle();
+    expect(
+      view.host.querySelector('main [role="alert"]')?.textContent,
+    ).toContain("请先登录，再发送文件。");
     expect(button(view.host, "知道了")).toBeDefined();
   });
 
@@ -703,7 +804,10 @@ describe("右键菜单", () => {
     const view = await render(<App bridge={source} />);
     await settle();
     expect(text(view.host)).toContain("右键菜单");
-    expect(text(view.host)).toContain("显示更多选项");
+    expect(text(view.host)).toContain(
+      "在文件上点右键，选择「用 Assemble 发送」。",
+    );
+    expect(text(view.host)).not.toContain("显示更多选项");
     const toggle = view.host.querySelector<HTMLButtonElement>(
       '[aria-label="右键菜单里的“用 Assemble 发送”"]',
     );
@@ -720,7 +824,9 @@ describe("右键菜单", () => {
     const source = new FakeBridge(snapshot({ sendMenu: "disabled" }));
     const view = await render(<App bridge={source} />);
     await settle();
-    expect(text(view.host)).toContain("里没有「用 Assemble 发送」");
+    expect(text(view.host)).toContain(
+      "文件的右键菜单里没有「用 Assemble 发送」",
+    );
   });
 
   test("系统不让改时显示固定文案", async () => {
