@@ -4,10 +4,11 @@
 // 文件在哪、怎么上传，都在 Rust 那边。挑文件、选设备、发出去，点三下就结束。
 
 import { DisplayPreferencesMenu } from "@assemble/ui/display-preferences";
-import { Cloud } from "lucide-react";
+import { ArrowRight, Cloud, File, Monitor } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
+import { Separator } from "@/components/ui/separator";
 import { useSnapshot } from "@/hooks/use-snapshot";
 import { type Bridge, bridge, toBridgeError } from "@/lib/bridge";
 import { uiText, useDesktopTranslation } from "@/lib/i18n";
@@ -57,7 +58,7 @@ export function SendPanel({ bridge: source = bridge }: SendPanelProps) {
     ? outcome === "failed"
       ? uiText("someFilesWereNotSent")
       : uiText("sendingEllipsis")
-    : uiText("sendToEllipsis");
+    : uiText("sendFiles");
   useEffect(() => {
     document.title = `${panelTitle} · Assemble`;
   }, [panelTitle]);
@@ -113,7 +114,7 @@ export function SendPanel({ bridge: source = bridge }: SendPanelProps) {
   }
 
   return (
-    <main className="flex min-h-screen w-full flex-col gap-3 bg-background px-5 py-5 text-foreground">
+    <main className="flex min-h-screen w-full flex-col gap-4 bg-background px-5 py-5 text-foreground">
       <header className="flex items-center justify-between gap-3">
         <h1 className="text-base leading-none font-semibold">{panelTitle}</h1>
         <DisplayPreferencesMenu />
@@ -160,68 +161,68 @@ export function SendPanel({ bridge: source = bridge }: SendPanelProps) {
 
       {draft && !sent ? (
         <>
-          <ul className="flex flex-col gap-1 rounded-lg border border-border px-3 py-2">
+          <ul
+            className="flex flex-col gap-3"
+            aria-label={uiText("selectedFiles")}
+          >
             {draft.files.map((file) => (
-              <li
-                key={file.name}
-                className="flex justify-between gap-3 text-sm"
-              >
-                <span className="truncate" title={file.name}>
-                  {file.name}
-                </span>
-                <span className="shrink-0 text-xs text-muted-foreground">
-                  {formatSize(file.size)}
-                </span>
+              <li key={file.name} className="flex items-start gap-3 py-1">
+                <File
+                  aria-hidden
+                  className="mt-0.5 size-5 shrink-0 text-muted-foreground"
+                />
+                <div className="flex min-w-0 flex-col gap-1">
+                  <p className="text-sm wrap-anywhere">{file.name}</p>
+                  <p className="text-xs text-muted-foreground">
+                    {formatSize(file.size)}
+                  </p>
+                </div>
               </li>
             ))}
           </ul>
+          <Separator />
           <ul
             className="flex flex-col gap-2"
             aria-label={uiText("chooseADestination")}
           >
             <li>
-              <button
+              <Button
                 type="button"
-                className="flex w-full items-center justify-between gap-3 rounded-lg border border-border px-3 py-2 text-left text-sm hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
+                variant="outline"
+                size="lg"
+                className="h-auto min-h-12 w-full justify-start gap-3 py-3 text-left whitespace-normal"
                 disabled={pending}
                 onClick={() => void sendTo("drive")}
               >
-                <span className="flex min-w-0 items-center gap-2">
-                  <Cloud
-                    aria-hidden
-                    className="size-3.5 shrink-0 text-muted-foreground"
-                  />
-                  <span className="truncate">{uiText("cloudDrive")}</span>
+                <Cloud aria-hidden data-icon="inline-start" />
+                <span className="min-w-0 flex-1 wrap-anywhere">
+                  {uiText("uploadToCloudDrive")}
                 </span>
-                <span className="shrink-0 text-xs text-muted-foreground">
-                  {uiText("storeOnTheServer")}
-                </span>
-              </button>
+                <ArrowRight aria-hidden data-icon="inline-end" />
+              </Button>
             </li>
             {destinations.map((device) => (
               <li key={device.id}>
-                <button
+                <Button
                   type="button"
-                  className="flex w-full items-center justify-between gap-3 rounded-lg border border-border px-3 py-2 text-left text-sm hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
+                  variant="outline"
+                  size="lg"
+                  className="h-auto min-h-12 w-full justify-start gap-3 py-3 text-left whitespace-normal"
                   disabled={!device.online || pending}
                   onClick={() => void sendTo(device.id)}
                 >
-                  <span className="flex min-w-0 items-center gap-2">
-                    <span
-                      aria-hidden
-                      className={
-                        device.online
-                          ? "size-2 shrink-0 rounded-full bg-emerald-500"
-                          : "size-2 shrink-0 rounded-full bg-muted-foreground/40"
-                      }
-                    />
-                    <span className="truncate">{device.name}</span>
+                  <Monitor aria-hidden data-icon="inline-start" />
+                  <span className="flex min-w-0 flex-1 flex-col items-start gap-1">
+                    <span className="wrap-anywhere">
+                      {uiText("sendToDeviceName", { name: device.name })}
+                    </span>
+                    <span className="text-xs font-normal text-muted-foreground">
+                      {PLATFORM_NAMES[device.platform]} ·{" "}
+                      {device.online ? uiText("online") : uiText("offline")}
+                    </span>
                   </span>
-                  <span className="shrink-0 text-xs text-muted-foreground">
-                    {PLATFORM_NAMES[device.platform]} ·{" "}
-                    {device.online ? uiText("online") : uiText("offline")}
-                  </span>
-                </button>
+                  <ArrowRight aria-hidden data-icon="inline-end" />
+                </Button>
               </li>
             ))}
           </ul>

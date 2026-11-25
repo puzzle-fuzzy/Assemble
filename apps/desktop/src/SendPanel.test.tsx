@@ -31,9 +31,7 @@ function destinations(host: HTMLElement): HTMLButtonElement[] {
 
 /** 其中属于设备的那几个（不是云盘）。 */
 function devices(host: HTMLElement): HTMLButtonElement[] {
-  return destinations(host).filter(
-    (choice) => !choice.textContent?.startsWith("云盘"),
-  );
+  return destinations(host).slice(1);
 }
 
 /** 模拟 Rust 推来新的状态。 */
@@ -104,12 +102,15 @@ describe("发送面板", () => {
     expect(page).toContain("512 KB");
     expect(page).toContain("说明.txt");
     expect(page).toContain("2.0 KB");
+    const selectedFiles = view.host.querySelector('ul[aria-label="已选文件"]');
+    expect(selectedFiles).not.toBeNull();
+    expect(selectedFiles?.querySelector("button, a, [tabindex]")).toBeNull();
     // 云盘排在最前面，永远能选；本机不在设备名单里；离线的设备点不了。
     const choices = destinations(view.host);
     expect(choices.map((choice) => choice.textContent)).toEqual([
-      "云盘存到服务端",
-      "工作电脑Windows · 在线",
-      "家里的台式机Linux · 离线",
+      "上传到云盘",
+      "发送到 工作电脑Windows · 在线",
+      "发送到 家里的台式机Linux · 离线",
     ]);
     expect(choices[0].disabled).toBe(false);
     expect(choices[1].disabled).toBe(false);

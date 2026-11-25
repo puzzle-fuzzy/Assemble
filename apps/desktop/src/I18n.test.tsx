@@ -189,7 +189,9 @@ describe("桌面语言切换", () => {
     await click(destination);
     expect(text(view.host)).toContain("那台设备刚刚下线了");
     await act(async () => setLanguage("en"));
-    expect(document.title).toBe("Send to… · Assemble");
+    expect(document.title).toBe("Send files · Assemble");
+    expect(button(view.host, "Upload to cloud drive")).toBeDefined();
+    expect(text(destination)).toContain("Send to 工作电脑");
     expect(button(view.host, "Language and appearance")).toBeDefined();
     expect(text(view.host)).toContain("The other device just went offline.");
     expect(text(view.host)).toContain("用户的合同.pdf");
