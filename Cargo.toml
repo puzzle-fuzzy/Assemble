@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/*", "apps/server", "apps/desktop/src-tauri"]
+members = ["crates/*", "apps/server", "apps/desktop/src-tauri", "apps/mcp"]
 
 [workspace.package]
 version = "0.1.0"
@@ -45,6 +45,16 @@ getrandom = "0.4"
 mime_guess = "2.0.5"
 # system-proxy：公司网络里常有系统级代理设置，桌面端应当遵从它。
 rpassword = "7.5.5"
+# MCP 的官方 Rust SDK。它发版很勤（四周里六个版本），所以钉死：升级必须是有意的，
+# 升完把 tools 的测试和真实客户端各走一遍。只开 stdio 服务端必需的 feature——全开的话
+# 它会把 HTTP 客户端、OAuth 那一整套都拖进来，而这个入口只走标准输入输出。
+rmcp = { version = "=3.11.0", default-features = false, features = [
+  "macros",
+  "server",
+  "transport-io",
+] }
+# 工具参数的 JSON Schema 由它从类型上生成；是 rmcp 用的同一个版本，不要各升各的。
+schemars = "1.2.3"
 reqwest = { version = "0.13.5", default-features = false, features = [
   "json",
   "query",

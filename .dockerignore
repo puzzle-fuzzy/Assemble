@@ -13,5 +13,8 @@
 !apps/desktop/
 !apps/desktop/src-tauri/
 !apps/desktop/src-tauri/**
+# 给助手用的入口 assemble-mcp 也是工作区成员：同样的道理，清单与 Rust 源码得在，不会被编译。
+!apps/mcp/
+!apps/mcp/**
 # Tauri 在本机生成的权限清单，不属于源码。
 apps/desktop/src-tauri/gen

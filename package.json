@@ -17,6 +17,7 @@
     "server:accounts": "ASSEMBLE_DATA_DIR=data/local/server ASSEMBLE_PUBLIC_ORIGIN=http://127.0.0.1:8787 cargo run -p assemble-server -- list-accounts",
     "acceptance": "bun scripts/acceptance/run.ts",
     "build": "bun run --filter @assemble/desktop build",
+    "mcp": "ASSEMBLE_SERVER_ORIGIN=https://as.yxswy.com cargo build --release -p assemble-mcp",
     "typecheck": "bun run --filter @assemble/desktop typecheck && bun run typecheck:tools",
     "typecheck:tools": "tsc --noEmit",
     "test": "bun test",

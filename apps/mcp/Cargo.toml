@@ -1,0 +1,56 @@
+[package]
+name = "assemble-mcp"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+description = "给 Codex 与 ZCode 用的对话入口：把 Assemble 的日程与提醒做成 MCP 工具"
+default-run = "assemble-mcp"
+
+[lib]
+name = "assemble_mcp"
+path = "src/lib.rs"
+
+[[bin]]
+name = "assemble-mcp"
+path = "src/main.rs"
+
+[dependencies]
+assemble-client.workspace = true
+assemble-protocol.workspace = true
+assemble-schedule.workspace = true
+assemble-store.workspace = true
+chrono.workspace = true
+clap.workspace = true
+rmcp.workspace = true
+schemars.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+
+# 集成测试对着真实运行的服务端走一遍：服务端的库（连同它的测试工具要用的东西）、
+# 会存 Cookie 的"浏览器"、以及像一个真实客户端那样经协议调用。
+[dev-dependencies]
+assemble-server.workspace = true
+base64.workspace = true
+futures-util.workspace = true
+reqwest = { workspace = true, features = [
+  "cookies",
+  "form",
+] }
+rmcp = { workspace = true, features = [
+  "client",
+  "transport-async-rw",
+  "transport-child-process",
+] }
+sha2.workspace = true
+# 借来的服务端测试工具要直接查库。
+sqlx.workspace = true
+tempfile.workspace = true
+
+[lints]
+workspace = true

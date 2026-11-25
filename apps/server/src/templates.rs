@@ -107,7 +107,7 @@ pub fn login_page(error: Option<&str>, next: &str, csrf: &str) -> String {
     )
 }
 
-/// 桌面端的授权确认页。
+/// 一台设备登录的授权确认页：桌面端与助手（`assemble-mcp`）走的是同一页。
 pub fn authorize_page(
     request: &str,
     account: &str,
@@ -118,9 +118,9 @@ pub fn authorize_page(
     page(
         "确认登录 · Assemble",
         &format!(
-            "<h1>登录 Assemble 桌面端</h1>\
+            "<h1>登录 Assemble</h1>\
 <p>当前登录：<strong>{}</strong></p>\
-<p><strong>{}</strong>（{}）想要访问你的账户：收发文件、使用云盘。</p>\
+<p><strong>{}</strong>（{}）想以你账户里一台设备的身份登录：收发文件、使用云盘、管理日程与提醒。</p>\
 <form method=\"post\" action=\"/desktop/authorize\">\
 <input type=\"hidden\" name=\"csrf\" value=\"{}\">\
 <input type=\"hidden\" name=\"request\" value=\"{}\">\
