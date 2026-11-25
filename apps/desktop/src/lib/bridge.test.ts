@@ -1,9 +1,10 @@
 // 桥接层：命令名、参数名、状态核对与错误收敛。这些必须与 Rust 侧的命令一一对应。
 
 import { beforeEach, describe, expect, mock, test } from "bun:test";
-
+import type { MediaContent, MediaIdentity } from "@assemble/media";
 import type { BridgeError as BridgeErrorType } from "@/lib/bridge";
 import type { Snapshot } from "@/lib/types";
+import mediaSamples from "../../../../packages/media/contract/snapshots.json";
 
 type InvokeCall = { command: string; args: Record<string, unknown> };
 
@@ -49,7 +50,7 @@ mock.module("@tauri-apps/api/event", () => ({
   },
 }));
 
-const { SNAPSHOT_EVENT, BridgeError, bridge, run, toBridgeError } =
+const { SNAPSHOT_EVENT, BridgeError, bridge, mediaBridge, run, toBridgeError } =
   await import("@/lib/bridge");
 const { messageFor } = await import("@/lib/messages");
 
@@ -263,6 +264,192 @@ describe("桥接", () => {
     rejectWith = null;
     respondWith = "disabled";
     await expect(run(() => bridge.launchAtLogin())).resolves.toBe("disabled");
+  });
+});
+
+describe("影视具名桥接", () => {
+  beforeEach(() => {
+    calls.length = 0;
+    rejectWith = null;
+  });
+  const content: MediaContent = {
+    mediaType: "movie",
+    title: "测试电影",
+    originalTitle: "",
+    year: null,
+    releaseDate: null,
+    overview: "",
+    genres: [],
+    episodeCount: null,
+    status: "planned",
+    watchedAt: null,
+    review: null,
+    notes: null,
+    magnetUri: null,
+  };
+  const identity: MediaIdentity = {
+    provider: "tmdb",
+    mediaType: "movie",
+    externalId: "42",
+  };
+  test("查询、维护、任务、图片与复制都使用对应具名命令", async () => {
+    const client = mediaBridge.client("private");
+    const scenarios: {
+      command: string;
+      args: Record<string, unknown>;
+      value: unknown;
+      perform: () => Promise<unknown>;
+    }[] = [
+      {
+        command: "media_capabilities",
+        args: {},
+        value: mediaSamples.capabilities,
+        perform: () => client.capabilities(),
+      },
+      {
+        command: "media_list",
+        args: { scope: "private", query: { status: "watching" } },
+        value: mediaSamples.listing,
+        perform: () => client.list({ status: "watching" }),
+      },
+      {
+        command: "media_get",
+        args: { scope: "private", id: "entry-1" },
+        value: mediaSamples.entries[0],
+        perform: () => client.get("entry-1"),
+      },
+      {
+        command: "media_create",
+        args: { input: { content, requestId: "request-1" } },
+        value: mediaSamples.entries[0],
+        perform: () => client.create(content, "request-1"),
+      },
+      {
+        command: "media_update",
+        args: { id: "entry-1", input: { version: 1, content } },
+        value: mediaSamples.entries[0],
+        perform: () => client.update("entry-1", 1, content),
+      },
+      {
+        command: "media_remove",
+        args: { id: "entry-1", version: 1 },
+        value: null,
+        perform: () => client.remove("entry-1", 1),
+      },
+      {
+        command: "media_search",
+        args: { provider: "tmdb", mediaType: "movie", q: "电影" },
+        value: [mediaSamples.candidate],
+        perform: () => client.search("tmdb", "movie", "电影"),
+      },
+      {
+        command: "media_catalog",
+        args: { identity },
+        value: mediaSamples.candidate,
+        perform: () => client.catalog(identity),
+      },
+      {
+        command: "media_import",
+        args: { input: { identity, requestId: "request-1" } },
+        value: mediaSamples.job,
+        perform: () => client.import(identity, "request-1"),
+      },
+      {
+        command: "media_job",
+        args: { id: "job-1" },
+        value: mediaSamples.job,
+        perform: () => client.job("job-1"),
+      },
+      {
+        command: "media_gallery",
+        args: { scope: "private", id: "entry-1" },
+        value: mediaSamples.gallery,
+        perform: () => client.gallery("entry-1"),
+      },
+      {
+        command: "media_sync_gallery",
+        args: { id: "entry-1", input: { version: 1, requestId: "request-1" } },
+        value: mediaSamples.job,
+        perform: () => client.syncGallery("entry-1", 1, "request-1"),
+      },
+      {
+        command: "media_select_poster",
+        args: { id: "entry-1", input: { version: 1, assetId: "asset-1" } },
+        value: mediaSamples.entries[0],
+        perform: () => client.selectPoster("entry-1", 1, "asset-1"),
+      },
+      {
+        command: "media_actor",
+        args: {
+          identity: { provider: "tmdb", externalId: "1" },
+          mediaType: "tv",
+        },
+        value: {
+          actor: {
+            identity: { provider: "tmdb", externalId: "1" },
+            name: "演员",
+            photo: null,
+          },
+          items: [],
+        },
+        perform: () =>
+          client.actor({ provider: "tmdb", externalId: "1" }, "tv"),
+      },
+      {
+        command: "media_image",
+        args: { assetId: "asset-1", variant: "200" },
+        value: "data:image/png;base64,YQ==",
+        perform: () =>
+          mediaBridge.image(
+            {
+              assetId: "asset-1",
+              width: 1,
+              height: 1,
+              contentType: "image/png",
+            },
+            "200",
+          ),
+      },
+      {
+        command: "media_copy_magnet",
+        args: { scope: "shared", id: "entry-1" },
+        value: null,
+        perform: () => mediaBridge.copyMagnet("shared", "entry-1"),
+      },
+    ];
+    for (const scenario of scenarios) {
+      respondWith = scenario.value;
+      await scenario.perform();
+      expect(calls.at(-1)).toEqual({
+        command: scenario.command,
+        args: scenario.args,
+      });
+    }
+  });
+  test("共享维护不会发命令，坏状态和非图片数据在交界拦截", async () => {
+    expect(() =>
+      mediaBridge.client("shared").create(content, "request-1"),
+    ).toThrow("shared media is maintained");
+    expect(calls).toHaveLength(0);
+    respondWith = { items: [] };
+    await expect(mediaBridge.client("private").list()).rejects.toMatchObject({
+      code: "INVALID_STATE",
+    });
+    respondWith = "https://third-party.example/poster.jpg";
+    await expect(
+      mediaBridge.image(
+        { assetId: "asset-1", width: 1, height: 1, contentType: "image/png" },
+        "200",
+      ),
+    ).rejects.toMatchObject({ code: "INVALID_STATE" });
+  });
+  test("已取消的页面查询不会再进入IPC", async () => {
+    const cancel = new AbortController();
+    cancel.abort();
+    await expect(
+      mediaBridge.client("private").list({}, cancel.signal),
+    ).rejects.toThrow();
+    expect(calls).toHaveLength(0);
   });
 });
 

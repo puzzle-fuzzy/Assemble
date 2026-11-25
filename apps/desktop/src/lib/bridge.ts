@@ -3,6 +3,16 @@
 // 界面没有通用的网络或文件能力：只能调用这里列出的几个具名命令，
 // 并接收 Rust 主动推来的状态。命令名与参数名必须和 `src-tauri/src/commands.rs` 一致。
 
+import type { ImageLoader, MediaClient, MediaScope } from "@assemble/media";
+import {
+  isMediaActorCredits,
+  isMediaCandidate,
+  isMediaCapabilities,
+  isMediaEntry,
+  isMediaGallery,
+  isMediaJob,
+  isMediaList,
+} from "@assemble/media/guard";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 
@@ -236,3 +246,133 @@ export async function run<T>(operation: () => Promise<T>): Promise<T> {
     throw toBridgeError(error);
   }
 }
+
+export interface MediaBridge {
+  client(scope: MediaScope): MediaClient;
+  image: ImageLoader;
+  copyMagnet(scope: MediaScope, id: string): Promise<void>;
+}
+
+async function mediaInvoke<T>(
+  command: string,
+  args: Record<string, unknown>,
+  guard: (value: unknown) => value is T,
+  signal?: AbortSignal,
+): Promise<T> {
+  signal?.throwIfAborted();
+  const value = await run(() => invoke<unknown>(command, args));
+  signal?.throwIfAborted();
+  if (!guard(value))
+    throw new BridgeError(
+      "INVALID_STATE",
+      "the media response has an unknown shape",
+    );
+  return value;
+}
+function requirePrivate(scope: MediaScope): void {
+  if (scope !== "private")
+    throw new BridgeError(
+      "FORBIDDEN",
+      "shared media is maintained in the admin app",
+    );
+}
+
+/** 影视同样只走具名命令；界面既不能指定网络地址，也拿不到本机图片路径。 */
+export const mediaBridge: MediaBridge = {
+  client: (scope) => ({
+    scope,
+    capabilities: (signal) =>
+      mediaInvoke("media_capabilities", {}, isMediaCapabilities, signal),
+    list: (query = {}, signal) =>
+      mediaInvoke("media_list", { scope, query }, isMediaList, signal),
+    get: (id, signal) =>
+      mediaInvoke("media_get", { scope, id }, isMediaEntry, signal),
+    create: (content, requestId, signal) => {
+      requirePrivate(scope);
+      return mediaInvoke(
+        "media_create",
+        { input: { content, requestId } },
+        isMediaEntry,
+        signal,
+      );
+    },
+    update: (id, version, content, signal) => {
+      requirePrivate(scope);
+      return mediaInvoke(
+        "media_update",
+        { id, input: { version, content } },
+        isMediaEntry,
+        signal,
+      );
+    },
+    remove: async (id, version, signal) => {
+      requirePrivate(scope);
+      signal?.throwIfAborted();
+      await run(() => invoke<void>("media_remove", { id, version }));
+      signal?.throwIfAborted();
+    },
+    search: (provider, mediaType, q, signal) =>
+      mediaInvoke(
+        "media_search",
+        { provider, mediaType, q },
+        (value): value is import("@assemble/media").MediaCandidate[] =>
+          Array.isArray(value) && value.every(isMediaCandidate),
+        signal,
+      ),
+    catalog: (identity, signal) =>
+      mediaInvoke("media_catalog", { identity }, isMediaCandidate, signal),
+    actor: (identity, mediaType, signal) =>
+      mediaInvoke(
+        "media_actor",
+        { identity, mediaType },
+        isMediaActorCredits,
+        signal,
+      ),
+    import: (identity, requestId, signal) => {
+      requirePrivate(scope);
+      return mediaInvoke(
+        "media_import",
+        { input: { identity, requestId } },
+        isMediaJob,
+        signal,
+      );
+    },
+    job: (id, signal) => {
+      requirePrivate(scope);
+      return mediaInvoke("media_job", { id }, isMediaJob, signal);
+    },
+    gallery: (id, signal) =>
+      mediaInvoke("media_gallery", { scope, id }, isMediaGallery, signal),
+    syncGallery: (id, version, requestId, signal) => {
+      requirePrivate(scope);
+      return mediaInvoke(
+        "media_sync_gallery",
+        { id, input: { version, requestId } },
+        isMediaJob,
+        signal,
+      );
+    },
+    selectPoster: (id, version, assetId, signal) => {
+      requirePrivate(scope);
+      return mediaInvoke(
+        "media_select_poster",
+        { id, input: { version, assetId } },
+        isMediaEntry,
+        signal,
+      );
+    },
+  }),
+  image: (image, variant, signal) =>
+    mediaInvoke(
+      "media_image",
+      { assetId: image.assetId, variant },
+      (value): value is string =>
+        typeof value === "string" &&
+        /^data:image\/(?:jpeg|png|webp);base64,[A-Za-z0-9+/]+={0,2}$/.test(
+          value,
+        ),
+      signal,
+    ),
+  copyMagnet: (scope, id) =>
+    run(() => invoke<void>("media_copy_magnet", { scope, id })),
+};

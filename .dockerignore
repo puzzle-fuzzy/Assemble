@@ -8,6 +8,8 @@
 !packages/ui/**
 !packages/display/
 !packages/display/**
+!packages/media/
+!packages/media/**
 !Cargo.toml
 !Cargo.lock
 !crates/
@@ -26,6 +28,8 @@
 !apps/mcp/**
 !apps/admin/
 !apps/admin/**
+!apps/media-web/
+!apps/media-web/**
 **/node_modules
 **/dist
 **/data

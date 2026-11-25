@@ -27,6 +27,8 @@ pub mod identity_templates;
 pub mod identity_web;
 pub mod mail;
 pub mod maintenance;
+pub mod media;
+pub mod media_web_assets;
 pub mod planner;
 pub mod presence;
 pub mod register;

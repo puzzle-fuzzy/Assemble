@@ -1,5 +1,6 @@
 @import "@assemble/ui/styles.css";
 @source "./";
+@source "../../../packages/media/src";
 
 /* 表格由组件负责外观；窄内容区保持列宽并允许键盘横向滚动。 */
 .admin-table-region {

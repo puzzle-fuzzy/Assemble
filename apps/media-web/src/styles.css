@@ -1,0 +1,314 @@
+@import "@assemble/ui/styles.css";
+@source "./";
+@source "../../../packages/media/src";
+
+.site-shell {
+  min-block-size: 100dvh;
+  display: flex;
+  flex-direction: column;
+  overflow-wrap: anywhere;
+}
+
+.site-header {
+  border-block-end: 1px solid var(--border);
+  background: var(--background);
+}
+
+.site-header-inner {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 1rem 2rem;
+  max-inline-size: 90rem;
+  margin-inline: auto;
+  padding: 1rem clamp(1rem, 4vi, 3rem);
+}
+
+.site-brand {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  font-weight: 650;
+  letter-spacing: -0.025em;
+}
+
+.site-brand svg {
+  inline-size: 1.4rem;
+  block-size: 1.4rem;
+}
+
+.site-nav,
+.site-account {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.site-account {
+  margin-inline-start: auto;
+  min-inline-size: 0;
+}
+
+.site-account span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-inline-size: 12rem;
+}
+
+.site-main,
+.site-footer {
+  inline-size: 100%;
+  max-inline-size: 90rem;
+  margin-inline: auto;
+  padding-inline: clamp(1rem, 4vi, 3rem);
+}
+
+.site-main {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 1.5rem;
+  min-inline-size: 0;
+  padding-block: clamp(1.5rem, 4vi, 3rem);
+  outline: none;
+}
+
+.site-heading {
+  font-size: clamp(1.75rem, 1.4rem + 1.2vi, 2.5rem);
+  line-height: 1.2;
+  font-weight: 650;
+  letter-spacing: -0.035em;
+}
+
+.site-session-content:not([hidden]) {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+.media-filters {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 8rem), 1fr));
+  align-items: end;
+  gap: 0.9rem;
+}
+
+.media-search {
+  grid-column: span 2;
+}
+
+.media-filter-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+
+.poster-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 10rem), 1fr));
+  gap: 2rem 1.25rem;
+}
+
+.poster-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 0.8rem;
+  min-inline-size: 0;
+  container-type: inline-size;
+}
+
+.poster-title {
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+/* 卡片标题是原生链接；独立的缺图重试按钮仍可单独获得焦点。 */
+.poster-title a::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 0.8rem;
+}
+
+.poster-title a:focus-visible {
+  outline: none;
+}
+
+.poster-card:has(a:focus-visible) {
+  outline: 2px solid var(--ring);
+  outline-offset: 5px;
+  border-radius: 0.8rem;
+}
+
+.poster-card button {
+  position: relative;
+  z-index: 1;
+}
+
+.poster-card:has(a:hover) .poster-title {
+  text-decoration: underline;
+  text-underline-offset: 0.2em;
+}
+
+.media-image,
+.poster-art {
+  aspect-ratio: 2 / 3;
+  inline-size: 100%;
+  block-size: auto;
+  object-fit: cover;
+  border-radius: 0.75rem;
+  background: var(--muted);
+}
+
+.poster-placeholder {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.65rem;
+  aspect-ratio: 2 / 3;
+  background: var(--muted);
+  color: var(--muted-foreground);
+  border-radius: 0.75rem;
+  padding: 1rem;
+  font-size: 0.75rem;
+  text-align: center;
+}
+
+.poster-placeholder > svg {
+  inline-size: 1.75rem;
+  block-size: 1.75rem;
+}
+
+.media-pagination {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding-block-start: 1rem;
+}
+
+.gallery-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 12rem), 1fr));
+  gap: 1rem;
+}
+
+.gallery-trigger {
+  padding: 0;
+  block-size: auto;
+  overflow: hidden;
+}
+
+.gallery-art {
+  aspect-ratio: 16 / 10;
+  inline-size: 100%;
+  object-fit: cover;
+}
+
+.gallery-expanded {
+  aspect-ratio: auto;
+  max-block-size: 75dvh;
+  inline-size: 100%;
+  object-fit: contain;
+}
+
+.catalog-intro,
+.actor-heading {
+  display: flex;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  gap: 2rem;
+}
+
+.catalog-poster {
+  inline-size: min(100%, 15rem);
+  aspect-ratio: 2 / 3;
+  flex-shrink: 0;
+}
+
+.actor-photo {
+  inline-size: 6rem;
+  aspect-ratio: 2 / 3;
+  flex-shrink: 0;
+}
+
+.collection-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 18rem), 1fr));
+  gap: 1.5rem;
+}
+
+.collection-art {
+  aspect-ratio: 16 / 10;
+  inline-size: 100%;
+  object-fit: cover;
+}
+
+.site-footer {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+  padding-block-end: 2rem;
+  color: var(--muted-foreground);
+  font-size: 0.75rem;
+  line-height: 1.6;
+}
+
+.skip-link {
+  position: fixed;
+  inset-block-start: 0.5rem;
+  inset-inline-start: 0.5rem;
+  padding: 0.6rem 1rem;
+  background: var(--background);
+  border: 2px solid var(--ring);
+  border-radius: 0.5rem;
+  transform: translateY(-200%);
+}
+
+.skip-link:focus {
+  transform: translateY(0);
+}
+
+@media (width < 42rem) {
+  .site-header-inner {
+    gap: 0.8rem;
+  }
+
+  .site-nav {
+    flex-basis: 100%;
+  }
+
+  .site-account {
+    margin-inline-start: 0;
+  }
+
+  .site-account span {
+    max-inline-size: 7rem;
+  }
+
+  .poster-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 1.5rem 0.8rem;
+  }
+
+  .media-filters {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .media-filter-actions {
+    grid-column: 1 / -1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms;
+    transition-duration: 0.01ms;
+  }
+}

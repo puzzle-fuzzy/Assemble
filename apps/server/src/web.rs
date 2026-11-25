@@ -130,7 +130,7 @@ pub fn query_param(uri: &Uri, name: &str) -> Option<String> {
 ///
 /// 不放开任意地址：否则登录链接本身可以被做成"登录后跳到别的站点"。
 pub fn safe_next(raw: &str) -> Option<&str> {
-    let acceptable = (raw.starts_with("/desktop/authorize") || matches!(raw, "/web/account" | "/admin" | "/admin/"))
+    let acceptable = (raw.starts_with("/desktop/authorize") || matches!(raw, "/web/account" | "/admin" | "/admin/" | "/movies/"))
         && !raw.starts_with("//")
         && !raw.contains(['\\', '\r', '\n'])
         // 不允许 `/desktop/authorize/../..` 这种会被浏览器规整到别处的写法。
@@ -492,6 +492,7 @@ mod tests {
         assert_eq!(safe_next("/web/account").unwrap(), "/web/account");
         assert_eq!(safe_next("/admin").unwrap(), "/admin");
         assert_eq!(safe_next("/admin/").unwrap(), "/admin/");
+        assert_eq!(safe_next("/movies/").unwrap(), "/movies/");
         for rejected in [
             "/administrator",
             "/admin/users",

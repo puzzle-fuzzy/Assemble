@@ -25,6 +25,12 @@ Assemble 是一个全新的、自带服务端的项目，用来完全替换 jarv
 
 哪些还没有在真实运行里验证过，逐条列在[运行手册](docs/runbooks/verify-macos-launch.md)的"还没有做过的"一节。
 
+## 影视片库：本轮实现，尚未正式发布
+
+共享片库由网页管理员维护，每个账户另有仅本人可读写的私人片库，两者都支持想看、在看、已看。桌面端提供共享列表与详情、私人库维护；同源 `/movies/` 提供只读海报墙与详情，共享允许匿名浏览，磁力登录后可读，私人条目、图片与观后感只给本人。管理端新增共享条目的搜索导入、编辑、图集与封面、合集和统计，不扩大账号管理权限。
+
+代码与局部界面自动化已完成，完整验证、真实来源访问、桌面真机与正式部署尚待核对；本轮已准备本地服务与受保护的 TMDB 配置文件，不能据此声称来源已启用或影视已上线。Jarvis 只读参考，不迁移旧数据；用户授权复用已有 TMDB 凭据仅限受保护服务端配置。边界见[决策 0008](docs/decisions/0008-media-libraries-and-viewer.md)，配置、备份与验收见[影视手册](docs/runbooks/media.md)。
+
 ## 环境要求
 
 - Bun 1.4.4 或更高（根目录 `package.json` 的 `packageManager`）
@@ -40,7 +46,8 @@ bun run acceptance   # 在 macOS 上真实验收：起好本机环境，等你�
 bun run server:dev   # 只要本地开发用的服务端：数据在 data/local/server，地址 http://127.0.0.1:8787
 bun run dev          # 桌面端的开发运行：Vite 热更新 + 调试构建，连本地开发服务
 bun run admin:dev    # 管理端开发页面：127.0.0.1:1421/admin/，复用本地服务端
-bun run build:frontend # 构建桌面与管理前端，管理资源随服务端镜像发布
+bun run media:dev    # 影视展示站开发页面：127.0.0.1:1422/movies/，复用本地服务端
+bun run build:frontend # 构建桌面、管理端与影视展示站；网页资源随服务端镜像发布
 bun run mcp          # 构建给助手用的入口 target/release/assemble-mcp，连正式服务
 ```
 
@@ -59,7 +66,7 @@ bun run mcp          # 构建给助手用的入口 target/release/assemble-mcp�
 
 管理后台和桌面应用内页面支持简体中文/英语，以及浅色/深色/跟随系统，在账户菜单中切换并保存在本机；管理端未登录页面和桌面发送面板也有入口。默认中文、跟随系统，浏览器身份页、托盘和系统通知保持现有语言；具体边界见[决策 0007](docs/decisions/0007-language-and-appearance.md)。
 
-管理端只在浏览器中访问 `/admin/`，不提供桌面程序，也不要求管理员安装 Assemble。页面按 sidebar-13 的菜单与内容结构显示概览、用户、设备和登录记录，提供查询、分页与用户详情；登录和退出均在网页完成。只有指定且已验证邮箱的超级管理员能够读取数据，不把首个注册者自动提权；初始化与登录见[管理端手册](docs/runbooks/admin.md)。本次没有扩展定时邮件或 RSS。
+管理端只在浏览器中访问 `/admin/`，不提供桌面程序，也不要求管理员安装 Assemble。页面按 sidebar-13 的菜单与内容结构显示概览、用户、设备和登录记录，提供查询、分页与用户详情；本轮源码另新增共享影视维护、合集与统计，正式状态单列在上方。登录和退出均在网页完成。只有指定且已验证邮箱的超级管理员能够读取管理数据、维护共享片库，不把首个注册者自动提权；初始化与登录见[管理端手册](docs/runbooks/admin.md)。本次没有扩展定时邮件或 RSS。
 
 左下角账户菜单的“关于”页展示“正式版本 / 预览版本 / 本地测试 - 版本号.commit号”，下一行显示对应环境的官网地址。版本号与 Git 提交号自动读取；类型与官网统一按构建时的服务地址识别，正常连接时右上角不再重复显示“正式服务”。Windows 的接收位置显示完整目录，Mac 保留“下载/Assemble”等简称；完整约定见[架构说明](docs/architecture.md#主窗口固定展示构建身份)。
 
@@ -98,7 +105,7 @@ target/release/assemble-mcp print-config zcode --name "ZCode 的助手"   # 或 
 ## 目录
 
 ```text
-apps/server/            服务端（axum + SQLite）：账户、登录页、设备、发送、云盘、日程与提醒
+apps/server/            服务端（axum + SQLite）：账户、登录页、设备、发送、云盘、日程与提醒、影视
   migrations/           数据库结构，启动时自动执行
   examples/fake_device  本机验证用的无界面设备
 apps/desktop/           桌面端（Tauri 2）
@@ -106,9 +113,11 @@ apps/desktop/           桌面端（Tauri 2）
   contract/             Rust 与界面共用的状态样本，两侧各自对着它校验
   src-tauri/            应用壳：窗口、托盘、生命周期与具名命令
 apps/mcp/               给助手用的入口 assemble-mcp：标准输入输出上的 MCP 服务端，十个日程与提醒的工具
-apps/admin/             同源管理端（React + Vite）：概览、用户、设备与登录记录
-packages/ui/            两端共用的 shadcn 基础组件、主题与字体
-packages/display/       两端共用的国际化、外观偏好与启动脚本
+apps/admin/             同源网页管理端：概览、用户、设备、登录记录与共享影视维护
+apps/media-web/         同源 /movies/ 影视展示站：海报墙与详情，只读
+packages/media/         影视共享类型、校验、浏览器适配、业务组件与中英字典
+packages/ui/            各界面共用的 shadcn 基础组件、主题与字体
+packages/display/       各界面共用的国际化、外观偏好与启动脚本
 crates/
   assemble-protocol     服务端 ⇄ 桌面端 ⇄ 界面的类型，只有这一份
   assemble-client       桌面端与助手入口访问服务端的唯一出口：HTTP、事件流、回环登录

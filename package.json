@@ -18,9 +18,9 @@
     "server:accounts": "ASSEMBLE_DATA_DIR=data/local/server ASSEMBLE_PUBLIC_ORIGIN=http://127.0.0.1:8787 cargo run -p assemble-server -- list-accounts",
     "acceptance": "bun scripts/acceptance/run.ts",
     "build": "bun run --filter @assemble/desktop build",
-    "build:frontend": "bun run --filter @assemble/desktop build:frontend && bun run admin:build",
+    "build:frontend": "bun run --filter @assemble/desktop build:frontend && bun run admin:build && bun run media:build",
     "mcp": "ASSEMBLE_SERVER_ORIGIN=https://as.yxswy.com cargo build --release -p assemble-mcp",
-    "typecheck": "bun run --filter @assemble/desktop typecheck && bun run --filter @assemble/admin typecheck && bun run --filter @assemble/ui typecheck && bun run --filter @assemble/display typecheck && bun run typecheck:tools",
+    "typecheck": "bun run --filter @assemble/desktop typecheck && bun run --filter @assemble/admin typecheck && bun run --filter @assemble/media-web typecheck && bun run --filter @assemble/media typecheck && bun run --filter @assemble/ui typecheck && bun run --filter @assemble/display typecheck && bun run typecheck:tools",
     "typecheck:tools": "tsc --noEmit",
     "test": "bun test",
     "lint": "biome check .",
@@ -33,7 +33,9 @@
     "rust:clippy:windows": "cargo clippy -p assemble-protocol -p assemble-transfer -p assemble-store -p assemble-device -p assemble-schedule --target x86_64-pc-windows-msvc --all-targets -- -D warnings",
     "verify": "bun scripts/verify/run.ts",
     "admin:dev": "bun run --filter @assemble/admin dev",
-    "admin:build": "bun run --filter @assemble/admin build"
+    "admin:build": "bun run --filter @assemble/admin build",
+    "media:dev": "bun run --filter @assemble/media-web dev",
+    "media:build": "bun run --filter @assemble/media-web build"
   },
   "devDependencies": {
     "@biomejs/biome": "2.6.8",

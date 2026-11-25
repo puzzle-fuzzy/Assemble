@@ -9,6 +9,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@assemble/media": "workspace:*",
     "@assemble/ui": "workspace:*",
     "lucide-react": "1.78.0",
     "react": "19.3.1",

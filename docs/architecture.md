@@ -6,14 +6,14 @@
 
 - **服务端与桌面端都在这个仓库里。** 服务端是 Rust（axum + SQLite），桌面端是 Tauri 2；两者共用一份协议类型。Assemble 完全替换 jarvis，不迁移它的数据。
 - **优先级：文件传输与日程规划。** 文件传输已落地，正式服务已上线；日程规划的第一批（日程、提醒、到点通知）在服务端与桌面端都已写完，给助手用的对话入口（`assemble-mcp`）也写完了，都有自动化测试；手机上的提醒还没有做（[决策 0003](decisions/0003-schedule-first-batch-and-conversational-entry.md)）。宠物、壁纸排在最后。
-- **第一期的端：Windows 与 macOS 桌面端、助手入口 `assemble-mcp` 与只读管理端。** 普通用户网页仍由服务端渲染：邮箱登录、公开注册与验证、GitHub 授权、桌面授权确认、账户（主邮箱、头像、网页改密与找回）。2026-11-25 用户另要求管理端，采用共享 shadcn 的 React 页面，同源发布在 `/admin/`（[决策 0006](decisions/0006-admin-and-shared-sidebar-ui.md)）。原生 iPhone 应用仍未实现（[决策 0003](decisions/0003-schedule-first-batch-and-conversational-entry.md)）。
+- **已有端为 Windows 与 macOS 桌面端、助手入口 `assemble-mcp` 与网页管理端；本轮新增只读影视展示站。** 普通用户身份网页仍由服务端渲染：邮箱登录、公开注册与验证、GitHub 授权、桌面授权确认、账户（主邮箱、头像、网页改密与找回）。管理端同源 `/admin/` 的账号与设备范围仍只读；用户后来确认增加共享影视维护，并新增同源 `/movies/` 海报墙与本人私人库只读展示（[决策 0008](decisions/0008-media-libraries-and-viewer.md)）。影视源码已接入，尚未正式发布。原生 iPhone 应用仍未实现（[决策 0003](decisions/0003-schedule-first-batch-and-conversational-entry.md)）。
 
 ## 结构
 
 ```text
 ┌──────────────────────────── apps/desktop（Tauri 2）────────────────────────────┐
 │  界面（React）：主窗口 · 发送面板                                              │
-│    只调用具名命令、接收状态事件；没有凭据，仅加载白名单 GitHub 头像，路径操作仍由 Rust 负责        │
+│    只调用具名命令、接收状态事件；没有凭据，头像与影视图片按各自受控入口加载，路径操作由 Rust 负责 │
 │      │ invoke（具名命令）                              ▲ 事件（完整状态快照）  │
 │  应用壳（Rust，src-tauri）                                                     │
 │    会话 · 后台任务（收、发、对账）· 传输记录表 · 日程名单                      │
@@ -36,17 +36,21 @@
 
 管理后台与桌面应用内页面共用 `packages/display` 的国际化和外观偏好：首批简体中文/英语，主题为浅色/深色/跟随系统。默认中文、跟随系统，选择只在本机保存，同源桌面窗口同步。两端仍共用 `packages/ui` 的 shadcn 控件、样式和主题入口；不会把语言选择混入账户凭据或 Rust 状态契约。浏览器身份页、托盘和系统通知不在首批范围，约定见[决策 0007](decisions/0007-language-and-appearance.md)。
 
-| 单元                     | 负责                                                                                                                                         | 不负责                             |
-| ------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------- |
-| `assemble-protocol`      | 服务端、桌面端、界面之间全部的类型与纯校验：账户、设备、登录、事件流、发送、云盘、日程、提醒、通知、错误码、服务来源                         | 任何 I/O                           |
-| `assemble-client`        | 桌面端与助手入口访问服务端的唯一出口：固定来源、不跟随重定向、凭据头、超时与取消、流式上传下载、事件流的重连、系统浏览器登录的回环回调       | 业务规则                           |
-| `assemble-transfer`      | 边读边算的摘要；暂存文件；校验后以硬链接发布，绝不覆盖。服务端与桌面端共用                                                                   | 判断目录能不能写                   |
-| `assemble-device`        | 这台电脑落盘的边界：接收目录、文件名收敛、同名加序号、一次接收的落盘规则、清扫中断留下的暂存文件；右键菜单的参数与注册表                     | 网络、窗口                         |
-| `assemble-store`         | 设置文件的原子私有写入；密钥存储抽象（系统钥匙串 / 内存）                                                                                    | 决定存什么                         |
-| `assemble-schedule`      | 日程出现规则的推算：一条日程在某段时间里出现在哪几场、某个时刻是不是它的一场。服务端的调度、桌面端的名单展开、助手看到的名单与撞车判断共用它 | 决定什么时候提醒、提醒谁           |
-| `apps/server`            | 账户、公开邮箱注册与验证、GitHub 登录、网页改密码与找回、桌面授权、设备与在线状态、发送、云盘、日程与提醒的存取和到点调度、定时清理          | 文件怎么存到用户的电脑上           |
-| `apps/desktop/src-tauri` | 窗口、托盘、生命周期、会话、后台任务、传输记录、日程名单、通知、设置与具名命令                                                               | 把规则再写一遍                     |
-| `apps/mcp`               | 给助手用的入口 `assemble-mcp`：标准输入输出上的 MCP 服务端、十个日程与提醒的工具、以一台设备的身份登录、给助手看的名单与说法                 | 理解与排程（不含模型）、文件、窗口 |
+影视的管理端、桌面端与 `/movies/` 展示站共用 `packages/media` 的 DTO、校验、业务组合和 `media` 中英字典，基础组件仍只有 `packages/ui` 一份，外观复用同一个 display 实例。ToC 自有文案注册 `mediaSite`；同源网页共用本机偏好，桌面保持自己的本机偏好。
+
+| 单元                     | 负责                                                                                                                                                         | 不负责                             |
+| ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------- |
+| `assemble-protocol`      | 服务端、桌面端、界面之间全部的类型与纯校验：账户、设备、登录、事件流、发送、云盘、日程、提醒、通知、错误码、服务来源                                         | 任何 I/O                           |
+| `assemble-client`        | 桌面端与助手入口访问服务端的唯一出口：固定来源、不跟随重定向、凭据头、超时与取消、流式上传下载、事件流的重连、系统浏览器登录的回环回调                       | 业务规则                           |
+| `assemble-transfer`      | 边读边算的摘要；暂存文件；校验后以硬链接发布，绝不覆盖。服务端与桌面端共用                                                                                   | 判断目录能不能写                   |
+| `assemble-device`        | 这台电脑落盘的边界：接收目录、文件名收敛、同名加序号、一次接收的落盘规则、清扫中断留下的暂存文件；右键菜单的参数与注册表                                     | 网络、窗口                         |
+| `assemble-store`         | 设置文件的原子私有写入；密钥存储抽象（系统钥匙串 / 内存）                                                                                                    | 决定存什么                         |
+| `assemble-schedule`      | 日程出现规则的推算：一条日程在某段时间里出现在哪几场、某个时刻是不是它的一场。服务端的调度、桌面端的名单展开、助手看到的名单与撞车判断共用它                 | 决定什么时候提醒、提醒谁           |
+| `apps/server`            | 账户、公开邮箱注册与验证、GitHub 登录、网页改密码与找回、桌面授权、设备与在线状态、发送、云盘、日程与提醒的存取和到点调度、影视权限/来源/图片/任务、定时清理 | 文件怎么存到用户的电脑上           |
+| `apps/desktop/src-tauri` | 窗口、托盘、生命周期、会话、后台任务、传输记录、日程名单、通知、设置与具名命令                                                                               | 把规则再写一遍                     |
+| `apps/mcp`               | 给助手用的入口 `assemble-mcp`：标准输入输出上的 MCP 服务端、十个日程与提醒的工具、以一台设备的身份登录、给助手看的名单与说法                                 | 理解与排程（不含模型）、文件、窗口 |
+| `packages/media`         | 三端共用的影视 TypeScript DTO/响应校验、业务组件、中英字典及 Cookie 浏览器适配                                                                               | 保存设备令牌、直接调用 Tauri       |
+| `apps/media-web`         | `/movies/` 海报墙、详情、状态筛选、演员作品与合集等只读展示                                                                                                  | 影视维护、处理密码、任意网页托管   |
 
 ## 服务端
 
@@ -54,15 +58,17 @@
 
 没有配置文件，全部来自环境变量（业务配置用 `ASSEMBLE_`，邮件与 OAuth 使用 `SMTP_*`、`GITHUB_*`）。没有配置文件、必须显式给出数据目录与对外地址，是因为猜错它们的后果比启动失败更糟。
 
-| 环境变量                     | 说明                                           | 默认             |
-| ---------------------------- | ---------------------------------------------- | ---------------- |
-| `ASSEMBLE_DATA_DIR`          | 数据放在哪里                                   | 必填             |
-| `ASSEMBLE_PUBLIC_ORIGIN`     | 浏览器访问服务端的地址，决定 Cookie 与来源校验 | 必填             |
-| `ASSEMBLE_ADDR`              | 监听地址，默认只监听本机、由反向代理转发       | `127.0.0.1:8787` |
-| `ASSEMBLE_DRIVE_QUOTA_BYTES` | 每个账户的云盘上限                             | 2 GiB            |
-| `ASSEMBLE_SEND_TTL_HOURS`    | 未送达的发送保留多久                           | 24 小时          |
-| `ASSEMBLE_SEND_HISTORY_DAYS` | 发送记录保留多久                               | 30 天            |
-| `ASSEMBLE_WEB_SESSION_HOURS` | 网页登录状态保留多久                           | 12 小时          |
+| 环境变量                                           | 说明                                           | 默认                       |
+| -------------------------------------------------- | ---------------------------------------------- | -------------------------- |
+| `ASSEMBLE_DATA_DIR`                                | 数据放在哪里                                   | 必填                       |
+| `ASSEMBLE_PUBLIC_ORIGIN`                           | 浏览器访问服务端的地址，决定 Cookie 与来源校验 | 必填                       |
+| `ASSEMBLE_ADDR`                                    | 监听地址，默认只监听本机、由反向代理转发       | `127.0.0.1:8787`           |
+| `ASSEMBLE_DRIVE_QUOTA_BYTES`                       | 每个账户的云盘上限                             | 2 GiB                      |
+| `ASSEMBLE_SEND_TTL_HOURS`                          | 未送达的发送保留多久                           | 24 小时                    |
+| `ASSEMBLE_SEND_HISTORY_DAYS`                       | 发送记录保留多久                               | 30 天                      |
+| `ASSEMBLE_WEB_SESSION_HOURS`                       | 网页登录状态保留多久                           | 12 小时                    |
+| `ASSEMBLE_TMDB_TOKEN` / `ASSEMBLE_TMDB_TOKEN_FILE` | 受保护的 TMDB 凭据；环境值与文件模式二选一     | 可选，不配置时 TMDB 不可用 |
+| `ASSEMBLE_MEDIA_WEB_ASSETS_DIR`                    | 固定第一方影视展示程序的构建目录               | 本地 `apps/media-web/dist` |
 
 命令行有 `serve`、`check-config`（读取配置并连接数据库，应用迁移和指定管理员初始化后退出）、`create-account`（密码从终端读两遍，永不当参数传入；建立待绑定的旧式账户）、`set-password`、`list-accounts` 和 `grant-super-admin <已验证邮箱>`。管理员配置使用受保护环境变量 `ASSEMBLE_SUPER_ADMIN_EMAIL`；静态管理资源由 `ASSEMBLE_ADMIN_ASSETS_DIR` 指定，本地默认 `apps/admin/dist`，镜像内固定 `/usr/share/assemble/admin`。
 
@@ -78,14 +84,14 @@
 
 正式服务在 2026-11-24 上线：<https://as.yxswy.com>，Docker Compose 加 nginx。材料在 `deploy/`；做过的与还没有验证过的见[部署手册](runbooks/deploy.md)。
 
-| 文件                 | 做什么                                                                                                                               |
-| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
-| `Dockerfile`         | Bun 构建共享 UI 管理端、官方 Rust 编译服务端、Debian slim 以专用账户运行。Rust 版本与工具链一致，SQLite 静态编入，管理资源随镜像发布 |
-| `compose.yaml`       | 一个服务。端口只绑在本机的 `127.0.0.1:8787`，交给反向代理；镜像与数据的位置由 `.env` 决定；日志自动轮转                              |
-| `compose.build.yaml` | 只在本机自己构建镜像时叠加到 `compose.yaml` 上                                                                                       |
-| `.env.example`       | 配置模板：镜像、数据位置、对外地址必填，其余都可以不填                                                                               |
-| `nginx.conf.example` | TLS 在这里结束。上传上限 110 MB，请求体不缓冲，`/v1/events` 的长连接关掉缓冲、放宽读超时。与正式服务器上的那一份只差域名             |
-| `push-image.sh`      | 把持续集成构建的镜像经 SSH 送到服务器上。服务器在国内，直接拉 GitHub 的镜像仓库会握手超时                                            |
+| 文件                 | 做什么                                                                                                                                           |
+| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `Dockerfile`         | Bun 构建共享 UI 管理端与影视展示站、官方 Rust 编译服务端、Debian slim 以专用账户运行。Rust 版本与工具链一致，SQLite 静态编入，网页资源随镜像发布 |
+| `compose.yaml`       | 一个服务。端口只绑在本机的 `127.0.0.1:8787`，交给反向代理；镜像与数据的位置由 `.env` 决定；日志自动轮转                                          |
+| `compose.build.yaml` | 只在本机自己构建镜像时叠加到 `compose.yaml` 上                                                                                                   |
+| `.env.example`       | 配置模板：镜像、数据位置、对外地址必填，其余都可以不填                                                                                           |
+| `nginx.conf.example` | TLS 在这里结束。上传上限 110 MB，请求体不缓冲，`/v1/events` 的长连接关掉缓冲、放宽读超时。与正式服务器上的那一份只差域名                         |
+| `push-image.sh`      | 把持续集成构建的镜像经 SSH 送到服务器上。服务器在国内，直接拉 GitHub 的镜像仓库会握手超时                                                        |
 
 服务端不读转发头：在它看来所有请求都来自反向代理。
 
@@ -117,6 +123,20 @@
 - **同一场只提醒一次。** 通知的主键就是"哪一条日程、哪一场"（提醒是它自己的标识），登记与生成是同一条插入，任务跑重了、服务端重启了都插不进第二条。调度每十秒一轮；离开提醒时刻超过十分钟、或者这一场已经结束的，不再提醒；提醒不管晚了多久都补。
 - **改过之后，旧的提醒不再补发。** 取消、完成、删除之后，还没读的通知作废；只改标题、地点、备注的，通知原地换新；改了时间或重复规则的，按新规则不再成立的那几场作废。
 - **通知只标已读，不删除。** 一处标了，别的设备在下一份名单里就看不到它。三十天之前的由定时清理删掉。
+
+### 影视库与展示站
+
+影视服务在 `apps/server/src/media/`：权限、条目归属、来源适配、资产发布与导入任务分别执行，不让处理器自行拼另一套 DTO。`assemble-protocol::media` 定义共享契约，`assemble-client` 提供桌面方法；Rust 与 TypeScript 共读 `packages/media/contract` 样本。
+
+共享与私人是独立片库，来源身份在各自归属范围内去重，两者均支持 `planned/watching/completed`。匿名可读共享内容，但服务端删除 `magnetUri`，共享备注也只给管理员；私人条目、图集和观看信息只给所属账户。合集只引用共享条目，统计只聚合共享库。来源详情和演员作品不携带某个私人库是否已收录的信息。
+
+公开读取位于 `/v1/media/shared/entries`、`/v1/media/collections` 与 catalog 相关接口，私人读写位于 `/v1/media/private`。共享写入、共享任务与统计位于 `/v1/admin/media`，逐次验证邮箱、管理员、同源与写入 CSRF，设备令牌不能访问。浏览器只使用 HttpOnly Cookie；桌面只经 Rust 具名方法使用设备身份，应用壳拒绝共享写入。
+
+TMDB 凭据仅在服务端的受保护环境或文件里。豆瓣公开来源遇到限制时返回稳定错误，不读取私人 Cookie。来源只访问固定 HTTPS 主机，图片大小、解码与总像素受限，校验后在事务里发布原图及 `200/360/480` 衍生图；响应带长度与摘要。匿名读取资产还必须有共享引用或未过期的公开来源缓存引用，不能猜测 assetId 读取私人或暂存图片。桌面 `media_image` 核对后返回数据 URL，界面不拿到令牌、任意远程图片地址或本地路径；`media_copy_magnet` 按条目标识重新授权后复制。
+
+`0005_media.sql` 新增条目、来源身份、资产、任务、幂等记录与合集，不修改旧迁移。影视图片为 SQLite 的 `media_asset_variants.content` BLOB，备份必须包含数据库本体与已有文件目录，不能将 `blobs/` 当作全部影视资产。导入持久化真实阶段和项目数量，未知进度不造百分比；版本冲突拒绝覆盖，重试按提交结果是否已知区分幂等续查与新尝试。
+
+`apps/media-web` 构建为同源 `/movies/`，运行时默认目录 `apps/media-web/dist`，镜像 `/usr/share/assemble/movies`。它是固定第一方应用，复用本站登录并回到固定 `/movies/`，没有维护操作，也不是任意用户内容托管。Jarvis 只读参考，不迁移账号、片库或站点；用户仅授权将已有 TMDB 凭据复制到受保护的 Assemble 配置。本轮代码已实现条目、导入、图集、封面、演员、合集、统计和三端接线，完整验证、真实来源、真机与正式发布仍待实际记录。详见[决策 0008](decisions/0008-media-libraries-and-viewer.md)与[影视手册](runbooks/media.md)。
 
 ## 桌面端
 
@@ -282,7 +302,7 @@ target/release/assemble-mcp print-config zcode --name "ZCode 的助手"
 ## 安全边界
 
 - **界面。** 两个窗口的能力清单都只有 `core:event:allow-listen` 与 `allow-unlisten`。内容安全策略限定脚本与样式只来自应用自身，连接只允许 IPC。对话框、通知、文件定位都只从 Rust 这边用。
-- **命令。** 界面能调用的只有这 42 个：`snapshot`、`sign_in`、`cancel_sign_in`、`sign_out`、`launch_at_login`、`set_launch_at_login`、`rename_device`、`remove_device`、`choose_receive_folder`、`reset_receive_folder`、`reveal_received`、`start_send`、`send_to_device`、`send_to_drive`、`close_send_panel`、`open_main`、`cancel_transfer`、`retry_transfer`、`drive_refresh`、`drive_upload`、`drive_download`、`drive_delete`、`set_send_menu`、`dismiss_notice`、`planner_refresh`、`schedule_create`、`schedule_update`、`schedule_complete`、`schedule_cancel`、`schedule_reopen`、`schedule_delete`、`reminder_create`、`reminder_update`、`reminder_dismiss`、`reminder_cancel`、`reminder_delete`、`notifications_read`、`notifications_read_all`、`planner_focus`、`planner_compose`、`set_planner_muted`。命令失败只返回稳定错误码。
+- **命令。** 界面只调用具名命令。原有设备、文件与日程命令包括：`snapshot`、`sign_in`、`cancel_sign_in`、`sign_out`、`launch_at_login`、`set_launch_at_login`、`rename_device`、`remove_device`、`choose_receive_folder`、`reset_receive_folder`、`reveal_received`、`start_send`、`send_to_device`、`send_to_drive`、`close_send_panel`、`open_main`、`cancel_transfer`、`retry_transfer`、`drive_refresh`、`drive_upload`、`drive_download`、`drive_delete`、`set_send_menu`、`dismiss_notice`、`planner_refresh`、`schedule_create`、`schedule_update`、`schedule_complete`、`schedule_cancel`、`schedule_reopen`、`schedule_delete`、`reminder_create`、`reminder_update`、`reminder_dismiss`、`reminder_cancel`、`reminder_delete`、`notifications_read`、`notifications_read_all`、`planner_focus`、`planner_compose`、`set_planner_muted`。影视另有 `media_capabilities`、`media_list`、`media_get`、`media_create`、`media_update`、`media_remove`、`media_search`、`media_catalog`、`media_actor`、`media_import`、`media_job`、`media_gallery`、`media_sync_gallery`、`media_select_poster`、`media_image`、`media_copy_magnet`；其中写入仅支持私人范围。命令失败只返回稳定错误码。
 - **标识，不是操作路径。** 界面引用一条传输、一个云盘文件、一台设备、一条日程、一条提醒、一条通知，用的都是标识。文件的位置由系统选择器、右键菜单或拖放直接交给 Rust；唯一的显示例外是 Windows 的接收目录文字，不能把它传回作为文件操作参数。
 - **助手。** `assemble-mcp` 只有上面那十个具名工具，全部围着日程、提醒与通知；没有文件、云盘，也没有"随便调一个接口"的工具。新增能力时在 `apps/mcp` 里加工具并补测试。它不碰窗口，也不接收文件路径。
 - **凭据。** 设备令牌存在系统钥匙串里，条目名按服务来源区分；助手的登录是另一条条目，账号位是助手的名字，不会顶掉桌面应用的。令牌、Cookie、密码、SMTP 授权码与 OAuth Secret 不进桌面界面、日志、命令返回值与状态；邮件凭据只存摘要，密钥只在受保护环境或文件中；写操作的网页表单都要来自本站，并带着与 Cookie 或会话成对的随机值；`assemble-mcp status` 与工具的返回值里都不出现令牌，它的标准输出上只有协议消息，日志一律写标准错误。
@@ -297,7 +317,7 @@ target/release/assemble-mcp print-config zcode --name "ZCode 的助手"
 | 助手的登录         | 系统钥匙串，服务名 `assemble.mcp-session:<服务来源>`，账号位是助手的名字 | `assemble-mcp logout` 时删除；在别处被移除之后这条还留着，`status` 如实说它已失效 |
 | 本机设置           | 应用数据目录下的 `settings.json`                                         | 接收位置、右键菜单开关、这台电脑弹不弹提醒、已经弹过哪些通知；不随账户变化        |
 | 收到的文件         | "下载/Assemble"，或用户选的文件夹                                        | 只在 Rust 里记着完整位置                                                          |
-| 服务端的数据       | 数据目录下的 `assemble.sqlite3` 与 `blobs/`                              | 结构只经迁移脚本改动                                                              |
+| 服务端的数据       | 数据目录下的 `assemble.sqlite3` 与 `blobs/`                              | 结构只经迁移脚本改动；影视图片原图/衍生图为 SQLite BLOB，不在 `blobs/`            |
 | 设备令牌（服务端） | 数据库里只存摘要                                                         | 密码只以 argon2id 散列保存                                                        |
 | Windows 右键菜单   | `HKCU\Software\Classes\*\shell\AssembleSend`                             | 指向这个可执行文件，不需要管理员权限                                              |
 

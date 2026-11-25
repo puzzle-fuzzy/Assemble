@@ -695,6 +695,25 @@ impl Client {
 
     // ---- 发送管线 ----
 
+    pub(crate) async fn media_request(
+        &self,
+        method: Method,
+        path: &str,
+        query: Vec<(&'static str, String)>,
+        payload: Option<Value>,
+        options: &RequestOptions<'_>,
+    ) -> Result<reqwest::Response, ClientError> {
+        let call = Call {
+            method,
+            path,
+            query,
+            payload: payload.map_or(Payload::None, Payload::Json),
+            authenticated: self.has_bearer(),
+            headers: Vec::new(),
+        };
+        checked(self.send(call, options.budget(), options.cancel).await?).await
+    }
+
     /// 发出请求，校验状态，再按约定结构解析。
     async fn call_json<T: DeserializeOwned>(
         &self,

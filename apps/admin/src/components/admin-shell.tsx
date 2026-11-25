@@ -32,22 +32,29 @@ import {
 import { SidebarAccountMenu } from "@assemble/ui/sidebar-account-menu";
 import {
   ChartNoAxesCombinedIcon,
+  FilmIcon,
   LogOutIcon,
   LogsIcon,
   MenuIcon,
   MonitorIcon,
   UsersIcon,
 } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import type { AccessFailure, AdminSession } from "../lib/api";
 import { useAdminTranslation } from "../lib/i18n";
+import { LoadingContent } from "./feedback";
 import { DevicesPage, LoginsPage, OverviewPage, UsersPage } from "./pages";
+
+const MediaPage = lazy(async () => ({
+  default: (await import("./media-page")).MediaPage,
+}));
 
 const navigation = [
   { key: "overview", icon: ChartNoAxesCombinedIcon },
   { key: "users", icon: UsersIcon },
   { key: "devices", icon: MonitorIcon },
   { key: "logins", icon: LogsIcon },
+  { key: "media", icon: FilmIcon },
 ] as const;
 
 type View = (typeof navigation)[number]["key"];
@@ -257,6 +264,11 @@ export function AdminShell({
           )}
           {view === "logins" && (
             <LoginsPage onAccessFailure={onAccessFailure} />
+          )}
+          {view === "media" && (
+            <Suspense fallback={<LoadingContent />}>
+              <MediaPage session={session} onAccessFailure={onAccessFailure} />
+            </Suspense>
           )}
         </div>
       </main>
