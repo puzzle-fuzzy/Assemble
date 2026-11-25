@@ -11,13 +11,17 @@ COPY package.json bun.lock bunfig.toml ./
 COPY apps/desktop/package.json apps/desktop/package.json
 COPY apps/admin/package.json apps/admin/package.json
 COPY apps/browser-extension/package.json apps/browser-extension/package.json
+COPY apps/media-web/package.json apps/media-web/package.json
+COPY packages/media/package.json packages/media/package.json
 COPY packages/ui/package.json packages/ui/package.json
 COPY packages/display/package.json packages/display/package.json
 RUN bun install --frozen-lockfile
 COPY apps/admin/ apps/admin/
+COPY apps/media-web/ apps/media-web/
+COPY packages/media/ packages/media/
 COPY packages/ui/ packages/ui/
 COPY packages/display/ packages/display/
-RUN bun run admin:build
+RUN bun run admin:build && bun run media:build
 
 # ---- 构建：官方 Rust 镜像自带编译 C 代码要用的工具链 ----
 # 版本与仓库根目录的 rust-toolchain.toml 一致（官方镜像不用 rustup，那个文件在这里不生效）。升级时两处一起改。
@@ -32,9 +36,10 @@ COPY apps/desktop/src-tauri/ apps/desktop/src-tauri/
 COPY apps/mcp/ apps/mcp/
 # 编译产物与下载的依赖放在缓存卷里，不进镜像层；成品拷出来交给下一阶段。
 ENV CARGO_TARGET_DIR=/target
+ARG CARGO_BUILD_JOBS=2
 RUN --mount=type=cache,target=/target \
     --mount=type=cache,target=/usr/local/cargo/registry \
-    cargo build --release --locked -p assemble-server --bin assemble-server \
+    CARGO_BUILD_JOBS="${CARGO_BUILD_JOBS}" cargo build --release --locked -p assemble-server --bin assemble-server \
     && mkdir /out \
     && cp /target/release/assemble-server /out/
 
@@ -49,13 +54,15 @@ RUN apt-get update \
     && chown assemble:assemble /var/lib/assemble
 COPY --from=build /out/assemble-server /usr/local/bin/assemble-server
 COPY --from=admin /src/apps/admin/dist/ /usr/share/assemble/admin/
+COPY --from=admin /src/apps/media-web/dist/ /usr/share/assemble/movies/
 # 从这里起以专用账户运行；少了这一行，容器会以 root 跑。
 USER assemble:assemble
 
 # 容器里的回环地址外面连不上，所以监听所有网卡；对不对外，由部署时的端口映射与反向代理决定。
 ENV ASSEMBLE_DATA_DIR=/var/lib/assemble \
     ASSEMBLE_ADDR=0.0.0.0:8787 \
-    ASSEMBLE_ADMIN_ASSETS_DIR=/usr/share/assemble/admin
+    ASSEMBLE_ADMIN_ASSETS_DIR=/usr/share/assemble/admin \
+    ASSEMBLE_MEDIA_WEB_ASSETS_DIR=/usr/share/assemble/movies
 EXPOSE 8787
 VOLUME /var/lib/assemble
 

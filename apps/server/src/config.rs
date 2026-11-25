@@ -28,6 +28,7 @@ pub const WEB_SESSION_HOURS: &str = "ASSEMBLE_WEB_SESSION_HOURS";
 pub const SUPER_ADMIN_EMAIL: &str = "ASSEMBLE_SUPER_ADMIN_EMAIL";
 /// 与服务端同源发布的管理端构建目录，不包含任何账户数据。
 pub const ADMIN_ASSETS_DIR: &str = "ASSEMBLE_ADMIN_ASSETS_DIR";
+pub const MEDIA_WEB_ASSETS_DIR: &str = "ASSEMBLE_MEDIA_WEB_ASSETS_DIR";
 pub const DEFAULT_ADDR: &str = "127.0.0.1:8787";
 pub const DEFAULT_DRIVE_QUOTA_BYTES: u64 = 2 * 1024 * 1024 * 1024;
 pub const DEFAULT_SEND_TTL: Duration = Duration::from_hours(24);
@@ -52,6 +53,8 @@ pub struct Config {
     pub github: Option<crate::github::GithubConfig>,
     pub super_admin_email: Option<String>,
     pub admin_assets_dir: PathBuf,
+    pub media: crate::media::MediaConfig,
+    pub media_web_assets_dir: PathBuf,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -171,6 +174,7 @@ impl Config {
             web_session_ttl,
             smtp: crate::mail::SmtpConfig::from_lookup(&get)?,
             github: crate::github::GithubConfig::from_lookup(&get)?,
+            media: crate::media::MediaConfig::from_lookup(&get)?,
             super_admin_email: optional(SUPER_ADMIN_EMAIL, get(SUPER_ADMIN_EMAIL), |value| {
                 crate::email_identity::normalize_email(value)
                     .map_err(|_| "必须是合法邮箱".to_owned())
@@ -178,6 +182,9 @@ impl Config {
             admin_assets_dir: get(ADMIN_ASSETS_DIR)
                 .filter(|value| !value.trim().is_empty())
                 .map_or_else(|| PathBuf::from("apps/admin/dist"), PathBuf::from),
+            media_web_assets_dir: get(MEDIA_WEB_ASSETS_DIR)
+                .filter(|value| !value.trim().is_empty())
+                .map_or_else(|| PathBuf::from("apps/media-web/dist"), PathBuf::from),
         })
     }
 
@@ -193,8 +200,10 @@ impl Config {
             web_session_ttl: DEFAULT_WEB_SESSION_TTL,
             smtp: None,
             github: None,
+            media: crate::media::MediaConfig::default(),
             super_admin_email: None,
             admin_assets_dir: PathBuf::from("apps/admin/dist"),
+            media_web_assets_dir: PathBuf::from("apps/media-web/dist"),
         }
     }
 

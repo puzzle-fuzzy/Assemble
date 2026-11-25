@@ -1,4 +1,11 @@
 {
+  "moviesAndTV": "Movies & TV",
+  "loadingMediaLibrary": "Loading library…",
+  "mediaLibraryScope": "Media library scope",
+  "sharedMediaLibrary": "Shared library",
+  "privateMediaLibrary": "My library",
+  "signInForPrivateLibrary": "Sign in to manage your library",
+  "privateLibraryDescription": "Your watchlist, watching and completed records are visible only to you.",
   "browserSignInTimedOutPleaseTryAgain": "Browser sign-in timed out. Please try again.",
   "signInNotifications": "Sign-in notifications",
   "signInToAssemble": "Sign in to Assemble",

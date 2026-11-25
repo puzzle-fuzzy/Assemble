@@ -64,7 +64,8 @@ impl std::fmt::Display for ApiError {
 
 impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
-        (
+        let retry_after = self.code == "MEDIA_CATALOG_RATE_LIMITED";
+        let mut response = (
             self.status,
             Json(ApiErrorBody {
                 error: ApiErrorDetail {
@@ -73,7 +74,14 @@ impl IntoResponse for ApiError {
                 },
             }),
         )
-            .into_response()
+            .into_response();
+        if retry_after {
+            response.headers_mut().insert(
+                axum::http::header::RETRY_AFTER,
+                axum::http::HeaderValue::from_static("60"),
+            );
+        }
+        response
     }
 }
 

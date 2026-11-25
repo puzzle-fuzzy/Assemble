@@ -19,6 +19,7 @@ pub mod client;
 pub mod error;
 pub mod events;
 pub mod login;
+pub mod media;
 
 pub use assemble_protocol::origin::{OriginError, ServerOrigin};
 pub use client::{

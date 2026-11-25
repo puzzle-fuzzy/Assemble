@@ -43,11 +43,13 @@ pub struct AppState {
     pub mailer: Arc<dyn crate::mail::Mailer>,
     pub github_flows: crate::github::Flows,
     pub github_provider: Arc<dyn crate::github::Provider>,
+    pub media: Arc<crate::media::jobs::Runtime>,
 }
 
 impl AppState {
     pub fn new(pool: SqlitePool, config: Config) -> Self {
         Self {
+            media: Arc::new(crate::media::jobs::Runtime::new(config.media.clone())),
             mailer: Arc::new(crate::mail::SmtpMailer(config.smtp.clone())),
             github_flows: crate::github::Flows::default(),
             github_provider: Arc::new(crate::github::GithubProvider(config.github.clone())),
@@ -70,6 +72,8 @@ fn upload_limit() -> usize {
 
 #[derive(Debug, thiserror::Error)]
 pub enum ServeError {
+    #[error("media job recovery failed")]
+    MediaRecovery,
     #[error("the address could not be listened on: {0}")]
     Bind(#[from] std::io::Error),
     #[error("the HTTP server stopped unexpectedly: {0}")]
@@ -91,7 +95,11 @@ pub fn router(state: Shared) -> Router {
         .route(READY_PATH, get(ready))
         .merge(browser_routes)
         .merge(crate::admin::routes())
+        .merge(crate::media::routes())
         .merge(crate::admin_assets::routes(&state.config.admin_assets_dir))
+        .merge(crate::media_web_assets::routes(
+            &state.config.media_web_assets_dir,
+        ))
         // 桌面端的接口
         .route(EXCHANGE_PATH, post(crate::desktop_login::exchange))
         .route("/v1/me", get(crate::devices::me))
@@ -232,6 +240,11 @@ pub async fn serve_until(
     stop: CancellationToken,
     grace: Duration,
 ) -> Result<(), ServeError> {
+    state
+        .media
+        .recover(&state)
+        .await
+        .map_err(|_| ServeError::MediaRecovery)?;
     let closing = Arc::clone(&state);
     let waiting = stop.clone();
     let shutdown = async move {
@@ -239,6 +252,7 @@ pub async fn serve_until(
         tracing::info!("shutting down");
         // 事件流是永不主动结束的长连接。不先收掉它们，优雅退出会一直等下去。
         closing.hub.close();
+        closing.media.shutdown(&closing.pool).await;
     };
     let patience = async move {
         stop.cancelled().await;

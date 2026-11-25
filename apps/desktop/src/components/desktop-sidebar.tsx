@@ -26,6 +26,7 @@ import {
   CalendarClock,
   Cloud,
   Download,
+  Film,
   InfoIcon,
   LogOutIcon,
   MenuIcon,
@@ -42,6 +43,7 @@ export function desktopModules() {
     { id: "transfers", label: uiText("fileTransfers"), icon: ArrowLeftRight },
     { id: "drive", label: uiText("cloudDrive"), icon: Cloud },
     { id: "downloads", label: downloadText("title"), icon: Download },
+    { id: "media", label: uiText("moviesAndTV"), icon: Film },
     {
       id: "planner",
       label: uiText("schedulesAndReminders"),

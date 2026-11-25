@@ -8,6 +8,8 @@
 !packages/ui/**
 !packages/display/
 !packages/display/**
+!packages/media/
+!packages/media/**
 !Cargo.toml
 !Cargo.lock
 !crates/
@@ -28,6 +30,8 @@
 !apps/admin/**
 !apps/browser-extension/
 !apps/browser-extension/package.json
+!apps/media-web/
+!apps/media-web/**
 **/node_modules
 **/dist
 **/data

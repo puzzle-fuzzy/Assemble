@@ -887,9 +887,385 @@ fn is_server_code(code: &str) -> bool {
             .all(|byte| byte.is_ascii_uppercase() || byte == b'_')
 }
 
+// 影视查询按会话分界：退出或切换账户后，旧请求不能把私人内容交给新页面。
+struct MediaCall {
+    epoch: u64,
+    cancel: tokio_util::sync::CancellationToken,
+}
+
+impl MediaCall {
+    fn new<R: tauri::Runtime>(state: &AppState<R>) -> Self {
+        Self {
+            epoch: *state.session_changes().borrow(),
+            cancel: if state.device_id().is_some() {
+                state.session_cancel()
+            } else {
+                state.lifetime.child_token()
+            },
+        }
+    }
+
+    fn finish<T, R: tauri::Runtime>(
+        &self,
+        state: &AppState<R>,
+        result: Result<T, assemble_client::ClientError>,
+    ) -> Result<T, CommandError> {
+        if self.cancel.is_cancelled() || *state.session_changes().borrow() != self.epoch {
+            return Err(CommandError::local(
+                "CANCELLED",
+                "the media session changed",
+            ));
+        }
+        result.map_err(|error| {
+            if error.is_unauthorized() {
+                session::revoked(state);
+            }
+            CommandError::from(&error)
+        })
+    }
+}
+
+use assemble_protocol::media::{
+    MediaActorCredits, MediaCandidate, MediaCapabilities, MediaCreate, MediaEntry, MediaGallery,
+    MediaIdentity, MediaImport, MediaJob, MediaList, MediaPersonIdentity, MediaPoster,
+    MediaProvider, MediaQuery, MediaScope, MediaSync, MediaType, MediaUpdate,
+};
+
+#[tauri::command]
+pub async fn media_capabilities(app: AppHandle) -> Result<MediaCapabilities, CommandError> {
+    let state = app.state::<AppState>();
+    let call = MediaCall::new(&state);
+    call.finish(
+        &state,
+        state
+            .client
+            .media_capabilities(&RequestOptions::new(&call.cancel))
+            .await,
+    )
+}
+#[tauri::command]
+pub async fn media_list(
+    app: AppHandle,
+    scope: MediaScope,
+    query: MediaQuery,
+) -> Result<MediaList, CommandError> {
+    let state = app.state::<AppState>();
+    let call = MediaCall::new(&state);
+    call.finish(
+        &state,
+        state
+            .client
+            .media_list(scope, &query, &RequestOptions::new(&call.cancel))
+            .await,
+    )
+}
+#[tauri::command]
+pub async fn media_get(
+    app: AppHandle,
+    scope: MediaScope,
+    id: String,
+) -> Result<MediaEntry, CommandError> {
+    let state = app.state::<AppState>();
+    let call = MediaCall::new(&state);
+    call.finish(
+        &state,
+        state
+            .client
+            .media_get(scope, &id, &RequestOptions::new(&call.cancel))
+            .await,
+    )
+}
+// 桌面只维护自己的片库；即便界面参数被篡改，也没有共享维护入口。
+#[tauri::command]
+pub async fn media_create(app: AppHandle, input: MediaCreate) -> Result<MediaEntry, CommandError> {
+    let state = app.state::<AppState>();
+    let call = MediaCall::new(&state);
+    call.finish(
+        &state,
+        state
+            .client
+            .media_create(
+                MediaScope::Private,
+                &input,
+                &RequestOptions::new(&call.cancel),
+            )
+            .await,
+    )
+}
+#[tauri::command]
+pub async fn media_update(
+    app: AppHandle,
+    id: String,
+    input: MediaUpdate,
+) -> Result<MediaEntry, CommandError> {
+    let state = app.state::<AppState>();
+    let call = MediaCall::new(&state);
+    call.finish(
+        &state,
+        state
+            .client
+            .media_update(
+                MediaScope::Private,
+                &id,
+                &input,
+                &RequestOptions::new(&call.cancel),
+            )
+            .await,
+    )
+}
+#[tauri::command]
+pub async fn media_remove(app: AppHandle, id: String, version: u64) -> Result<(), CommandError> {
+    let state = app.state::<AppState>();
+    let call = MediaCall::new(&state);
+    call.finish(
+        &state,
+        state
+            .client
+            .media_remove(
+                MediaScope::Private,
+                &id,
+                version,
+                &RequestOptions::new(&call.cancel),
+            )
+            .await,
+    )
+}
+#[tauri::command]
+pub async fn media_search(
+    app: AppHandle,
+    provider: MediaProvider,
+    media_type: MediaType,
+    q: String,
+) -> Result<Vec<MediaCandidate>, CommandError> {
+    let state = app.state::<AppState>();
+    let call = MediaCall::new(&state);
+    call.finish(
+        &state,
+        state
+            .client
+            .media_search(provider, media_type, &q, &RequestOptions::new(&call.cancel))
+            .await,
+    )
+}
+#[tauri::command]
+pub async fn media_catalog(
+    app: AppHandle,
+    identity: MediaIdentity,
+) -> Result<MediaCandidate, CommandError> {
+    let state = app.state::<AppState>();
+    let call = MediaCall::new(&state);
+    call.finish(
+        &state,
+        state
+            .client
+            .media_catalog(&identity, &RequestOptions::new(&call.cancel))
+            .await,
+    )
+}
+#[tauri::command]
+pub async fn media_actor(
+    app: AppHandle,
+    identity: MediaPersonIdentity,
+    media_type: MediaType,
+) -> Result<MediaActorCredits, CommandError> {
+    let state = app.state::<AppState>();
+    let call = MediaCall::new(&state);
+    call.finish(
+        &state,
+        state
+            .client
+            .media_actor(&identity, media_type, &RequestOptions::new(&call.cancel))
+            .await,
+    )
+}
+#[tauri::command]
+pub async fn media_import(app: AppHandle, input: MediaImport) -> Result<MediaJob, CommandError> {
+    let state = app.state::<AppState>();
+    let call = MediaCall::new(&state);
+    call.finish(
+        &state,
+        state
+            .client
+            .media_import(
+                MediaScope::Private,
+                &input,
+                &RequestOptions::new(&call.cancel),
+            )
+            .await,
+    )
+}
+#[tauri::command]
+pub async fn media_job(app: AppHandle, id: String) -> Result<MediaJob, CommandError> {
+    let state = app.state::<AppState>();
+    let call = MediaCall::new(&state);
+    call.finish(
+        &state,
+        state
+            .client
+            .media_job(MediaScope::Private, &id, &RequestOptions::new(&call.cancel))
+            .await,
+    )
+}
+#[tauri::command]
+pub async fn media_gallery(
+    app: AppHandle,
+    scope: MediaScope,
+    id: String,
+) -> Result<MediaGallery, CommandError> {
+    let state = app.state::<AppState>();
+    let call = MediaCall::new(&state);
+    call.finish(
+        &state,
+        state
+            .client
+            .media_gallery(scope, &id, &RequestOptions::new(&call.cancel))
+            .await,
+    )
+}
+#[tauri::command]
+pub async fn media_sync_gallery(
+    app: AppHandle,
+    id: String,
+    input: MediaSync,
+) -> Result<MediaJob, CommandError> {
+    let state = app.state::<AppState>();
+    let call = MediaCall::new(&state);
+    call.finish(
+        &state,
+        state
+            .client
+            .media_sync_gallery(
+                MediaScope::Private,
+                &id,
+                &input,
+                &RequestOptions::new(&call.cancel),
+            )
+            .await,
+    )
+}
+#[tauri::command]
+pub async fn media_select_poster(
+    app: AppHandle,
+    id: String,
+    input: MediaPoster,
+) -> Result<MediaEntry, CommandError> {
+    let state = app.state::<AppState>();
+    let call = MediaCall::new(&state);
+    call.finish(
+        &state,
+        state
+            .client
+            .media_select_poster(
+                MediaScope::Private,
+                &id,
+                &input,
+                &RequestOptions::new(&call.cancel),
+            )
+            .await,
+    )
+}
+#[tauri::command]
+pub async fn media_image(
+    app: AppHandle,
+    asset_id: String,
+    variant: String,
+) -> Result<String, CommandError> {
+    use base64::Engine;
+    let state = app.state::<AppState>();
+    let call = MediaCall::new(&state);
+    let asset = call.finish(
+        &state,
+        state
+            .client
+            .media_asset(&asset_id, &variant, &RequestOptions::new(&call.cancel))
+            .await,
+    )?;
+    if !matches!(
+        asset.content_type.as_str(),
+        "image/jpeg" | "image/png" | "image/webp"
+    ) {
+        return Err(CommandError::local(
+            "INVALID_STATE",
+            "the media asset is not an image",
+        ));
+    }
+    Ok(format!(
+        "data:{};base64,{}",
+        asset.content_type,
+        base64::engine::general_purpose::STANDARD.encode(asset.bytes)
+    ))
+}
+#[tauri::command]
+pub async fn media_copy_magnet(
+    app: AppHandle,
+    scope: MediaScope,
+    id: String,
+) -> Result<(), CommandError> {
+    use tauri_plugin_clipboard_manager::ClipboardExt;
+    let state = app.state::<AppState>();
+    let call = MediaCall::new(&state);
+    let entry = call.finish(
+        &state,
+        state
+            .client
+            .media_get(scope, &id, &RequestOptions::new(&call.cancel))
+            .await,
+    )?;
+    let magnet = entry
+        .content
+        .magnet_uri
+        .ok_or_else(|| CommandError::local("NOT_FOUND", "no permitted magnet link"))?;
+    app.clipboard()
+        .write_text(magnet)
+        .map_err(|_| CommandError::local("SYSTEM_REJECTED", "the clipboard could not be written"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    struct SilentNotifications;
+    impl crate::state::Notifier for SilentNotifications {
+        fn received(&self, _: i32, _: &str, _: &str, _: bool) {}
+        fn reminder(&self, _: i32, _: &str, _: &str) {}
+    }
+
+    #[tokio::test]
+    async fn stale_media_responses_cannot_cross_a_session_change() {
+        let app = tauri::test::mock_app();
+        let client =
+            assemble_client::Client::new(assemble_client::ServerOrigin::development()).unwrap();
+        app.manage(AppState::new(
+            app.handle().clone(),
+            client,
+            None,
+            crate::state::Settings::default(),
+            std::path::PathBuf::from("Downloads"),
+            std::sync::Arc::new(SilentNotifications),
+        ));
+        let state = app.state::<AppState<tauri::test::MockRuntime>>();
+        let old = MediaCall::new(&state);
+        assert_eq!(old.finish(&state, Ok(42)).unwrap(), 42);
+        state.begin_session();
+        assert_eq!(old.finish(&state, Ok(43)).unwrap_err().code, "CANCELLED");
+        let before = *state.session_changes().borrow();
+        let stale_unauthorized = Err::<(), _>(assemble_client::ClientError::Http {
+            status: 401,
+            remote_code: Some("UNAUTHORIZED".into()),
+        });
+        assert_eq!(
+            old.finish(&state, stale_unauthorized).unwrap_err().code,
+            "CANCELLED"
+        );
+        // 旧请求的401也不许撤销刚开始的新会话。
+        assert_eq!(*state.session_changes().borrow(), before);
+        let current = MediaCall::new(&state);
+        current.cancel.cancel();
+        assert_eq!(
+            current.finish(&state, Ok(44)).unwrap_err().code,
+            "CANCELLED"
+        );
+    }
 
     #[test]
     fn client_failures_become_stable_codes_without_echoing_details() {

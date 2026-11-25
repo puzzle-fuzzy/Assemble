@@ -11,8 +11,9 @@ import {
   BreadcrumbPage,
   BreadcrumbSeparator,
 } from "@assemble/ui/breadcrumb";
+import { Skeleton } from "@assemble/ui/skeleton";
 import { ArrowDownToLine, ArrowUpToLine, UserRound } from "lucide-react";
-import { Fragment, useEffect, useRef, useState } from "react";
+import { Fragment, lazy, Suspense, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import {
   DesktopMobileMenu,
@@ -48,7 +49,13 @@ import { Toaster } from "@/components/ui/sonner";
 import { Switch } from "@/components/ui/switch";
 import { DownloadsPage } from "@/DownloadsPage";
 import { useSnapshot } from "@/hooks/use-snapshot";
-import { type Bridge, bridge, toBridgeError } from "@/lib/bridge";
+import {
+  type Bridge,
+  bridge,
+  type MediaBridge,
+  mediaBridge,
+  toBridgeError,
+} from "@/lib/bridge";
 import { formatBuildInfo } from "@/lib/build-info";
 import { formatStoredDate, uiText, useDesktopTranslation } from "@/lib/i18n";
 import { messageFor } from "@/lib/messages";
@@ -70,16 +77,25 @@ import type {
   TransferView,
 } from "@/lib/types";
 import { cn } from "@/lib/utils";
+
+const MediaPage = lazy(() =>
+  import("@/MediaPage").then((module) => ({ default: module.MediaPage })),
+);
+
 import { PlannerCard } from "@/PlannerCard";
 
 export interface AppProps {
   /** 默认使用真实的桥接；测试时注入替身。 */
   bridge?: Bridge;
+  mediaBridge?: MediaBridge;
 }
 
 const LOGIN_TIMEOUT_MESSAGE = "等待浏览器登录超时，请重试。";
 
-export function App({ bridge: source = bridge }: AppProps) {
+export function App({
+  bridge: source = bridge,
+  mediaBridge: mediaSource = mediaBridge,
+}: AppProps) {
   useDesktopTranslation();
   const { resolvedTheme } = useDisplayPreferences();
   const { snapshot, loadError } = useSnapshot(source);
@@ -236,6 +252,7 @@ export function App({ bridge: source = bridge }: AppProps) {
                 </p>
               ) : null}
               {phase !== "signedIn" &&
+              section !== "media" &&
               section !== "settings" &&
               section !== "downloads" &&
               section !== "account" &&
@@ -337,6 +354,26 @@ export function App({ bridge: source = bridge }: AppProps) {
                   onError={setActionError}
                 />
               </section>
+              {section === "media" ? (
+                <section id="view-media" aria-label={uiText("moviesAndTV")}>
+                  <Suspense
+                    fallback={
+                      <Skeleton
+                        className="h-64 w-full"
+                        role="status"
+                        aria-label={uiText("loadingMediaLibrary")}
+                      />
+                    }
+                  >
+                    <MediaPage
+                      key={accountId ?? "anonymous"}
+                      source={mediaSource}
+                      accountId={accountId}
+                      onSignIn={() => navigate("account")}
+                    />
+                  </Suspense>
+                </section>
+              ) : null}
               <section
                 id="view-account"
                 aria-label={uiText("accountCenter")}

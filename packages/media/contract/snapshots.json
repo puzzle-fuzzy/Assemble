@@ -1,0 +1,234 @@
+{
+  "entries": [
+    {
+      "id": "entry-shared",
+      "version": 1,
+      "scope": "shared",
+      "mediaType": "movie",
+      "title": "测试电影",
+      "originalTitle": "A Film",
+      "year": 2026,
+      "releaseDate": "2026-11-25",
+      "overview": "简介",
+      "genres": ["剧情"],
+      "cast": [],
+      "episodeCount": null,
+      "identities": [
+        {
+          "provider": "tmdb",
+          "mediaType": "movie",
+          "externalId": "42"
+        }
+      ],
+      "poster": null,
+      "status": "planned",
+      "watchedAt": null,
+      "review": null,
+      "notes": null,
+      "magnetUri": null,
+      "magnetAvailable": true,
+      "createdAt": "2026-11-25T01:00:00.000Z",
+      "updatedAt": "2026-11-25T01:00:00.000Z"
+    },
+    {
+      "id": "entry-private",
+      "version": 1,
+      "scope": "private",
+      "mediaType": "movie",
+      "title": "测试电影",
+      "originalTitle": "A Film",
+      "year": 2026,
+      "releaseDate": "2026-11-25",
+      "overview": "简介",
+      "genres": ["剧情"],
+      "cast": [],
+      "episodeCount": null,
+      "identities": [
+        {
+          "provider": "tmdb",
+          "mediaType": "movie",
+          "externalId": "42"
+        }
+      ],
+      "poster": null,
+      "status": "watching",
+      "watchedAt": null,
+      "review": "私人观后感",
+      "notes": "仅本人",
+      "magnetUri": "magnet:?xt=urn:btih:0123456789012345678901234567890123456789",
+      "magnetAvailable": true,
+      "createdAt": "2026-11-25T01:00:00.000Z",
+      "updatedAt": "2026-11-25T01:00:00.000Z"
+    },
+    {
+      "id": "entry-completed",
+      "version": 1,
+      "scope": "shared",
+      "mediaType": "movie",
+      "title": "测试电影",
+      "originalTitle": "A Film",
+      "year": 2026,
+      "releaseDate": "2026-11-25",
+      "overview": "简介",
+      "genres": ["剧情"],
+      "cast": [],
+      "episodeCount": null,
+      "identities": [
+        {
+          "provider": "tmdb",
+          "mediaType": "movie",
+          "externalId": "42"
+        }
+      ],
+      "poster": null,
+      "status": "completed",
+      "watchedAt": "2026-11-25",
+      "review": "公开观后感",
+      "notes": null,
+      "magnetUri": null,
+      "magnetAvailable": true,
+      "createdAt": "2026-11-25T01:00:00.000Z",
+      "updatedAt": "2026-11-25T01:00:00.000Z"
+    }
+  ],
+  "listing": {
+    "items": [
+      {
+        "id": "entry-shared",
+        "version": 1,
+        "scope": "shared",
+        "mediaType": "movie",
+        "title": "测试电影",
+        "originalTitle": "A Film",
+        "year": 2026,
+        "releaseDate": "2026-11-25",
+        "overview": "简介",
+        "genres": ["剧情"],
+        "cast": [],
+        "episodeCount": null,
+        "identities": [
+          {
+            "provider": "tmdb",
+            "mediaType": "movie",
+            "externalId": "42"
+          }
+        ],
+        "poster": null,
+        "status": "planned",
+        "watchedAt": null,
+        "review": null,
+        "notes": null,
+        "magnetUri": null,
+        "magnetAvailable": true,
+        "createdAt": "2026-11-25T01:00:00.000Z",
+        "updatedAt": "2026-11-25T01:00:00.000Z"
+      }
+    ],
+    "total": 1,
+    "page": 1,
+    "pageSize": 36,
+    "counts": {
+      "all": 1,
+      "planned": 1,
+      "watching": 0,
+      "completed": 0
+    }
+  },
+  "capabilities": {
+    "providers": {
+      "tmdb": false,
+      "douban": true
+    },
+    "canMaintainShared": false,
+    "canMaintainPrivate": true
+  },
+  "job": {
+    "id": "job1",
+    "scope": "private",
+    "status": "running",
+    "stage": "images",
+    "completedItems": 1,
+    "totalItems": 3,
+    "entryId": null,
+    "errorCode": null
+  },
+  "gallery": {
+    "entryId": "entry-shared",
+    "version": 1,
+    "items": []
+  },
+  "candidate": {
+    "identity": {
+      "provider": "tmdb",
+      "mediaType": "movie",
+      "externalId": "42"
+    },
+    "title": "资料",
+    "originalTitle": "",
+    "year": null,
+    "overview": "",
+    "poster": null
+  },
+  "collection": {
+    "id": "collection1",
+    "version": 1,
+    "title": "精选",
+    "description": "",
+    "poster": null,
+    "items": [
+      {
+        "id": "entry-shared",
+        "version": 1,
+        "scope": "shared",
+        "mediaType": "movie",
+        "title": "测试电影",
+        "originalTitle": "A Film",
+        "year": 2026,
+        "releaseDate": "2026-11-25",
+        "overview": "简介",
+        "genres": ["剧情"],
+        "cast": [],
+        "episodeCount": null,
+        "identities": [
+          {
+            "provider": "tmdb",
+            "mediaType": "movie",
+            "externalId": "42"
+          }
+        ],
+        "poster": null,
+        "status": "planned",
+        "watchedAt": null,
+        "review": null,
+        "notes": null,
+        "magnetUri": null,
+        "magnetAvailable": true,
+        "createdAt": "2026-11-25T01:00:00.000Z",
+        "updatedAt": "2026-11-25T01:00:00.000Z"
+      }
+    ],
+    "createdAt": "2026-11-25T01:00:00.000Z",
+    "updatedAt": "2026-11-25T01:00:00.000Z"
+  },
+  "statistics": {
+    "total": 1,
+    "planned": 1,
+    "watching": 0,
+    "completed": 0,
+    "movies": 1,
+    "tv": 0,
+    "byYear": [
+      {
+        "year": 2026,
+        "count": 1
+      }
+    ],
+    "byGenre": [
+      {
+        "genre": "剧情",
+        "count": 1
+      }
+    ],
+    "byMonth": []
+  }
+}

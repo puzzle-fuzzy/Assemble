@@ -101,6 +101,16 @@ mod tests {
                 "email_rate_limits",
                 "github_identities",
                 "login_events",
+                "media_asset_variants",
+                "media_assets",
+                "media_catalog_assets",
+                "media_collection_entries",
+                "media_collections",
+                "media_entries",
+                "media_entry_assets",
+                "media_identities",
+                "media_jobs",
+                "media_mutations",
                 "notifications",
                 "planner_mutations",
                 "reminders",
@@ -118,7 +128,7 @@ mod tests {
             .fetch_one(&again)
             .await
             .unwrap();
-        assert_eq!(applied, 4);
+        assert_eq!(applied, 5);
     }
 
     #[tokio::test]
