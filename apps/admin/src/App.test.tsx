@@ -143,7 +143,9 @@ describe("管理端真实数据和访问权限", () => {
     expect(host.textContent).not.toContain("do-not-display");
     failed = false;
     await click(button(host, "重试"));
-    expect(host.querySelector("h1")?.textContent).toBe("概览");
+    expect(
+      host.querySelector('header [data-slot="breadcrumb-page"]')?.textContent,
+    ).toBe("概览");
   });
 
   test("加载只显示 Skeleton，拿到结果后展示实际数量，菜单导航对应右侧内容", async () => {
@@ -161,12 +163,17 @@ describe("管理端真实数据和访问权限", () => {
       resolveOverview?.(defaultResponse("/v1/admin/overview")),
     );
     expect(host.textContent).toContain("23");
+    expect(host.querySelector("main h1") === null).toBe(true);
     expect(host.querySelector('[data-slot="skeleton"]')).toBeNull();
     await navigate(host, "devices");
-    expect(host.querySelector("h1")?.textContent).toBe("设备");
+    expect(
+      host.querySelector('header [data-slot="breadcrumb-page"]')?.textContent,
+    ).toBe("设备");
     expect(host.textContent).toContain("工作电脑");
     expect(host.textContent).toContain("Windows");
-    expect(document.activeElement).toBe(host.querySelector("h1"));
+    expect(document.activeElement).toBe(
+      host.querySelector('header [data-slot="breadcrumb-page"]'),
+    );
     expect(
       host.querySelectorAll('nav[aria-label="管理功能"] [aria-current="page"]'),
     ).toHaveLength(1);
@@ -174,7 +181,9 @@ describe("管理端真实数据和访问权限", () => {
       host.querySelector('[aria-current="page"][href="#devices"]'),
     ).not.toBeNull();
     await navigate(host, "logins");
-    expect(host.querySelector("h1")?.textContent).toBe("登录记录");
+    expect(
+      host.querySelector('header [data-slot="breadcrumb-page"]')?.textContent,
+    ).toBe("登录记录");
     expect(host.textContent).toContain("GitHub");
     expect(document.title).toBe("登录记录 · Assemble 管理控制台");
   });
@@ -243,17 +252,25 @@ describe("用户、设备和登录记录的交互", () => {
     expect(query.get("page")).toBe("1");
     expect(query.get("q")).toBe("张三+工作@example.test");
     await click(button(host, "查看 张三 的详情"));
-    expect(host.querySelector("h1")?.textContent).toBe("用户详情");
+    expect(
+      host.querySelector('header [data-slot="breadcrumb-page"]')?.textContent,
+    ).toBe("用户详情");
     expect(host.textContent).toContain("工作电脑");
     expect(host.textContent).toContain("最近登录记录");
     expect(host.textContent).toContain("GitHub");
-    expect(document.activeElement).toBe(host.querySelector("h1"));
+    expect(document.activeElement).toBe(
+      host.querySelector('header [data-slot="breadcrumb-page"]'),
+    );
     await click(button(host, "返回用户列表"));
     expect(
       host.querySelector<HTMLInputElement>('input[type="search"]')?.value,
     ).toBe(" 张三+工作@example.test ");
-    expect(host.querySelector("h1")?.textContent).toBe("用户");
-    expect(document.activeElement).toBe(host.querySelector("h1"));
+    expect(
+      host.querySelector('header [data-slot="breadcrumb-page"]')?.textContent,
+    ).toBe("用户");
+    expect(document.activeElement).toBe(
+      host.querySelector('header [data-slot="breadcrumb-page"]'),
+    );
   });
 
   test("列表读取失败后重试，空结果使用真正空态，空邮箱与时间不编造", async () => {
@@ -361,7 +378,9 @@ describe("用户、设备和登录记录的交互", () => {
     expect(oldSignal?.aborted).toBe(true);
     await act(async () => oldResolve?.(json(page([user]))));
     await settle();
-    expect(host.querySelector("h1")?.textContent).toBe("设备");
+    expect(
+      host.querySelector('header [data-slot="breadcrumb-page"]')?.textContent,
+    ).toBe("设备");
   });
 
   test("用户详情 404 可以返回，缺少历史时显示空态而不是样例内容", async () => {

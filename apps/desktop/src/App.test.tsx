@@ -41,22 +41,21 @@ afterEach(async () => {
 });
 
 describe("版本信息", () => {
-  test("固定在所有内容卡片之后，未登录、已登录或断网时都显示构建身份", async () => {
+  test("版本与官网集中在关于软件，正常页面不再显示页脚", async () => {
     for (const current of [
       snapshot(),
       snapshot({ phase: "signedIn" }),
       snapshot({ service: service({ reachable: false }) }),
     ]) {
       const view = await renderApp(new FakeBridge(current));
-      await settle();
-      const footer = view.host.querySelector("footer");
-      expect(footer?.querySelector("p")?.textContent).toBe(
-        "本地测试 - 0.1.0.1234567",
-      );
-      expect(footer?.querySelectorAll("p")[1]?.textContent).toBe(
-        "官网：http://127.0.0.1:8787",
-      );
-      expect(view.host.querySelector("main")?.lastElementChild).toBe(footer);
+      expect(text(view.host)).not.toContain("本地测试 - 0.1.0.1234567");
+      expect(view.host.querySelector("footer") === null).toBe(true);
+      await click(button(view.host, "关于软件"));
+      expect(text(view.host)).toContain("本地测试 - 0.1.0.1234567");
+      expect(text(view.host)).toContain("http://127.0.0.1:8787");
+      expect(
+        view.host.querySelector("section[id^=view-]:not([hidden])")?.id,
+      ).toBe("view-about");
       await view.unmount();
     }
   });

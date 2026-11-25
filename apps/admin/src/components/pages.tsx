@@ -8,7 +8,7 @@ import {
   CardTitle,
 } from "@assemble/ui/card";
 import { ArrowLeftIcon, RefreshCwIcon } from "lucide-react";
-import { type ReactNode, useEffect, useRef, useState } from "react";
+import { type ReactNode, useEffect, useState } from "react";
 import {
   type AccessFailure,
   type AdminDevice,
@@ -34,21 +34,8 @@ interface AccessProps {
   onAccessFailure: (failure: AccessFailure) => void;
 }
 
-function PageHeading({
-  title,
-  description,
-}: {
-  title: string;
-  description: string;
-}) {
-  return (
-    <div className="flex flex-col gap-1">
-      <h1 tabIndex={-1} className="text-xl font-semibold tracking-tight">
-        {title}
-      </h1>
-      <p className="text-sm text-muted-foreground">{description}</p>
-    </div>
-  );
+function PageDescription({ description }: { description: string }) {
+  return <p className="text-sm text-muted-foreground">{description}</p>;
 }
 
 export function OverviewPage({ onAccessFailure }: AccessProps) {
@@ -59,10 +46,7 @@ export function OverviewPage({ onAccessFailure }: AccessProps) {
   return (
     <>
       <div className="flex flex-wrap items-start justify-between gap-3">
-        <PageHeading
-          title="概览"
-          description="查看当前账户和设备的实际数量。"
-        />
+        <PageDescription description="查看当前账户和设备的实际数量。" />
         <Button
           variant="outline"
           size="sm"
@@ -123,7 +107,6 @@ export function OverviewPage({ onAccessFailure }: AccessProps) {
 
 interface CollectionProps<T> extends AccessProps {
   name: "users" | "devices" | "logins";
-  title: string;
   description: string;
   searchLabel: string;
   placeholder: string;
@@ -135,7 +118,6 @@ interface CollectionProps<T> extends AccessProps {
 
 function Collection<T>({
   name,
-  title,
   description,
   searchLabel,
   placeholder,
@@ -151,7 +133,7 @@ function Collection<T>({
   );
   return (
     <>
-      <PageHeading title={title} description={description} />
+      <PageDescription description={description} />
       <SearchForm
         label={searchLabel}
         placeholder={placeholder}
@@ -182,34 +164,28 @@ function Collection<T>({
   );
 }
 
-export function UsersPage({ onAccessFailure }: AccessProps) {
+export function UsersPage({
+  onAccessFailure,
+  onDetailChange,
+}: AccessProps & { onDetailChange?: (showing: boolean) => void }) {
   const queryState = useListQuery();
   const [selected, setSelected] = useState<string | null>(null);
-  const list = useRef<HTMLDivElement>(null);
-  const returning = useRef(false);
   useEffect(() => {
-    if (selected === null && returning.current) {
-      returning.current = false;
-      list.current?.querySelector<HTMLElement>("h1")?.focus();
-    }
-  }, [selected]);
+    onDetailChange?.(selected !== null);
+  }, [selected, onDetailChange]);
   if (selected !== null) {
     return (
       <UserDetail
         id={selected}
         onAccessFailure={onAccessFailure}
-        onBack={() => {
-          returning.current = true;
-          setSelected(null);
-        }}
+        onBack={() => setSelected(null)}
       />
     );
   }
   return (
-    <div ref={list} className="flex min-w-0 flex-col gap-4">
+    <div className="flex min-w-0 flex-col gap-4">
       <Collection<AdminUser>
         name="users"
-        title="用户"
         description="查看注册时间、最近登录和账户的使用设备。时间按北京时间显示。"
         searchLabel="搜索用户"
         placeholder="姓名或邮箱"
@@ -230,7 +206,6 @@ export function DevicesPage({ onAccessFailure }: AccessProps) {
   return (
     <Collection<AdminDevice>
       name="devices"
-      title="设备"
       description="查看设备所属用户、平台、在线状态和使用时间。时间按北京时间显示。"
       searchLabel="搜索设备"
       placeholder="设备名称、用户姓名或邮箱"
@@ -248,7 +223,6 @@ export function LoginsPage({ onAccessFailure }: AccessProps) {
   return (
     <Collection<AdminLogin>
       name="logins"
-      title="登录记录"
       description="查看已记录的成功登录，时间按北京时间显示；历史中没有采集的时间不会补写。"
       searchLabel="搜索登录记录"
       placeholder="用户姓名或邮箱"
@@ -270,21 +244,14 @@ function UserDetail({
     `/v1/admin/users/${encodeURIComponent(id)}`,
     onAccessFailure,
   );
-  const header = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    header.current?.querySelector<HTMLElement>("h1")?.focus();
-  }, []);
   return (
     <>
-      <div ref={header} className="flex flex-col items-start gap-3">
+      <div className="flex flex-col items-start gap-3">
         <Button variant="ghost" size="sm" onClick={onBack}>
           <ArrowLeftIcon data-icon="inline-start" aria-hidden="true" />
           返回用户列表
         </Button>
-        <PageHeading
-          title="用户详情"
-          description="账户信息、所属设备和最近的登录记录。"
-        />
+        <PageDescription description="账户信息、所属设备和最近的登录记录。" />
       </div>
       {resource.phase === "loading" ? (
         <LoadingContent />

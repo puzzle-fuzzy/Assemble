@@ -79,7 +79,7 @@ export function App({ bridge: source = bridge }: AppProps) {
   const [actionError, setActionError] = useState<string | null>(null);
   const [section, setSection] = useState<Section>("transfers");
   const [queries, setQueries] = useState<Partial<Record<Section, string>>>({});
-  const contentHeading = useRef<HTMLHeadingElement>(null);
+  const contentHeading = useRef<HTMLSpanElement>(null);
   const phase = snapshot?.session.phase;
   const accountId =
     snapshot?.session.phase === "signedIn" ? snapshot.session.account.id : null;
@@ -163,7 +163,14 @@ export function App({ bridge: source = bridge }: AppProps) {
                   </BreadcrumbItem>
                   <BreadcrumbSeparator className="hidden md:block" />
                   <BreadcrumbItem>
-                    <BreadcrumbPage>{sectionLabel}</BreadcrumbPage>
+                    <BreadcrumbPage
+                      ref={contentHeading}
+                      role="heading"
+                      aria-level={1}
+                      tabIndex={-1}
+                    >
+                      {sectionLabel}
+                    </BreadcrumbPage>
                   </BreadcrumbItem>
                 </BreadcrumbList>
               </Breadcrumb>
@@ -177,17 +184,11 @@ export function App({ bridge: source = bridge }: AppProps) {
           </header>
           <ScrollArea className="min-h-0 flex-1">
             <div className="@container mx-auto flex w-full min-w-0 flex-col gap-4 p-4 pt-0">
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <h1
-                  ref={contentHeading}
-                  tabIndex={-1}
-                  className="text-xl font-semibold tracking-tight"
-                >
-                  {sectionLabel}
-                </h1>
-                {phase === "signedIn" &&
-                section !== "settings" &&
-                section !== "account" ? (
+              {phase === "signedIn" &&
+              section !== "settings" &&
+              section !== "account" &&
+              section !== "about" ? (
+                <div className="flex justify-end">
                   <Input
                     className="w-full sm:w-64"
                     aria-label={`搜索${sectionLabel}`}
@@ -201,8 +202,8 @@ export function App({ bridge: source = bridge }: AppProps) {
                       }));
                     }}
                   />
-                ) : null}
-              </div>
+                </div>
+              ) : null}
               {loadError ? (
                 <p role="alert" className="text-sm text-destructive">
                   {loadError}
@@ -221,7 +222,8 @@ export function App({ bridge: source = bridge }: AppProps) {
               ) : null}
               {phase !== "signedIn" &&
               section !== "settings" &&
-              section !== "account" ? (
+              section !== "account" &&
+              section !== "about" ? (
                 <Empty className="min-h-64">
                   <EmptyHeader>
                     <EmptyMedia variant="icon">
@@ -317,21 +319,50 @@ export function App({ bridge: source = bridge }: AppProps) {
                   />
                 </div>
               </section>
+              <section
+                id="view-about"
+                aria-label="关于软件"
+                hidden={section !== "about"}
+              >
+                <AboutCard />
+              </section>
             </div>
           </ScrollArea>
-          <footer className="shrink-0 border-t px-4 py-3 text-center text-xs text-muted-foreground">
-            <p>{formatBuildInfo(__ASSEMBLE_BUILD__)}</p>
-            <p className="mt-1 break-all select-text">
-              官网：{__ASSEMBLE_BUILD__.website}
-            </p>
-          </footer>
         </main>
       </SidebarProvider>
     </>
   );
 }
 
-/** 官网地址由页脚展示；这里仅保留检测、断网与登录后的连接状态。 */
+/** 版本与官网只在关于页展示，避免每个页面重复占用内容空间。 */
+function AboutCard() {
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="sr-only">关于软件</CardTitle>
+        <CardDescription>当前安装的版本与官方网站。</CardDescription>
+      </CardHeader>
+      <CardContent>
+        <dl className="flex flex-col gap-4 text-sm">
+          <div className="flex flex-col gap-1">
+            <dt className="text-muted-foreground">当前版本</dt>
+            <dd className="select-text">
+              {formatBuildInfo(__ASSEMBLE_BUILD__)}
+            </dd>
+          </div>
+          <div className="flex flex-col gap-1">
+            <dt className="text-muted-foreground">官网</dt>
+            <dd className="break-all select-text">
+              {__ASSEMBLE_BUILD__.website}
+            </dd>
+          </div>
+        </dl>
+      </CardContent>
+    </Card>
+  );
+}
+
+/** 页头只保留检测、断网与登录后的连接状态。 */
 function ServiceStatus({
   service,
   signedIn,
@@ -770,7 +801,7 @@ function TransfersCard({
   return (
     <Card>
       <CardHeader>
-        <CardTitle>传输</CardTitle>
+        <CardTitle className="sr-only">传输</CardTitle>
         <CardDescription>
           别的设备发来的文件会自动存到接收位置；挑好文件，选一台设备就能发出去。
         </CardDescription>
@@ -977,7 +1008,7 @@ function DriveCard({
   return (
     <Card>
       <CardHeader>
-        <CardTitle>云盘</CardTitle>
+        <CardTitle className="sr-only">云盘</CardTitle>
         <CardDescription>
           {drive
             ? `已用 ${formatSpace(drive.usedBytes)}，共 ${formatSpace(drive.limitBytes)}`
@@ -1172,7 +1203,7 @@ function LaunchCard({ source, snapshot, onError }: CardProps) {
   return (
     <Card>
       <CardHeader>
-        <CardTitle>本机</CardTitle>
+        <CardTitle className="sr-only">本机</CardTitle>
         <CardDescription>开机启动</CardDescription>
         <CardAction>
           <Switch

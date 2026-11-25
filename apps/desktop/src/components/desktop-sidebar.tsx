@@ -20,6 +20,7 @@ import {
   ArrowLeftRight,
   CalendarClock,
   Cloud,
+  InfoIcon,
   MenuIcon,
   Settings2,
   UserRound,
@@ -32,6 +33,7 @@ export const DESKTOP_MODULES = [
   { id: "planner", label: "日程与提醒", icon: CalendarClock },
   { id: "settings", label: "本机设置", icon: Settings2 },
   { id: "account", label: "账户中心", icon: UserRound },
+  { id: "about", label: "关于软件", icon: InfoIcon },
 ] as const;
 export type DesktopModule = (typeof DESKTOP_MODULES)[number]["id"];
 

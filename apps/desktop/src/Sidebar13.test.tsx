@@ -39,7 +39,7 @@ afterEach(async () => {
 });
 
 describe("sidebar-13 整页导航", () => {
-  test("左侧展示五个文字菜单，右侧整页列出传输记录", async () => {
+  test("左侧展示六个文字菜单，右侧整页列出传输记录", async () => {
     const view = await renderApp(
       new FakeBridge(
         snapshot({
@@ -65,6 +65,7 @@ describe("sidebar-13 整页导航", () => {
       "日程与提醒",
       "本机设置",
       "账户中心",
+      "关于软件",
     ])
       expect(button(nav, name)?.textContent).toBe(name);
     expect(text(card(view.host, "传输"))).toContain("已收到.pdf");
@@ -80,7 +81,10 @@ describe("sidebar-13 整页导航", () => {
     const view = await renderApp(source);
     expect(button(view.host, "使用浏览器登录")).toBeUndefined();
     await click(button(view.host, "打开账户中心"));
-    expect(view.host.querySelector("main h1")?.textContent).toBe("账户中心");
+    expect(
+      view.host.querySelector('header [data-slot="breadcrumb-page"]')
+        ?.textContent,
+    ).toBe("账户中心");
     await click(button(view.host, "使用浏览器登录"));
     expect(source.calls).toEqual(["signIn"]);
     await act(async () => source.push(snapshot({ phase: "signedIn" })));
@@ -140,10 +144,14 @@ describe("sidebar-13 整页导航", () => {
       ...document.body.querySelectorAll<HTMLElement>('[role="menuitemradio"]'),
     ].find((candidate) => candidate.textContent === "账户中心");
     await click(item);
-    expect(view.host.querySelector("main h1")?.textContent).toBe("账户中心");
-    expect(document.activeElement === view.host.querySelector("main h1")).toBe(
-      true,
-    );
+    expect(
+      view.host.querySelector('header [data-slot="breadcrumb-page"]')
+        ?.textContent,
+    ).toBe("账户中心");
+    expect(
+      document.activeElement ===
+        view.host.querySelector('header [data-slot="breadcrumb-page"]'),
+    ).toBe(true);
     expect(document.body.querySelector('[role="menu"]') === null).toBe(true);
     expect(button(view.host, "退出登录")).toBeDefined();
   });

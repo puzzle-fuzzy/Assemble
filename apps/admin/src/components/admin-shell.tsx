@@ -64,7 +64,8 @@ export function AdminShell({
   onAccessFailure: (failure: AccessFailure) => void;
 }) {
   const [view, setView] = useState<View>(currentView);
-  const content = useRef<HTMLDivElement>(null);
+  const pageHeading = useRef<HTMLSpanElement>(null);
+  const [userDetail, setUserDetail] = useState(false);
   const initial = useRef(true);
   const logout = useRef<HTMLFormElement>(null);
   const focusPageOnMenuClose = useRef(false);
@@ -80,15 +81,17 @@ export function AdminShell({
       window.removeEventListener("popstate", update);
     };
   }, []);
+  const pageName = view === "users" && userDetail ? "用户详情" : selected.name;
   useEffect(() => {
-    document.title = `${selected.name} · Assemble 管理控制台`;
+    document.title = `${pageName} · Assemble 管理控制台`;
     if (initial.current) initial.current = false;
-    else content.current?.querySelector<HTMLElement>("h1")?.focus();
-  }, [selected.name]);
+    else pageHeading.current?.focus();
+  }, [pageName]);
 
   function navigate(next: View) {
     if (next === view) return;
     window.history.pushState(null, "", `#${next}`);
+    setUserDetail(false);
     setView(next);
   }
 
@@ -144,7 +147,7 @@ export function AdminShell({
                   if (focusPageOnMenuClose.current) {
                     event.preventDefault();
                     focusPageOnMenuClose.current = false;
-                    content.current?.querySelector<HTMLElement>("h1")?.focus();
+                    pageHeading.current?.focus();
                   }
                 }}
               >
@@ -180,7 +183,14 @@ export function AdminShell({
                 </BreadcrumbItem>
                 <BreadcrumbSeparator className="hidden md:block" />
                 <BreadcrumbItem>
-                  <BreadcrumbPage>{selected.name}</BreadcrumbPage>
+                  <BreadcrumbPage
+                    ref={pageHeading}
+                    role="heading"
+                    aria-level={1}
+                    tabIndex={-1}
+                  >
+                    {pageName}
+                  </BreadcrumbPage>
                 </BreadcrumbItem>
               </BreadcrumbList>
             </Breadcrumb>
@@ -228,14 +238,16 @@ export function AdminShell({
             </form>
           </div>
         </header>
-        <div
-          ref={content}
-          className="admin-content flex min-w-0 flex-1 flex-col gap-4 overflow-y-auto p-4 pt-0 [&>*]:shrink-0"
-        >
+        <div className="admin-content flex min-w-0 flex-1 flex-col gap-4 overflow-y-auto p-4 pt-0 [&>*]:shrink-0">
           {view === "overview" && (
             <OverviewPage onAccessFailure={onAccessFailure} />
           )}
-          {view === "users" && <UsersPage onAccessFailure={onAccessFailure} />}
+          {view === "users" && (
+            <UsersPage
+              onAccessFailure={onAccessFailure}
+              onDetailChange={setUserDetail}
+            />
+          )}
           {view === "devices" && (
             <DevicesPage onAccessFailure={onAccessFailure} />
           )}

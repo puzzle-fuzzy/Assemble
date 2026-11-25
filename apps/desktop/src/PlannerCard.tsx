@@ -193,7 +193,7 @@ export function PlannerCard({
   return (
     <Card>
       <CardHeader>
-        <CardTitle>日程</CardTitle>
+        <CardTitle className="sr-only">日程</CardTitle>
         {showForm || (planner !== null && entries.length === 0) ? null : (
           <CardDescription>
             {planner ? `七天之内有 ${entries.length} 项。` : "正在读取日程…"}
