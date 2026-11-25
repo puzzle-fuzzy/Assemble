@@ -1,5 +1,4 @@
 import { describe, expect, test } from "bun:test";
-import { formatBuildInfo } from "../../apps/desktop/src/lib/build-info";
 import { readBuildInfo, resolveBuildInfo } from "./build-info.mts";
 
 const COMMIT = "98557c34388eeefe5f8dced68249166d8133329a";
@@ -44,17 +43,22 @@ describe("构建身份", () => {
     }
   });
 
-  test("三个版本类型都能明确指定，格式固定且哈希统一为七位小写", () => {
-    for (const [channel, name, origin] of [
-      ["stable", "正式版本", "https://as.yxswy.com"],
-      ["preview", "预览版本", "https://preview.example.test"],
-      ["local", "本地测试", "http://127.0.0.1:8787"],
-    ]) {
+  test("三个版本类型都能明确指定，哈希统一为七位小写", () => {
+    for (const [channel, origin] of [
+      ["stable", "https://as.yxswy.com"],
+      ["preview", "https://preview.example.test"],
+      ["local", "http://127.0.0.1:8787"],
+    ] as const) {
       const info = resolveBuildInfo("0.1.0", ` ${COMMIT.toUpperCase()}\n`, {
         ASSEMBLE_BUILD_CHANNEL: channel,
         ASSEMBLE_SERVER_ORIGIN: origin,
       });
-      expect(formatBuildInfo(info)).toBe(`${name} - 0.1.0.98557c3`);
+      expect(info).toEqual({
+        channel,
+        version: "0.1.0",
+        commit: "98557c3",
+        website: origin,
+      });
     }
   });
 

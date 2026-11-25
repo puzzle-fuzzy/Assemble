@@ -1,0 +1,164 @@
+{
+  "planner": {
+    "day": {
+      "today": "今天",
+      "yesterday": "昨天",
+      "tomorrow": "明天",
+      "dayAfterTomorrow": "后天"
+    },
+    "repeat": {
+      "none": "不重复",
+      "daily": "每天",
+      "weekly": "每周",
+      "monthly": "每月"
+    },
+    "lead": {
+      "atTime": "到点时提醒",
+      "minutes": "提前 {{count}} 分钟",
+      "hours": "提前 {{count}} 小时",
+      "days": "提前 {{count}} 天"
+    },
+    "ago": {
+      "justNow": "刚刚",
+      "minutes": "{{count}} 分钟前",
+      "hours": "{{count}} 小时前"
+    },
+    "timeSpan": "{{start}} 到 {{end}}",
+    "at": "{{day}} {{time}}",
+    "repeatUntil": "{{repeat}}，到 {{date}}",
+    "later": {
+      "label": "之后：{{dates}}{{more}}",
+      "separator": "、",
+      "totalSuffix": " 等 {{count}} 场"
+    },
+    "fired": "已到点 · {{when}}",
+    "form": {
+      "titleRequired": "先写一个标题。",
+      "timeIncomplete": "时间要填到哪一天、几点几分。",
+      "endIncomplete": "结束时间没有填完整；不填也可以。",
+      "endBeforeStart": "结束时间要晚于开始时间。"
+    }
+  },
+  "transfer": {
+    "size": "{{value}} {{unit}}",
+    "progress": "{{state}} {{percent}}%",
+    "failed": "{{state}}：{{reason}}。",
+    "unknownReason": "原因不明",
+    "waiting": "已发出，等对方接收",
+    "declined": "对方拒收了。",
+    "withdrawn": "对方撤回了，没有收到。",
+    "cancelled": "已取消。",
+    "expiredReceived": "过了时限，没有收到。",
+    "expiredSent": "对方没有在时限内接收。",
+    "states": {
+      "received": {
+        "queued": "等待接收…",
+        "running": "正在接收",
+        "done": "已保存",
+        "failed": "接收失败"
+      },
+      "sent": {
+        "queued": "等待发送…",
+        "running": "正在发送",
+        "done": "对方已收下",
+        "failed": "发送失败"
+      },
+      "stored": {
+        "queued": "等待上传…",
+        "running": "正在上传到云盘",
+        "done": "已存到云盘",
+        "failed": "没能存进云盘"
+      },
+      "fetched": {
+        "queued": "等待取回…",
+        "running": "正在从云盘取回",
+        "done": "已取回",
+        "failed": "取回失败"
+      }
+    },
+    "failures": {
+      "diskFull": {
+        "received": "这台电脑的磁盘已满",
+        "sent": "对方设备的磁盘已满"
+      },
+      "writeFailed": {
+        "received": "文件没能写进接收文件夹",
+        "sent": "对方设备没能把文件写下来"
+      },
+      "verificationFailed": {
+        "received": "收到的内容与发出的对不上",
+        "sent": "对方收到的内容与发出的对不上"
+      },
+      "cancelled": {
+        "received": "已取消",
+        "sent": "已取消"
+      },
+      "deviceOffline": { "sent": "那台设备刚刚下线了" },
+      "tooLarge": { "sent": "超过 100 MB" },
+      "fileUnreadable": { "sent": "文件读不出来，可能已被移走或改动" },
+      "rejected": { "sent": "服务端拒绝了这次发送，请重新选择文件" },
+      "quotaExceeded": { "sent": "云盘空间不够" },
+      "vanished": { "received": "云盘里已经没有这个文件了" }
+    }
+  },
+  "errors": {
+    "CREDENTIAL_STORE_UNAVAILABLE": "系统钥匙串不可用，无法保存登录状态。",
+    "BROWSER_UNAVAILABLE": "无法打开系统浏览器，请重试。",
+    "UNREACHABLE": "暂时连不上服务，请检查网络后重试。",
+    "ACCOUNT_DISABLED": "这个账户已被禁用。",
+    "UNSUPPORTED": "当前运行方式不支持设置开机启动。",
+    "SYSTEM_REJECTED": "系统没有接受这个设置，请稍后重试。",
+    "INVALID_INPUT": "输入的内容不合法：名字不能为空，也不能超过 60 个字符。",
+    "NOT_FOUND": "这台设备已经不在账户里了。",
+    "IS_THIS_DEVICE": "要移除这台设备，请使用「退出登录」。",
+    "INVALID_RESPONSE": "服务端的回答看不懂，请稍后重试。",
+    "INVALID_RECEIVE_FOLDER": "这个文件夹不能用来保存收到的文件，请换一个。",
+    "NOT_SAVED": "这个文件还没有保存到这台电脑上。",
+    "FILE_TOO_LARGE": "有文件超过 100 MB，发不出去。",
+    "FILE_UNREADABLE": "有文件读不出来，可能已被移走或没有权限。",
+    "PANEL_UNAVAILABLE": "发送面板没能打开，请重试。",
+    "DEVICE_OFFLINE": "那台设备刚刚下线了，没法发送。",
+    "NO_DRAFT": "没有待发送的文件，请重新选择。",
+    "NOT_RETRYABLE": "这一次没法重发，请重新选择文件。",
+    "ONLY_FOLDERS": "只能发送文件，不能发送文件夹。",
+    "QUOTA_EXCEEDED": "云盘空间不够，删掉一些文件再试。",
+    "FILE_GONE": "云盘里已经没有这个文件了。",
+    "VERSION_CONFLICT": "这一条在别的设备上被改过。已经换成最新的，请再看一眼。",
+    "INVALID_STATE": "这一条现在的状态不能这样改。已经换成最新的，请再看一眼。",
+    "PLANNER_INPUT": "有内容不合规则，没有保存。请检查标题（最多 200 个字）、时间和重复的截止日。",
+    "GENERIC": "操作没有完成，请稍后重试。"
+  },
+  "notice": {
+    "fixed": {
+      "sessionExpired": "登录已失效，请重新登录。",
+      "deviceSessionExpired": "这台设备的登录已失效，请重新登录。",
+      "signOutPending": "暂时无法退出：这台设备的登录还没有在服务端撤销。请联网后重试。",
+      "loginTimedOut": "等待浏览器登录超时，请重试。",
+      "browserUnavailable": "无法打开系统浏览器，请重试。",
+      "credentialStoreUnavailable": "系统钥匙串不可用，无法保存登录状态。",
+      "loginRejected": "登录没有通过，请重试。",
+      "unreachable": "暂时连不上服务，请检查网络后重试。",
+      "loginIncomplete": "登录没有完成，请重试。",
+      "onlyFolders": "只能发送文件，不能发送文件夹。",
+      "panelUnavailable": "发送面板没能打开，请重试。",
+      "signInToSend": "请先登录，再发送文件。",
+      "signInToUpload": "请先登录，再往云盘里存文件。",
+      "receiveFolderFallback": "原来设置的接收文件夹不可用，这个文件已存到默认位置。",
+      "launchAtLoginFailed": "暂时无法完成开机启动的设置，请稍后重试。"
+    },
+    "fileTooLarge": "「{{name}}」超过 100 MB，发不出去。",
+    "fileUnreadable": "「{{name}}」读不出来，可能已被移走或没有权限。",
+    "unknownInfo": "有新的提示，请检查当前状态。",
+    "unknownError": "操作没有完成，请稍后重试。"
+  },
+  "build": {
+    "channels": {
+      "stable": "正式版本",
+      "preview": "预览版本",
+      "local": "本地测试"
+    },
+    "identity": "{{channel}} - {{version}}.{{commit}}",
+    "currentVersion": "当前版本",
+    "website": "官网"
+  }
+}

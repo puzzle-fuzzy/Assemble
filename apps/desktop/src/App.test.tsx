@@ -29,7 +29,7 @@ import {
   snapshot,
   transfer,
 } from "@/test-support/fakes";
-import { renderApp } from "@/test-support/render-app";
+import { openAccountMenu, renderApp } from "@/test-support/render-app";
 
 beforeEach(() => {
   document.body.replaceChildren();
@@ -41,7 +41,7 @@ afterEach(async () => {
 });
 
 describe("版本信息", () => {
-  test("版本与官网集中在关于软件，正常页面不再显示页脚", async () => {
+  test("左下角用户菜单的关于展示版本与官网，侧栏功能区不再重复入口", async () => {
     for (const current of [
       snapshot(),
       snapshot({ phase: "signedIn" }),
@@ -50,12 +50,40 @@ describe("版本信息", () => {
       const view = await renderApp(new FakeBridge(current));
       expect(text(view.host)).not.toContain("本地测试 - 0.1.0.1234567");
       expect(view.host.querySelector("footer") === null).toBe(true);
-      await click(button(view.host, "关于软件"));
+      const nav = view.host.querySelector(
+        'nav[aria-label="主功能"]',
+      ) as HTMLElement;
+      expect(button(nav, "关于软件")).toBeUndefined();
+      expect(button(nav, "关于")).toBeUndefined();
+      const trigger = await openAccountMenu(view.host);
+      expect(trigger.closest('[data-slot="sidebar-footer"]')).not.toBeNull();
+      const about = [
+        ...document.body.querySelectorAll<HTMLElement>('[role="menuitem"]'),
+      ].find((item) => item.textContent === "关于");
+      await click(about);
       expect(text(view.host)).toContain("本地测试 - 0.1.0.1234567");
       expect(text(view.host)).toContain("http://127.0.0.1:8787");
       expect(
         view.host.querySelector("section[id^=view-]:not([hidden])")?.id,
       ).toBe("view-about");
+      const heading = view.host.querySelector(
+        'header [data-slot="breadcrumb-page"]',
+      );
+      expect(heading?.textContent).toBe("关于");
+      expect(document.activeElement).toBe(heading);
+      expect(document.body.querySelector('[role="menu"]')).toBeNull();
+      await openAccountMenu(view.host);
+      expect(
+        document.body.querySelector('[role="menuitem"][aria-current="page"]')
+          ?.textContent,
+      ).toBe("关于");
+      await act(async () => {
+        document.activeElement?.dispatchEvent(
+          new KeyboardEvent("keydown", { key: "Escape", bubbles: true }),
+        );
+      });
+      await settle();
+      expect(document.activeElement).toBe(trigger);
       await view.unmount();
     }
   });
@@ -697,9 +725,12 @@ describe("云盘", () => {
     const view = await renderApp(source, "云盘");
     await settle();
     const page = text(view.host);
-    expect(page).toContain("已用 1.5 MB，共 2.0 GB");
+    expect(page).toContain("1.5 MB / 2.0 GB");
+    expect(
+      card(view.host, "云盘").querySelector('[role="progressbar"]'),
+    ).toBeNull();
     expect(page).toContain("季度报表.xlsx");
-    expect(page).toContain("512 KB · 2026-11-24");
+    expect(page).toContain("512 KB · 2026/11/24");
     expect(page).toContain("合同.pdf");
     expect(source.calls).toEqual([]);
   });
@@ -810,7 +841,7 @@ describe("云盘", () => {
     const view = await renderApp(source, "云盘");
     await settle();
     expect(text(view.host)).toContain("云盘里还没有文件。");
-    expect(text(view.host)).toContain("已用 0 B，共 2.0 GB");
+    expect(text(view.host)).toContain("0 B / 2.0 GB");
   });
 });
 

@@ -9,7 +9,7 @@
     "noEmit": true,
     "skipLibCheck": true,
     "verbatimModuleSyntax": true,
-    "types": [],
+    "types": ["bun"],
     "paths": {
       "@assemble/ui/components": ["./src/components"],
       "@assemble/ui/components/*": ["./src/components/*"],

@@ -10,10 +10,11 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
+import { uiText, useDesktopTranslation } from "@/lib/i18n";
 import {
   fromLocalInput,
-  LEADS,
   leadLabel,
+  leadOptions,
   problemWith,
   repeatLabel,
   toLocalInput,
@@ -55,6 +56,7 @@ export function PlannerForm({
   /** 删掉正在修改的这一条；新建的表单没有这一项。 */
   onRemove: (() => Promise<void>) | null;
 }) {
+  useDesktopTranslation();
   const schedule = form.kind === "schedule" ? form.original : null;
   const reminder = form.kind === "reminder" ? form.original : null;
   const [title, setTitle] = useState(schedule?.title ?? reminder?.title ?? "");
@@ -69,32 +71,38 @@ export function PlannerForm({
   const [lead, setLead] = useState(String(schedule?.remindBefore ?? ""));
   const [place, setPlace] = useState(schedule?.location?.label ?? "");
   const [notes, setNotes] = useState(schedule?.notes ?? reminder?.notes ?? "");
-  const [problem, setProblem] = useState<string | null>(null);
+  const [invalidDraft, setInvalidDraft] = useState<
+    Parameters<typeof problemWith>[0] | null
+  >(null);
+  const problem = invalidDraft
+    ? (problemWith(invalidDraft) ?? uiText("enterACompleteDateAndTime"))
+    : null;
   const [confirming, setConfirming] = useState(false);
 
   // 助手定下的提前量不在常选的那几个里：照样列出来，不改它就不会丢。
   const chosen = schedule?.remindBefore ?? null;
+  const availableLeads = leadOptions();
   const leads: ReadonlyArray<readonly [number | null, string]> =
-    chosen !== null && !LEADS.some(([minutes]) => minutes === chosen)
-      ? [...LEADS, [chosen, leadLabel(chosen)]]
-      : LEADS;
+    chosen !== null && !availableLeads.some(([minutes]) => minutes === chosen)
+      ? [...availableLeads, [chosen, leadLabel(chosen)]]
+      : availableLeads;
   const heading =
     form.kind === "schedule"
       ? schedule
-        ? "修改日程"
-        : "新建日程"
+        ? uiText("editSchedule")
+        : uiText("newSchedule")
       : reminder
-        ? "修改提醒"
-        : "新建提醒";
+        ? uiText("editReminder")
+        : uiText("newReminder");
 
   function submit() {
     const issue = problemWith({ title, at, end });
     const start = fromLocalInput(at);
     if (issue !== null || start === null) {
-      setProblem(issue ?? "时间要填到哪一天、几点几分。");
+      setInvalidDraft({ title, at, end });
       return;
     }
-    setProblem(null);
+    setInvalidDraft(null);
     void onSave({
       title: title.trim(),
       start,
@@ -118,7 +126,7 @@ export function PlannerForm({
       <h2 className="text-sm font-medium">{heading}</h2>
       <FieldGroup>
         <Field
-          label="标题"
+          label={uiText("title")}
           control={(id) => (
             <Input
               id={id}
@@ -132,7 +140,9 @@ export function PlannerForm({
         />
         <FieldGroup className="grid grid-cols-1 gap-3 @md:grid-cols-2">
           <Field
-            label={form.kind === "schedule" ? "开始时间" : "到点时间"}
+            label={
+              form.kind === "schedule" ? uiText("startTime") : uiText("dueTime")
+            }
             control={(id) => (
               <Input
                 id={id}
@@ -145,7 +155,7 @@ export function PlannerForm({
           />
           {form.kind === "schedule" ? (
             <Field
-              label="结束时间"
+              label={uiText("endTime")}
               control={(id) => (
                 <Input
                   id={id}
@@ -162,7 +172,7 @@ export function PlannerForm({
           <>
             <FieldGroup className="grid grid-cols-1 gap-3 @md:grid-cols-2">
               <Field
-                label="重复"
+                label={uiText("repeat")}
                 control={(id) => (
                   <Select
                     id={id}
@@ -181,7 +191,7 @@ export function PlannerForm({
                 )}
               />
               <Field
-                label="提醒"
+                label={uiText("notification")}
                 control={(id) => (
                   <Select
                     id={id}
@@ -202,7 +212,7 @@ export function PlannerForm({
               />
             </FieldGroup>
             <Field
-              label="地点"
+              label={uiText("location")}
               control={(id) => (
                 <Input
                   id={id}
@@ -216,7 +226,7 @@ export function PlannerForm({
           </>
         ) : null}
         <Field
-          label="备注"
+          label={uiText("notes")}
           control={(id) => (
             <Textarea
               id={id}
@@ -235,7 +245,7 @@ export function PlannerForm({
       ) : null}
       <div className="flex flex-wrap gap-2">
         <Button type="submit" disabled={pending}>
-          保存
+          {uiText("save")}
         </Button>
         <Button
           type="button"
@@ -243,7 +253,7 @@ export function PlannerForm({
           disabled={pending}
           onClick={onClose}
         >
-          取消
+          {uiText("cancel")}
         </Button>
         {onRemove ? (
           confirming ? (
@@ -254,7 +264,7 @@ export function PlannerForm({
                 disabled={pending}
                 onClick={() => void onRemove()}
               >
-                确认删除
+                {uiText("confirmDeletion")}
               </Button>
               <Button
                 type="button"
@@ -262,7 +272,7 @@ export function PlannerForm({
                 disabled={pending}
                 onClick={() => setConfirming(false)}
               >
-                算了
+                {uiText("neverMind")}
               </Button>
             </>
           ) : (
@@ -272,7 +282,7 @@ export function PlannerForm({
               disabled={pending}
               onClick={() => setConfirming(true)}
             >
-              删除…
+              {uiText("deleteEllipsis")}
             </Button>
           )
         ) : null}

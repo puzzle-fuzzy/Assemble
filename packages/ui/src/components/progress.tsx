@@ -10,6 +10,8 @@ function Progress({
   return (
     <ProgressPrimitive.Root
       data-slot="progress"
+      // 视觉填充与读屏状态共用真实进度，避免读屏一直收到“未知进度”。
+      value={value}
       className={cn(
         "relative flex h-1 w-full items-center overflow-x-hidden rounded-full bg-muted",
         className,

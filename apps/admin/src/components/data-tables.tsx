@@ -18,7 +18,8 @@ import type {
   AdminLogin,
   AdminUser,
 } from "../lib/api";
-import { platformName, RecordedTime } from "../lib/text";
+import { useAdminTranslation } from "../lib/i18n";
+import { RecordedTime } from "../lib/text";
 
 function TableRegion({
   title,
@@ -36,6 +37,7 @@ function TableRegion({
 }
 
 export function AccountIdentity({ account }: { account: AdminAccount }) {
+  const { t } = useAdminTranslation();
   return (
     <div className="flex min-w-0 items-center gap-2">
       <Avatar>
@@ -45,7 +47,7 @@ export function AccountIdentity({ account }: { account: AdminAccount }) {
       <div className="flex min-w-0 flex-col gap-0.5">
         <span className="break-all">{account.displayName}</span>
         <span className="break-all text-muted-foreground">
-          {account.email ?? "未绑定邮箱"}
+          {account.email ?? t("common.emailMissing")}
         </span>
       </div>
     </div>
@@ -59,19 +61,22 @@ export function UsersTable({
   users: AdminUser[];
   onSelect: (id: string) => void;
 }) {
+  const { t } = useAdminTranslation();
   return (
-    <TableRegion title="注册用户表格，可横向滚动">
+    <TableRegion title={t("table.usersRegion")}>
       <Table>
-        <TableCaption className="sr-only">注册用户</TableCaption>
+        <TableCaption className="sr-only">
+          {t("table.usersCaption")}
+        </TableCaption>
         <TableHeader>
           <TableRow>
-            <TableHead scope="col">用户</TableHead>
-            <TableHead scope="col">注册时间</TableHead>
-            <TableHead scope="col">最近登录</TableHead>
-            <TableHead scope="col">设备</TableHead>
-            <TableHead scope="col">身份</TableHead>
+            <TableHead scope="col">{t("table.user")}</TableHead>
+            <TableHead scope="col">{t("table.createdAt")}</TableHead>
+            <TableHead scope="col">{t("table.lastLoginAt")}</TableHead>
+            <TableHead scope="col">{t("table.devices")}</TableHead>
+            <TableHead scope="col">{t("table.identity")}</TableHead>
             <TableHead scope="col">
-              <span className="sr-only">操作</span>
+              <span className="sr-only">{t("common.actions")}</span>
             </TableHead>
           </TableRow>
         </TableHeader>
@@ -88,14 +93,19 @@ export function UsersTable({
                 <RecordedTime value={user.lastLoginAt} />
               </TableCell>
               <TableCell>
-                {user.deviceCount} 台 / {user.onlineDeviceCount} 在线
+                {t("table.deviceSummary", {
+                  count: user.deviceCount,
+                  online: user.onlineDeviceCount,
+                })}
               </TableCell>
               <TableCell>
                 <div className="flex flex-wrap gap-1">
                   <Badge variant={user.isSuperAdmin ? "default" : "secondary"}>
-                    {user.isSuperAdmin ? "超级管理员" : "用户"}
+                    {t(user.isSuperAdmin ? "common.superAdmin" : "common.user")}
                   </Badge>
-                  {user.hasGithub && <Badge variant="outline">GitHub</Badge>}
+                  {user.hasGithub && (
+                    <Badge variant="outline">{t("common.github")}</Badge>
+                  )}
                 </div>
               </TableCell>
               <TableCell>
@@ -103,9 +113,11 @@ export function UsersTable({
                   variant="ghost"
                   size="sm"
                   onClick={() => onSelect(user.id)}
-                  aria-label={`查看 ${user.displayName} 的详情`}
+                  aria-label={t("table.viewUserDetails", {
+                    name: user.displayName,
+                  })}
                 >
-                  查看详情
+                  {t("table.viewDetails")}
                   <ChevronRightIcon data-icon="inline-end" aria-hidden="true" />
                 </Button>
               </TableCell>
@@ -118,22 +130,25 @@ export function UsersTable({
 }
 
 export function DevicesTable({ devices }: { devices: AdminDevice[] }) {
+  const { t } = useAdminTranslation();
   return (
-    <TableRegion title="设备表格，可横向滚动">
+    <TableRegion title={t("table.devicesRegion")}>
       <Table>
-        <TableCaption className="sr-only">设备</TableCaption>
+        <TableCaption className="sr-only">
+          {t("table.devicesCaption")}
+        </TableCaption>
         <TableHeader>
           <TableRow>
             {[
-              "设备名称",
-              "所属用户",
-              "平台",
-              "状态",
-              "添加时间",
-              "最后在线",
+              "deviceName",
+              "deviceOwner",
+              "platform",
+              "status",
+              "deviceCreatedAt",
+              "lastSeenAt",
             ].map((label) => (
               <TableHead key={label} scope="col">
-                {label}
+                {t(`table.${label}`)}
               </TableHead>
             ))}
           </TableRow>
@@ -148,14 +163,14 @@ export function DevicesTable({ devices }: { devices: AdminDevice[] }) {
                 <div className="flex flex-col gap-0.5 break-all">
                   <span>{device.accountDisplayName}</span>
                   <span className="text-muted-foreground">
-                    {device.accountEmail ?? "未绑定邮箱"}
+                    {device.accountEmail ?? t("common.emailMissing")}
                   </span>
                 </div>
               </TableCell>
-              <TableCell>{platformName[device.platform]}</TableCell>
+              <TableCell>{t(`platform.${device.platform}`)}</TableCell>
               <TableCell>
                 <Badge variant={device.online ? "default" : "secondary"}>
-                  {device.online ? "在线" : "离线"}
+                  {t(device.online ? "common.online" : "common.offline")}
                 </Badge>
               </TableCell>
               <TableCell>
@@ -173,15 +188,18 @@ export function DevicesTable({ devices }: { devices: AdminDevice[] }) {
 }
 
 export function LoginsTable({ logins }: { logins: AdminLogin[] }) {
+  const { t } = useAdminTranslation();
   return (
-    <TableRegion title="登录记录表格，可横向滚动">
+    <TableRegion title={t("table.loginsRegion")}>
       <Table>
-        <TableCaption className="sr-only">登录记录</TableCaption>
+        <TableCaption className="sr-only">
+          {t("table.loginsCaption")}
+        </TableCaption>
         <TableHeader>
           <TableRow>
-            <TableHead scope="col">用户</TableHead>
-            <TableHead scope="col">登录方式</TableHead>
-            <TableHead scope="col">登录时间</TableHead>
+            <TableHead scope="col">{t("table.user")}</TableHead>
+            <TableHead scope="col">{t("table.loginMethod")}</TableHead>
+            <TableHead scope="col">{t("table.occurredAt")}</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -191,13 +209,13 @@ export function LoginsTable({ logins }: { logins: AdminLogin[] }) {
                 <div className="flex flex-col gap-0.5 break-all">
                   <span>{login.displayName}</span>
                   <span className="text-muted-foreground">
-                    {login.email ?? "未绑定邮箱"}
+                    {login.email ?? t("common.emailMissing")}
                   </span>
                 </div>
               </TableCell>
               <TableCell>
                 <Badge variant="outline">
-                  {login.method === "github" ? "GitHub" : "邮箱密码"}
+                  {t(`loginMethod.${login.method}`)}
                 </Badge>
               </TableCell>
               <TableCell>

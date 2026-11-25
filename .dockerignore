@@ -6,6 +6,8 @@
 !packages/
 !packages/ui/
 !packages/ui/**
+!packages/display/
+!packages/display/**
 !Cargo.toml
 !Cargo.lock
 !crates/

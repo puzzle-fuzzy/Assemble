@@ -3,13 +3,14 @@
 // 它是一个单独的窗口，只认标识：要发的文件、账户里的设备、每一条传输。
 // 文件在哪、怎么上传，都在 Rust 那边。挑文件、选设备、发出去，点三下就结束。
 
+import { DisplayPreferencesMenu } from "@assemble/ui/display-preferences";
 import { Cloud } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
-
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { useSnapshot } from "@/hooks/use-snapshot";
 import { type Bridge, bridge, toBridgeError } from "@/lib/bridge";
+import { uiText, useDesktopTranslation } from "@/lib/i18n";
 import { messageFor } from "@/lib/messages";
 import { formatSize, transferStatus, verdict } from "@/lib/transfer-text";
 import type { TransferView } from "@/lib/types";
@@ -26,6 +27,7 @@ const LINGER_MS = 1500;
 const PLATFORM_NAMES = { windows: "Windows", macos: "Mac", linux: "Linux" };
 
 export function SendPanel({ bridge: source = bridge }: SendPanelProps) {
+  useDesktopTranslation();
   const { snapshot, loadError } = useSnapshot(source);
   // 发起之后盯着的那几条传输。
   const [sent, setSent] = useState<string[] | null>(null);
@@ -51,6 +53,14 @@ export function SendPanel({ bridge: source = bridge }: SendPanelProps) {
     [sent, snapshot],
   );
   const outcome = verdict(mine);
+  const panelTitle = sent
+    ? outcome === "failed"
+      ? uiText("someFilesWereNotSent")
+      : uiText("sendingEllipsis")
+    : uiText("sendToEllipsis");
+  useEffect(() => {
+    document.title = `${panelTitle} · Assemble`;
+  }, [panelTitle]);
 
   // 全部传完而且没有一个失败：停一会儿让用户看清，然后收起。
   useEffect(() => {
@@ -71,7 +81,7 @@ export function SendPanel({ bridge: source = bridge }: SendPanelProps) {
           : await source.sendToDevice(destination),
       );
     } catch (error: unknown) {
-      setProblem(messageFor(toBridgeError(error)));
+      setProblem(toBridgeError(error).code);
     } finally {
       setPending(false);
     }
@@ -87,7 +97,7 @@ export function SendPanel({ bridge: source = bridge }: SendPanelProps) {
         }
       }
     } catch (error: unknown) {
-      setProblem(messageFor(toBridgeError(error)));
+      setProblem(toBridgeError(error).code);
     } finally {
       setPending(false);
     }
@@ -104,39 +114,45 @@ export function SendPanel({ bridge: source = bridge }: SendPanelProps) {
 
   return (
     <main className="flex min-h-screen w-full flex-col gap-3 bg-background px-5 py-5 text-foreground">
+      <header className="flex items-center justify-between gap-3">
+        <h1 className="text-base leading-none font-semibold">{panelTitle}</h1>
+        <DisplayPreferencesMenu />
+      </header>
       {loadError ? (
         <p role="alert" className="text-sm text-destructive">
           {loadError}
         </p>
       ) : null}
       {!snapshot ? (
-        <p className="text-sm text-muted-foreground">正在打开…</p>
+        <p className="text-sm text-muted-foreground">
+          {uiText("openingEllipsis")}
+        </p>
       ) : null}
 
       {snapshot && !signedIn ? (
         <>
-          <h1 className="text-base leading-none font-semibold">发送到…</h1>
           <p className="text-sm text-muted-foreground">
-            请先在 Assemble 主窗口登录，再发送文件。
+            {uiText("signInFromTheMainAssembleWindowToSendFiles")}
           </p>
           <Button variant="outline" onClick={() => void source.openMain()}>
-            打开 Assemble
+            {uiText("openAssemble")}
           </Button>
         </>
       ) : null}
 
       {snapshot && signedIn && !draft && !sent ? (
         <>
-          <h1 className="text-base leading-none font-semibold">发送到…</h1>
-          <p className="text-sm text-muted-foreground">没有要发送的文件。</p>
+          <p className="text-sm text-muted-foreground">
+            {uiText("noFilesSelected")}
+          </p>
           <div className="flex gap-2">
             <Button
               onClick={() => void source.startSend().catch(() => undefined)}
             >
-              重新选择
+              {uiText("chooseAgain")}
             </Button>
             <Button variant="outline" onClick={() => void close()}>
-              关闭
+              {uiText("close")}
             </Button>
           </div>
         </>
@@ -144,7 +160,6 @@ export function SendPanel({ bridge: source = bridge }: SendPanelProps) {
 
       {draft && !sent ? (
         <>
-          <h1 className="text-base leading-none font-semibold">发送到…</h1>
           <ul className="flex flex-col gap-1 rounded-lg border border-border px-3 py-2">
             {draft.files.map((file) => (
               <li
@@ -160,7 +175,10 @@ export function SendPanel({ bridge: source = bridge }: SendPanelProps) {
               </li>
             ))}
           </ul>
-          <ul className="flex flex-col gap-2" aria-label="选择要发往哪里">
+          <ul
+            className="flex flex-col gap-2"
+            aria-label={uiText("chooseADestination")}
+          >
             <li>
               <button
                 type="button"
@@ -173,10 +191,10 @@ export function SendPanel({ bridge: source = bridge }: SendPanelProps) {
                     aria-hidden
                     className="size-3.5 shrink-0 text-muted-foreground"
                   />
-                  <span className="truncate">云盘</span>
+                  <span className="truncate">{uiText("cloudDrive")}</span>
                 </span>
                 <span className="shrink-0 text-xs text-muted-foreground">
-                  存到服务端
+                  {uiText("storeOnTheServer")}
                 </span>
               </button>
             </li>
@@ -201,7 +219,7 @@ export function SendPanel({ bridge: source = bridge }: SendPanelProps) {
                   </span>
                   <span className="shrink-0 text-xs text-muted-foreground">
                     {PLATFORM_NAMES[device.platform]} ·{" "}
-                    {device.online ? "在线" : "离线"}
+                    {device.online ? uiText("online") : uiText("offline")}
                   </span>
                 </button>
               </li>
@@ -209,7 +227,7 @@ export function SendPanel({ bridge: source = bridge }: SendPanelProps) {
           </ul>
           {problem ? (
             <p role="alert" className="text-sm text-destructive">
-              {problem}
+              {messageFor(toBridgeError({ code: problem }))}
             </p>
           ) : null}
         </>
@@ -217,9 +235,6 @@ export function SendPanel({ bridge: source = bridge }: SendPanelProps) {
 
       {sent ? (
         <>
-          <h1 className="text-base leading-none font-semibold">
-            {outcome === "failed" ? "没有全部传完" : "正在传送…"}
-          </h1>
           <ul className="flex flex-col gap-2">
             {mine.map((transfer) => (
               <SentFile key={transfer.id} transfer={transfer} />
@@ -233,7 +248,7 @@ export function SendPanel({ bridge: source = bridge }: SendPanelProps) {
                   disabled={pending}
                   onClick={() => void retryFailed()}
                 >
-                  重发没发出去的
+                  {uiText("retryUnsentFiles")}
                 </Button>
               ) : null}
               <Button
@@ -241,17 +256,19 @@ export function SendPanel({ bridge: source = bridge }: SendPanelProps) {
                 disabled={pending}
                 onClick={() => void close()}
               >
-                关闭
+                {uiText("close")}
               </Button>
             </>
           ) : (
             <p className="text-sm text-muted-foreground">
-              {closing ? "已发送" : "传完之后会自动关闭。"}
+              {closing
+                ? uiText("sent")
+                : uiText("thisWindowClosesWhenTheTransferFinishes")}
             </p>
           )}
           {problem ? (
             <p role="alert" className="text-sm text-destructive">
-              {problem}
+              {messageFor(toBridgeError({ code: problem }))}
             </p>
           ) : null}
         </>

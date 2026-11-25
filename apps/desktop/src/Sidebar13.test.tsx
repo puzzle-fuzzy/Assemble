@@ -39,7 +39,7 @@ afterEach(async () => {
 });
 
 describe("sidebar-13 整页导航", () => {
-  test("左侧展示六个文字菜单，右侧整页列出传输记录", async () => {
+  test("左侧展示功能文字菜单和底部账户区，右侧整页列出传输记录", async () => {
     const view = await renderApp(
       new FakeBridge(
         snapshot({
@@ -59,15 +59,11 @@ describe("sidebar-13 整页导航", () => {
     const nav = view.host.querySelector(
       'nav[aria-label="主功能"]',
     ) as HTMLElement;
-    for (const name of [
-      "文件传输",
-      "云盘",
-      "日程与提醒",
-      "本机设置",
-      "账户中心",
-      "关于软件",
-    ])
+    for (const name of ["文件传输", "云盘", "日程与提醒", "本机设置"])
       expect(button(nav, name)?.textContent).toBe(name);
+    expect(button(nav, "关于")).toBeUndefined();
+    expect(button(nav, "关于软件")).toBeUndefined();
+    expect(button(view.host, "账户菜单")).toBeDefined();
     expect(text(card(view.host, "传输"))).toContain("已收到.pdf");
     expect(text(card(view.host, "传输"))).toContain("正在发.zip");
     expect(view.host.querySelector("[data-item-id]") === null).toBe(true);

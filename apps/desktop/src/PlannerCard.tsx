@@ -4,24 +4,20 @@
 // 每一次改动都带着看到的版本号；别处改过时 Rust 已经换上最新的名单，这里只提示"再看一眼"。
 // 表单交给 Rust 的只有标题、时间与几句备注，没有这台电脑上的任何位置。
 
+import { CalendarClock } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardAction,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Empty,
-  EmptyDescription,
   EmptyHeader,
+  EmptyMedia,
   EmptyTitle,
 } from "@/components/ui/empty";
+import { Input } from "@/components/ui/input";
+import { Skeleton } from "@/components/ui/skeleton";
 import { type Bridge, toBridgeError } from "@/lib/bridge";
-import { messageFor } from "@/lib/messages";
+import { uiText, useDesktopTranslation } from "@/lib/i18n";
 import { agenda } from "@/lib/planner-text";
 import type {
   ReminderContent,
@@ -44,6 +40,7 @@ export interface PlannerCardProps {
   onError: (message: string | null) => void;
   active?: boolean;
   query?: string;
+  onQueryChange: (query: string) => void;
 }
 
 /** 这些错误码的意思都是"你看到的是旧的"：表单里留着旧值只会再错一次，不如收起来看最新的。 */
@@ -55,7 +52,9 @@ export function PlannerCard({
   onError,
   active = true,
   query = "",
+  onQueryChange,
 }: PlannerCardProps) {
+  useDesktopTranslation();
   const [pending, setPending] = useState(false);
   const [form, setForm] = useState<Form | null>(null);
   const [showForm, setShowForm] = useState(false);
@@ -73,7 +72,7 @@ export function PlannerCard({
     if (!signedInAs || planner || requested.current === signedInAs) return;
     requested.current = signedInAs;
     source.plannerRefresh().catch((error: unknown) => {
-      onError(messageFor(toBridgeError(error)));
+      onError(toBridgeError(error).code);
     });
   }, [signedInAs, planner, source, onError]);
 
@@ -110,7 +109,7 @@ export function PlannerCard({
       await what();
       return null;
     } catch (error: unknown) {
-      onError(messageFor(toBridgeError(error)));
+      onError(toBridgeError(error).code);
       return toBridgeError(error).code;
     } finally {
       setPending(false);
@@ -192,43 +191,53 @@ export function PlannerCard({
 
   return (
     <Card>
-      <CardHeader>
-        <CardTitle className="sr-only">日程</CardTitle>
-        {showForm || (planner !== null && entries.length === 0) ? null : (
-          <CardDescription>
-            {planner ? `七天之内有 ${entries.length} 项。` : "正在读取日程…"}
-          </CardDescription>
-        )}
-        {showForm ? null : (
-          <CardAction className="flex flex-wrap gap-2">
-            {form ? (
+      <CardHeader
+        className={
+          showForm
+            ? "sr-only"
+            : "flex flex-row flex-wrap items-center justify-between gap-3"
+        }
+      >
+        <CardTitle className="sr-only">{uiText("schedule")}</CardTitle>
+        {!showForm ? (
+          <>
+            <Input
+              className="w-full sm:w-64"
+              aria-label={uiText("searchSchedulesAndReminders")}
+              placeholder={uiText("searchEllipsis")}
+              value={query}
+              onChange={(event) => onQueryChange(event.target.value)}
+            />
+            <div className="flex flex-wrap items-center gap-2">
+              {form ? (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={pending}
+                  onClick={() => setShowForm(true)}
+                >
+                  {uiText("resumeEditingEllipsis")}
+                </Button>
+              ) : null}
               <Button
                 size="sm"
                 variant="outline"
                 disabled={pending}
-                onClick={() => setShowForm(true)}
+                onClick={() => edit({ kind: "schedule", original: null })}
               >
-                继续编辑…
+                {uiText("newScheduleEllipsis")}
               </Button>
-            ) : null}
-            <Button
-              size="sm"
-              variant="outline"
-              disabled={pending}
-              onClick={() => edit({ kind: "schedule", original: null })}
-            >
-              新建日程…
-            </Button>
-            <Button
-              size="sm"
-              variant="outline"
-              disabled={pending}
-              onClick={() => edit({ kind: "reminder", original: null })}
-            >
-              新建提醒…
-            </Button>
-          </CardAction>
-        )}
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={pending}
+                onClick={() => edit({ kind: "reminder", original: null })}
+              >
+                {uiText("newReminderEllipsis")}
+              </Button>
+            </div>
+          </>
+        ) : null}
       </CardHeader>
       {form ? (
         <CardContent hidden={!showForm}>
@@ -243,12 +252,36 @@ export function PlannerCard({
           />
         </CardContent>
       ) : null}
+      {!showForm && planner === null ? (
+        <CardContent
+          role="status"
+          aria-label={uiText("loadingScheduleEllipsis")}
+        >
+          <Skeleton className="h-32 w-full" />
+        </CardContent>
+      ) : null}
       {!showForm && planner ? (
         <CardContent className="flex flex-col gap-4">
+          {shownEntries.length === 0 && notifications.length === 0 ? (
+            <Empty className="min-h-48">
+              <EmptyHeader>
+                <EmptyMedia variant="icon">
+                  <CalendarClock aria-hidden="true" />
+                </EmptyMedia>
+                <EmptyTitle>
+                  {needle
+                    ? uiText("noMatchingItems")
+                    : uiText("noUpcomingItemsInTheNextSevenDays")}
+                </EmptyTitle>
+              </EmptyHeader>
+            </Empty>
+          ) : null}
           {notifications.length > 0 ? (
             <div className="flex flex-col gap-2">
               <div className="flex items-center justify-between gap-3">
-                <h2 className="text-sm font-medium">到点的提醒</h2>
+                <h2 className="text-sm font-medium">
+                  {uiText("dueReminders")}
+                </h2>
                 {planner.notifications.length > 1 ? (
                   <Button
                     size="xs"
@@ -258,14 +291,15 @@ export function PlannerCard({
                       void act(() => source.notificationsReadAll())
                     }
                   >
-                    全部已读
+                    {uiText("markAllAsRead")}
                   </Button>
                 ) : null}
               </div>
-              <ul className="flex flex-col gap-2">
-                {notifications.map((notification) => (
+              <ul className="flex flex-col">
+                {notifications.map((notification, index) => (
                   <NotificationRow
                     key={notification.id}
+                    separated={index > 0}
                     ref={notification.id === focus ? focused : undefined}
                     notification={notification}
                     reminder={
@@ -290,30 +324,15 @@ export function PlannerCard({
               </ul>
             </div>
           ) : null}
-          <div className="flex flex-col gap-2">
-            <h2 className="text-sm font-medium">接下来的安排</h2>
-            {entries.length === 0 ? (
-              <Empty>
-                <EmptyHeader>
-                  <EmptyTitle>七天之内没有安排。</EmptyTitle>
-                  <EmptyDescription>
-                    新建日程或提醒后会显示在这里。
-                  </EmptyDescription>
-                </EmptyHeader>
-              </Empty>
-            ) : shownEntries.length === 0 && notifications.length === 0 ? (
-              <Empty>
-                <EmptyHeader>
-                  <EmptyTitle>没有匹配的安排</EmptyTitle>
-                  <EmptyDescription>换个关键词试试。</EmptyDescription>
-                </EmptyHeader>
-              </Empty>
-            ) : (
-              <ul className="flex flex-col gap-2">
-                {shownEntries.map((entry) =>
+          {shownEntries.length > 0 ? (
+            <div className="flex flex-col gap-2">
+              <h2 className="text-sm font-medium">{uiText("upcoming")}</h2>
+              <ul className="flex flex-col">
+                {shownEntries.map((entry, index) =>
                   "schedule" in entry ? (
                     <ScheduleRow
                       key={entry.key}
+                      separated={index > 0}
                       source={source}
                       item={entry.schedule}
                       deviceName={deviceName}
@@ -324,6 +343,7 @@ export function PlannerCard({
                   ) : (
                     <ReminderRow
                       key={entry.key}
+                      separated={index > 0}
                       source={source}
                       item={entry.reminder}
                       deviceName={deviceName}
@@ -334,8 +354,8 @@ export function PlannerCard({
                   ),
                 )}
               </ul>
-            )}
-          </div>
+            </div>
+          ) : null}
         </CardContent>
       ) : null}
     </Card>

@@ -206,7 +206,6 @@ describe("日程", () => {
     await settle();
     const page = card(view.host, "日程");
 
-    expect(text(page)).toContain("七天之内有 5 项。");
     // 通知说清楚是多久之前来的。
     expect(text(await notice(page, "取快递"))).toContain("驿站楼下");
     expect(text(await notice(page, "取快递"))).toContain("20 分钟前");
@@ -259,7 +258,11 @@ describe("日程", () => {
     const view = await renderApp(source, "日程与提醒");
     await settle();
     expect(source.calls).toEqual(["plannerRefresh"]);
-    expect(text(card(view.host, "日程"))).toContain("正在读取日程…");
+    expect(
+      card(view.host, "日程").querySelector(
+        '[role="status"][aria-label="正在读取日程…"]',
+      ),
+    ).not.toBeNull();
 
     // 还是没拿到：不重复要。
     await act(async () => {
@@ -283,6 +286,7 @@ describe("日程", () => {
     const page = card(view.host, "日程");
     expect(text(page)).toContain("七天之内没有安排。");
     expect(text(page)).not.toContain("到点的提醒");
+    expect(text(page)).not.toContain("接下来的安排");
     expect(button(page, "全部已读")).toBeUndefined();
   });
 
@@ -328,8 +332,12 @@ describe("日程", () => {
       await settle();
       const page = card(view.host, "日程");
       expect(scrolling.scrolled).toEqual([await notice(page, "周会")]);
-      expect((await notice(page, "周会")).className).toContain("ring-2");
-      expect((await notice(page, "取快递")).className).not.toContain("ring-2");
+      expect((await notice(page, "周会")).getAttribute("aria-current")).toBe(
+        "true",
+      );
+      expect((await notice(page, "取快递")).hasAttribute("aria-current")).toBe(
+        false,
+      );
     } finally {
       scrolling.restore();
     }

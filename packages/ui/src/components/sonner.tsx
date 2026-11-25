@@ -1,3 +1,4 @@
+import { useDisplayPreferences } from "@assemble/display";
 import {
   CircleCheckIcon,
   InfoIcon,
@@ -6,11 +7,15 @@ import {
   TriangleAlertIcon,
 } from "lucide-react";
 import { Toaster as Sonner, type ToasterProps } from "sonner";
+import { useUiTranslation } from "../lib/i18n";
 
 const Toaster = ({ ...props }: ToasterProps) => {
+  const { resolvedTheme } = useDisplayPreferences();
+  const { t } = useUiTranslation();
   return (
     <Sonner
-      theme="light"
+      theme={resolvedTheme}
+      containerAriaLabel={t("notifications")}
       className="toaster group"
       icons={{
         success: <CircleCheckIcon className="size-4" />,
@@ -28,7 +33,7 @@ const Toaster = ({ ...props }: ToasterProps) => {
         } as React.CSSProperties
       }
       toastOptions={{
-        closeButtonAriaLabel: "关闭提示",
+        closeButtonAriaLabel: t("closeToast"),
         classNames: {
           toast: "cn-toast",
         },

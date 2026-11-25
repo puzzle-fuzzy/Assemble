@@ -2,6 +2,7 @@
 //
 // 现在有六类真实内容：账户与连接、账户里的设备、文件传输、日程与提醒、云盘、本机设置。
 
+import { useDisplayPreferences } from "@assemble/display";
 import {
   Breadcrumb,
   BreadcrumbItem,
@@ -11,12 +12,12 @@ import {
   BreadcrumbSeparator,
 } from "@assemble/ui/breadcrumb";
 import { ArrowDownToLine, ArrowUpToLine, UserRound } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import {
   DesktopMobileMenu,
   DesktopSidebar,
-  DESKTOP_MODULES as SECTIONS,
+  desktopModules as SECTIONS,
   type DesktopModule as Section,
 } from "@/components/desktop-sidebar";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -41,13 +42,16 @@ import {
 import { Input } from "@/components/ui/input";
 import { Progress } from "@/components/ui/progress";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Separator } from "@/components/ui/separator";
 import { SidebarProvider } from "@/components/ui/sidebar";
 import { Toaster } from "@/components/ui/sonner";
 import { Switch } from "@/components/ui/switch";
 import { useSnapshot } from "@/hooks/use-snapshot";
 import { type Bridge, bridge, toBridgeError } from "@/lib/bridge";
 import { formatBuildInfo } from "@/lib/build-info";
+import { formatStoredDate, uiText, useDesktopTranslation } from "@/lib/i18n";
 import { messageFor } from "@/lib/messages";
+import { noticeText } from "@/lib/notice-text";
 import {
   formatSize,
   formatSpace,
@@ -75,7 +79,11 @@ export interface AppProps {
 const LOGIN_TIMEOUT_MESSAGE = "等待浏览器登录超时，请重试。";
 
 export function App({ bridge: source = bridge }: AppProps) {
+  useDesktopTranslation();
+  const { resolvedTheme } = useDisplayPreferences();
   const { snapshot, loadError } = useSnapshot(source);
+  const [accountPending, setAccountPending] = useState(false);
+  const accountAction = useRef(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const [section, setSection] = useState<Section>("transfers");
   const [queries, setQueries] = useState<Partial<Record<Section, string>>>({});
@@ -107,8 +115,7 @@ export function App({ bridge: source = bridge }: AppProps) {
     setQueries((previous) => ({ ...previous, planner: "" }));
   }, [focused]);
 
-  const query = queries[section] ?? "";
-  const sectionLabel = SECTIONS.find((item) => item.id === section)?.label;
+  const sectionLabel = SECTIONS().find((item) => item.id === section)?.label;
   useEffect(() => {
     document.title = `${sectionLabel} · Assemble`;
     if (previousSection.current !== section) contentHeading.current?.focus();
@@ -123,23 +130,45 @@ export function App({ bridge: source = bridge }: AppProps) {
       if (compose !== null)
         void source
           .plannerCompose(null)
-          .catch((error: unknown) =>
-            setActionError(messageFor(toBridgeError(error))),
-          );
+          .catch((error: unknown) => setActionError(toBridgeError(error).code));
       if (focused !== null)
         void source
           .plannerFocus(null)
-          .catch((error: unknown) =>
-            setActionError(messageFor(toBridgeError(error))),
-          );
+          .catch((error: unknown) => setActionError(toBridgeError(error).code));
+    }
+  }
+
+  async function signOut() {
+    if (accountAction.current) return;
+    accountAction.current = true;
+    setAccountPending(true);
+    setActionError(null);
+    try {
+      await source.signOut();
+    } catch (error: unknown) {
+      setActionError(toBridgeError(error).code);
+    } finally {
+      accountAction.current = false;
+      setAccountPending(false);
     }
   }
 
   return (
     <>
-      <Toaster closeButton containerAriaLabel="登录提示" />
+      <Toaster
+        theme={resolvedTheme}
+        closeButton
+        containerAriaLabel={uiText("signInNotifications")}
+      />
       <SidebarProvider className="items-start">
-        <DesktopSidebar section={section} onNavigate={navigate} />
+        <DesktopSidebar
+          section={section}
+          onNavigate={navigate}
+          session={snapshot?.session}
+          pending={accountPending}
+          onSignOut={() => void signOut()}
+          onNavigateFocus={() => contentHeading.current?.focus()}
+        />
         <main className="flex h-svh min-w-0 flex-1 flex-col overflow-hidden">
           <header className="flex h-16 shrink-0 items-center justify-between gap-2 transition-[width,height] ease-linear group-has-data-[collapsible=icon]/sidebar-wrapper:h-12">
             <div className="flex min-w-0 items-center gap-2 px-4">
@@ -183,27 +212,8 @@ export function App({ bridge: source = bridge }: AppProps) {
             </div>
           </header>
           <ScrollArea className="min-h-0 flex-1">
-            <div className="@container mx-auto flex w-full min-w-0 flex-col gap-4 p-4 pt-0">
-              {phase === "signedIn" &&
-              section !== "settings" &&
-              section !== "account" &&
-              section !== "about" ? (
-                <div className="flex justify-end">
-                  <Input
-                    className="w-full sm:w-64"
-                    aria-label={`搜索${sectionLabel}`}
-                    placeholder="搜索…"
-                    value={query}
-                    onChange={(event) => {
-                      const value = event.target.value;
-                      setQueries((previous) => ({
-                        ...previous,
-                        [section]: value,
-                      }));
-                    }}
-                  />
-                </div>
-              ) : null}
+            {/* Card 的外描边需要留在滚动区内，避免顶部贴边时被视口裁掉。 */}
+            <div className="@container mx-auto flex w-full min-w-0 flex-col gap-4 p-4 pt-1">
               {loadError ? (
                 <p role="alert" className="text-sm text-destructive">
                   {loadError}
@@ -217,7 +227,7 @@ export function App({ bridge: source = bridge }: AppProps) {
               ) : null}
               {actionError ? (
                 <p role="alert" className="text-sm text-destructive">
-                  {actionError}
+                  {messageFor(toBridgeError({ code: actionError }))}
                 </p>
               ) : null}
               {phase !== "signedIn" &&
@@ -230,10 +240,12 @@ export function App({ bridge: source = bridge }: AppProps) {
                       <UserRound aria-hidden="true" />
                     </EmptyMedia>
                     <EmptyTitle>
-                      {snapshot ? "登录 Assemble" : "正在读取本机状态…"}
+                      {snapshot
+                        ? uiText("signInToAssemble")
+                        : uiText("loadingDeviceStatusEllipsis")}
                     </EmptyTitle>
                     <EmptyDescription>
-                      通过左侧菜单的账户中心，在系统浏览器里登录。
+                      {uiText("completeSignInInYourSystemBrowser")}
                     </EmptyDescription>
                   </EmptyHeader>
                   <EmptyContent>
@@ -241,7 +253,7 @@ export function App({ bridge: source = bridge }: AppProps) {
                       variant="outline"
                       onClick={() => navigate("account")}
                     >
-                      打开账户中心
+                      {uiText("openAccountCenter")}
                     </Button>
                   </EmptyContent>
                 </Empty>
@@ -249,7 +261,7 @@ export function App({ bridge: source = bridge }: AppProps) {
               {/* 只隐藏非当前页面，同一账户的草稿与进行中的操作继续保留。 */}
               <section
                 id="view-transfers"
-                aria-label="文件传输"
+                aria-label={uiText("fileTransfers")}
                 hidden={section !== "transfers"}
               >
                 <TransfersCard
@@ -258,11 +270,17 @@ export function App({ bridge: source = bridge }: AppProps) {
                   snapshot={snapshot}
                   onError={setActionError}
                   query={queries.transfers ?? ""}
+                  onQueryChange={(value) =>
+                    setQueries((previous) => ({
+                      ...previous,
+                      transfers: value,
+                    }))
+                  }
                 />
               </section>
               <section
                 id="view-drive"
-                aria-label="云盘"
+                aria-label={uiText("cloudDrive")}
                 hidden={section !== "drive"}
               >
                 <DriveCard
@@ -271,11 +289,14 @@ export function App({ bridge: source = bridge }: AppProps) {
                   snapshot={snapshot}
                   onError={setActionError}
                   query={queries.drive ?? ""}
+                  onQueryChange={(value) =>
+                    setQueries((previous) => ({ ...previous, drive: value }))
+                  }
                 />
               </section>
               <section
                 id="view-planner"
-                aria-label="日程与提醒"
+                aria-label={uiText("schedulesAndReminders")}
                 hidden={section !== "planner"}
               >
                 <PlannerCard
@@ -285,11 +306,14 @@ export function App({ bridge: source = bridge }: AppProps) {
                   snapshot={snapshot}
                   onError={setActionError}
                   query={queries.planner ?? ""}
+                  onQueryChange={(value) =>
+                    setQueries((previous) => ({ ...previous, planner: value }))
+                  }
                 />
               </section>
               <section
                 id="view-settings"
-                aria-label="本机设置"
+                aria-label={uiText("deviceSettings")}
                 hidden={section !== "settings"}
               >
                 <LaunchCard
@@ -300,7 +324,7 @@ export function App({ bridge: source = bridge }: AppProps) {
               </section>
               <section
                 id="view-account"
-                aria-label="账户中心"
+                aria-label={uiText("accountCenter")}
                 hidden={section !== "account"}
               >
                 <div
@@ -311,6 +335,8 @@ export function App({ bridge: source = bridge }: AppProps) {
                     source={source}
                     snapshot={snapshot}
                     onError={setActionError}
+                    onSignOut={signOut}
+                    busy={accountPending}
                   />
                   <DevicesCard
                     source={source}
@@ -321,7 +347,7 @@ export function App({ bridge: source = bridge }: AppProps) {
               </section>
               <section
                 id="view-about"
-                aria-label="关于软件"
+                aria-label={uiText("about")}
                 hidden={section !== "about"}
               >
                 <AboutCard />
@@ -338,20 +364,19 @@ export function App({ bridge: source = bridge }: AppProps) {
 function AboutCard() {
   return (
     <Card>
-      <CardHeader>
-        <CardTitle className="sr-only">关于软件</CardTitle>
-        <CardDescription>当前安装的版本与官方网站。</CardDescription>
+      <CardHeader className="sr-only">
+        <CardTitle>{uiText("about")}</CardTitle>
       </CardHeader>
       <CardContent>
         <dl className="flex flex-col gap-4 text-sm">
           <div className="flex flex-col gap-1">
-            <dt className="text-muted-foreground">当前版本</dt>
+            <dt className="text-muted-foreground">{uiText("version")}</dt>
             <dd className="select-text">
               {formatBuildInfo(__ASSEMBLE_BUILD__)}
             </dd>
           </div>
           <div className="flex flex-col gap-1">
-            <dt className="text-muted-foreground">官网</dt>
+            <dt className="text-muted-foreground">{uiText("website")}</dt>
             <dd className="break-all select-text">
               {__ASSEMBLE_BUILD__.website}
             </dd>
@@ -371,12 +396,18 @@ function ServiceStatus({
   signedIn: boolean;
 }) {
   if (!service || service.reachable === null) {
-    return <p className="text-sm text-muted-foreground">正在检测连接</p>;
+    return (
+      <p className="text-sm text-muted-foreground">
+        {uiText("checkingConnection")}
+      </p>
+    );
   }
   if (!service.reachable) {
     return (
       <p className="text-sm text-destructive">
-        {signedIn ? "连接已断开，正在重连" : "暂时无法连接服务器"}
+        {signedIn
+          ? uiText("connectionLostReconnecting")
+          : uiText("unableToReachTheServer")}
       </p>
     );
   }
@@ -384,11 +415,11 @@ function ServiceStatus({
     return (
       <p className="text-sm text-muted-foreground">
         {service.stream === "connected"
-          ? "已连接"
+          ? uiText("connected")
           : // `off` 只出现在刚登录、事件流还没开始建立的那一瞬间。
             service.stream === "connecting" || service.stream === "off"
-            ? "正在连接…"
-            : "连接已断开，正在重连…"}
+            ? uiText("connectingEllipsis")
+            : uiText("connectionLostReconnectingEllipsis")}
       </p>
     );
   }
@@ -425,32 +456,37 @@ function NoticeLine({
           : "flex items-start justify-between gap-3 text-sm text-muted-foreground"
       }
     >
-      <p>{notice.message}</p>
+      <p>{noticeText(notice)}</p>
       <button
         type="button"
         className="shrink-0 text-sm text-muted-foreground underline-offset-2 hover:underline"
         onClick={onDismiss}
       >
-        知道了
+        {uiText("dismiss")}
       </button>
     </div>
   );
 }
 
 function LoginTimeoutToast({ onDismiss }: { onDismiss: () => void }) {
+  useDesktopTranslation();
+  const message = uiText("browserSignInTimedOutPleaseTryAgain");
   const dismissRef = useRef(onDismiss);
   dismissRef.current = onDismiss;
 
   useEffect(() => {
-    const id = toast.error(LOGIN_TIMEOUT_MESSAGE, {
+    toast.error(message, {
       id: "login-timeout",
       duration: Number.POSITIVE_INFINITY,
       onDismiss: () => dismissRef.current(),
     });
-    return () => {
-      toast.dismiss(id);
-    };
-  }, []);
+  }, [message]);
+  useEffect(
+    () => () => {
+      toast.dismiss("login-timeout");
+    },
+    [],
+  );
 
   return null;
 }
@@ -461,7 +497,13 @@ interface CardProps {
   onError: (message: string | null) => void;
 }
 
-function SessionCard({ source, snapshot, onError }: CardProps) {
+function SessionCard({
+  source,
+  snapshot,
+  onError,
+  onSignOut,
+  busy = false,
+}: CardProps & { onSignOut?: () => Promise<void>; busy?: boolean }) {
   const [pending, setPending] = useState(false);
   const session = snapshot?.session;
   const unreachable = snapshot?.service.reachable === false;
@@ -476,7 +518,7 @@ function SessionCard({ source, snapshot, onError }: CardProps) {
       // 回调失败的具体提示由 Rust 的 notice 提供，取消或拒绝时则不提示。
       // 不再叠上一条通用错误，否则超时 toast 之外页面里还会留着同一次失败。
       if (failure.code !== "LOGIN_CALLBACK_FAILED") {
-        onError(messageFor(failure));
+        onError(failure.code);
       }
     } finally {
       setPending(false);
@@ -484,7 +526,7 @@ function SessionCard({ source, snapshot, onError }: CardProps) {
   }
 
   const action = (() => {
-    if (!session || pending) return null;
+    if (!session || pending || busy) return null;
     switch (session.phase) {
       case "signingIn":
         return (
@@ -492,16 +534,18 @@ function SessionCard({ source, snapshot, onError }: CardProps) {
             variant="outline"
             onClick={() => void perform(() => source.cancelSignIn())}
           >
-            取消
+            {uiText("cancel")}
           </Button>
         );
       case "signedIn":
         return (
           <Button
             variant="outline"
-            onClick={() => void perform(() => source.signOut())}
+            onClick={() =>
+              void perform(() => (onSignOut ? onSignOut() : source.signOut()))
+            }
           >
-            退出登录
+            {uiText("signOut")}
           </Button>
         );
       case "signedOut":
@@ -510,7 +554,7 @@ function SessionCard({ source, snapshot, onError }: CardProps) {
             disabled={unreachable}
             onClick={() => void perform(() => source.signIn())}
           >
-            使用浏览器登录
+            {uiText("signInWithBrowser")}
           </Button>
         );
     }
@@ -519,7 +563,7 @@ function SessionCard({ source, snapshot, onError }: CardProps) {
   return (
     <Card>
       <CardHeader>
-        <CardTitle>账户</CardTitle>
+        <CardTitle>{uiText("account")}</CardTitle>
         <CardDescription>{describe(session, unreachable)}</CardDescription>
         <CardAction>{action}</CardAction>
       </CardHeader>
@@ -538,7 +582,8 @@ function SessionCard({ source, snapshot, onError }: CardProps) {
             </AvatarFallback>
           </Avatar>
           <p className="text-sm text-muted-foreground">
-            这台设备：{session.device.name}
+            {uiText("thisDevice")}
+            {session.device.name}
           </p>
         </CardContent>
       ) : null}
@@ -553,7 +598,7 @@ function describe(
   if (!session) return "";
   switch (session.phase) {
     case "signingIn":
-      return "已在浏览器打开登录页，完成后会自动返回。";
+      return uiText("theSignInPageIsOpenInYourBrowserReturnHereWhenYouFinish");
     case "signedIn": {
       const { displayName, username, email } = session.account;
       const identity = email ?? username;
@@ -562,7 +607,9 @@ function describe(
         : `${displayName}（${identity}）`;
     }
     case "signedOut":
-      return unreachable ? "服务暂不可达，恢复后即可登录。" : "";
+      return unreachable
+        ? uiText("theServerIsUnavailableSignInWhenTheConnectionIsRestored")
+        : "";
   }
 }
 
@@ -584,20 +631,19 @@ function DevicesCard({ source, snapshot, onError }: CardProps) {
   return (
     <Card>
       <CardHeader>
-        <CardTitle>设备</CardTitle>
-        <CardDescription>
-          登录了这个账户的全部电脑。在线的可以直接收文件。
-        </CardDescription>
+        <CardTitle>{uiText("devices")}</CardTitle>
       </CardHeader>
-      <CardContent className="flex flex-col gap-2">
-        {snapshot.devices.map((device) => (
-          <DeviceRow
-            key={device.id}
-            source={source}
-            device={device}
-            isThisDevice={device.id === session.device.id}
-            onError={onError}
-          />
+      <CardContent className="flex flex-col">
+        {snapshot.devices.map((device, index) => (
+          <Fragment key={device.id}>
+            {index > 0 ? <Separator /> : null}
+            <DeviceRow
+              source={source}
+              device={device}
+              isThisDevice={device.id === session.device.id}
+              onError={onError}
+            />
+          </Fragment>
         ))}
       </CardContent>
     </Card>
@@ -631,7 +677,7 @@ function DeviceRow({
       setEditing(false);
       setConfirming(false);
     } catch (error: unknown) {
-      setProblem(messageFor(toBridgeError(error)));
+      setProblem(toBridgeError(error).code);
     } finally {
       setPending(false);
     }
@@ -640,7 +686,7 @@ function DeviceRow({
   function save() {
     const name = draft.trim();
     if (name.length === 0 || name.length > DEVICE_NAME_MAX) {
-      setProblem(messageFor(toBridgeError({ code: "INVALID_INPUT" })));
+      setProblem(toBridgeError({ code: "INVALID_INPUT" }).code);
       return;
     }
     if (name === device.name) {
@@ -651,7 +697,7 @@ function DeviceRow({
   }
 
   return (
-    <div className="rounded-lg border border-border px-3 py-2">
+    <div className="py-3">
       <div className="flex flex-wrap items-center gap-3">
         <span
           aria-hidden
@@ -664,7 +710,7 @@ function DeviceRow({
         <div className="min-w-0 flex-1">
           {editing ? (
             <Input
-              aria-label={`给「${device.name}」起的新名字`}
+              aria-label={uiText("newNameFor", { value0: device.name })}
               value={draft}
               maxLength={DEVICE_NAME_MAX}
               autoFocus
@@ -683,14 +729,14 @@ function DeviceRow({
               {device.name}
               {isThisDevice ? (
                 <Badge className="ml-2" variant="secondary">
-                  本机
+                  {uiText("thisDevice2")}
                 </Badge>
               ) : null}
             </p>
           )}
           <p className="text-xs text-muted-foreground">
             {PLATFORM_NAMES[device.platform]} ·{" "}
-            {device.online ? "在线" : "离线"}
+            {device.online ? uiText("online") : uiText("offline")}
           </p>
         </div>
         {isThisDevice ? null : (
@@ -705,7 +751,7 @@ function DeviceRow({
                     void perform(() => source.removeDevice(device.id))
                   }
                 >
-                  确认移除
+                  {uiText("confirmRemoval")}
                 </Button>
                 <Button
                   size="sm"
@@ -713,13 +759,13 @@ function DeviceRow({
                   disabled={pending}
                   onClick={() => setConfirming(false)}
                 >
-                  取消
+                  {uiText("cancel")}
                 </Button>
               </>
             ) : editing ? (
               <>
                 <Button size="sm" disabled={pending} onClick={save}>
-                  保存
+                  {uiText("save")}
                 </Button>
                 <Button
                   size="sm"
@@ -730,7 +776,7 @@ function DeviceRow({
                     setDraft(device.name);
                   }}
                 >
-                  取消
+                  {uiText("cancel")}
                 </Button>
               </>
             ) : (
@@ -743,14 +789,14 @@ function DeviceRow({
                     setEditing(true);
                   }}
                 >
-                  改名
+                  {uiText("rename")}
                 </Button>
                 <Button
                   size="sm"
                   variant="outline"
                   onClick={() => setConfirming(true)}
                 >
-                  移除
+                  {uiText("remove")}
                 </Button>
               </>
             )}
@@ -759,7 +805,7 @@ function DeviceRow({
       </div>
       {problem ? (
         <p role="alert" className="mt-1 text-xs text-destructive">
-          {problem}
+          {messageFor(toBridgeError({ code: problem }))}
         </p>
       ) : null}
     </div>
@@ -779,7 +825,8 @@ function TransfersCard({
   snapshot,
   onError,
   query,
-}: CardProps & { query: string }) {
+  onQueryChange,
+}: CardProps & { query: string; onQueryChange: (query: string) => void }) {
   const [pending, setPending] = useState(false);
 
   // 选文件时系统选择器一直开着，命令要到它关掉才返回。
@@ -789,7 +836,7 @@ function TransfersCard({
     try {
       await source.startSend();
     } catch (error: unknown) {
-      onError(messageFor(toBridgeError(error)));
+      onError(toBridgeError(error).code);
     } finally {
       setPending(false);
     }
@@ -800,30 +847,31 @@ function TransfersCard({
 
   return (
     <Card>
-      <CardHeader>
-        <CardTitle className="sr-only">传输</CardTitle>
-        <CardDescription>
-          别的设备发来的文件会自动存到接收位置；挑好文件，选一台设备就能发出去。
-        </CardDescription>
-        <CardAction>
+      <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-3">
+        <CardTitle className="sr-only">{uiText("transfers")}</CardTitle>
+        <Input
+          className="w-full sm:w-64"
+          aria-label={uiText("searchFileTransfers")}
+          placeholder={uiText("searchEllipsis")}
+          value={query}
+          onChange={(event) => onQueryChange(event.target.value)}
+        />
+        <CardAction className="self-center">
           <Button
             size="sm"
             variant="outline"
             disabled={pending}
             onClick={() => void startSend()}
           >
-            发送文件…
+            {uiText("sendFilesEllipsis")}
           </Button>
         </CardAction>
       </CardHeader>
-      <CardContent className="flex flex-col gap-2">
+      <CardContent className="flex flex-col">
         {snapshot.transfers.length === 0 ? (
           <Empty>
             <EmptyHeader>
-              <EmptyTitle>还没有收发过文件。</EmptyTitle>
-              <EmptyDescription>
-                发送文件，或等待其他设备发来文件。
-              </EmptyDescription>
+              <EmptyTitle>{uiText("noTransfersYet")}</EmptyTitle>
             </EmptyHeader>
           </Empty>
         ) : snapshot.transfers.filter((item) =>
@@ -833,8 +881,7 @@ function TransfersCard({
           ).length === 0 ? (
           <Empty>
             <EmptyHeader>
-              <EmptyTitle>没有匹配的传输</EmptyTitle>
-              <EmptyDescription>换个关键词试试。</EmptyDescription>
+              <EmptyTitle>{uiText("noMatchingTransfers")}</EmptyTitle>
             </EmptyHeader>
           </Empty>
         ) : (
@@ -844,13 +891,15 @@ function TransfersCard({
                 .toLocaleLowerCase()
                 .includes(query.trim().toLocaleLowerCase()),
             )
-            .map((transfer) => (
-              <TransferRow
-                key={transfer.id}
-                source={source}
-                transfer={transfer}
-                onError={onError}
-              />
+            .map((transfer, index) => (
+              <Fragment key={transfer.id}>
+                {index > 0 ? <Separator /> : null}
+                <TransferRow
+                  source={source}
+                  transfer={transfer}
+                  onError={onError}
+                />
+              </Fragment>
             ))
         )}
       </CardContent>
@@ -862,10 +911,12 @@ function TransferRow({
   source,
   transfer,
   onError,
+  showPeer = true,
 }: {
   source: Bridge;
   transfer: TransferView;
   onError: (message: string | null) => void;
+  showPeer?: boolean;
 }) {
   const [pending, setPending] = useState(false);
   const failed = transfer.phase === "failed";
@@ -878,37 +929,41 @@ function TransferRow({
     try {
       await what();
     } catch (error: unknown) {
-      onError(messageFor(toBridgeError(error)));
+      onError(toBridgeError(error).code);
     } finally {
       setPending(false);
     }
   }
 
   return (
-    <div className="rounded-lg border border-border px-3 py-2">
+    <article aria-label={transfer.name} className="py-3">
       <div className="flex flex-wrap items-start gap-3">
-        <span
-          aria-hidden
-          className="mt-0.5 text-muted-foreground"
-          data-direction={transfer.direction}
-        >
-          {receiving ? (
-            <ArrowDownToLine className="size-4" />
-          ) : (
-            <ArrowUpToLine className="size-4" />
-          )}
-        </span>
+        {showPeer ? (
+          <span
+            aria-hidden
+            className="mt-0.5 text-muted-foreground"
+            data-direction={transfer.direction}
+          >
+            {receiving ? (
+              <ArrowDownToLine className="size-4" />
+            ) : (
+              <ArrowUpToLine className="size-4" />
+            )}
+          </span>
+        ) : null}
         <div className="min-w-0 flex-1">
           <p className="truncate text-sm font-medium" title={transfer.name}>
             {transfer.name}
           </p>
           <p className="text-xs text-muted-foreground">
-            {receiving ? "来自" : "发给"} {transfer.peer} ·{" "}
+            {showPeer
+              ? `${receiving ? uiText("from") : uiText("to")} ${transfer.target === "drive" ? uiText("cloudDrive") : transfer.peer} · `
+              : ""}
             {formatSize(transfer.size)}
           </p>
           {transfer.savedAs ? (
             <p className="text-xs text-muted-foreground">
-              已存为「{transfer.savedAs}」
+              {uiText("savedAsFilename", { name: transfer.savedAs })}
             </p>
           ) : null}
         </div>
@@ -921,7 +976,7 @@ function TransferRow({
               disabled={pending}
               onClick={() => void act(() => source.revealReceived(transfer.id))}
             >
-              在文件夹中显示
+              {uiText("showInFolder")}
             </Button>
           ) : null}
           {transfer.retryable ? (
@@ -931,7 +986,7 @@ function TransferRow({
               disabled={pending}
               onClick={() => void act(() => source.retryTransfer(transfer.id))}
             >
-              重发
+              {uiText("retry")}
             </Button>
           ) : null}
           {CANCELLABLE.has(transfer.phase) ? (
@@ -941,16 +996,21 @@ function TransferRow({
               disabled={pending}
               onClick={() => void act(() => source.cancelTransfer(transfer.id))}
             >
-              取消
+              {uiText("cancel")}
             </Button>
           ) : null}
         </div>
       </div>
-      {transfer.phase === "inProgress" ? (
+      {transfer.phase === "inProgress" || transfer.phase === "queued" ? (
         <Progress
-          aria-hidden
+          aria-label={uiText("transferProgressFor", { value0: transfer.name })}
           className="mt-2"
-          value={transfer.progress * 100}
+          value={
+            transfer.phase === "queued"
+              ? 0
+              : Math.floor(transfer.progress * 100)
+          }
+          getValueLabel={() => transferStatus(transfer)}
         />
       ) : null}
       <p
@@ -963,7 +1023,7 @@ function TransferRow({
       >
         {transferStatus(transfer)}
       </p>
-    </div>
+    </article>
   );
 }
 
@@ -973,8 +1033,13 @@ function DriveCard({
   snapshot,
   onError,
   query,
-}: CardProps & { query: string }) {
+  onQueryChange,
+}: CardProps & { query: string; onQueryChange: (query: string) => void }) {
   const [pending, setPending] = useState(false);
+  const [preparing, setPreparing] = useState(false);
+  const uploadStarting = useRef(false);
+  const previousUploads = useRef(new Set<string>());
+  const [completedUploads, setCompletedUploads] = useState<string[]>([]);
   const [confirming, setConfirming] = useState<string | null>(null);
   // 名单由 Rust 在连上服务时去拿；万一没拿到（比如刚登录时断了一下），这里补要一次。
   const requested = useRef<string | null>(null);
@@ -983,10 +1048,30 @@ function DriveCard({
   const drive = snapshot?.drive ?? null;
 
   useEffect(() => {
+    const uploads =
+      snapshot?.transfers.filter(
+        (item) => item.target === "drive" && item.direction === "out",
+      ) ?? [];
+    const completed = uploads.filter(
+      (item) =>
+        item.phase === "complete" && previousUploads.current.has(item.id),
+    );
+    if (completed.length)
+      setCompletedUploads(completed.map((item) => item.name));
+    previousUploads.current = new Set(
+      uploads
+        .filter(
+          (item) => item.phase === "queued" || item.phase === "inProgress",
+        )
+        .map((item) => item.id),
+    );
+  }, [snapshot?.transfers]);
+
+  useEffect(() => {
     if (!signedInAs || drive || requested.current === signedInAs) return;
     requested.current = signedInAs;
     source.driveRefresh().catch((error: unknown) => {
-      onError(messageFor(toBridgeError(error)));
+      onError(toBridgeError(error).code);
     });
   }, [signedInAs, drive, source, onError]);
 
@@ -998,75 +1083,106 @@ function DriveCard({
     try {
       await what();
     } catch (error: unknown) {
-      onError(messageFor(toBridgeError(error)));
+      onError(toBridgeError(error).code);
     } finally {
       setPending(false);
       setConfirming(null);
     }
   }
 
+  async function upload() {
+    if (uploadStarting.current) return;
+    uploadStarting.current = true;
+    setPreparing(true);
+    setCompletedUploads([]);
+    try {
+      await act(() => source.driveUpload());
+    } finally {
+      uploadStarting.current = false;
+      setPreparing(false);
+    }
+  }
+
+  // 上传任务不受文件搜索过滤，避免新选的文件在筛选条件下看不见进度。
+  const uploads = snapshot.transfers.filter(
+    (item) =>
+      item.target === "drive" &&
+      item.direction === "out" &&
+      (item.phase === "queued" ||
+        item.phase === "inProgress" ||
+        item.phase === "failed"),
+  );
+  const files =
+    drive?.items.filter((file) =>
+      file.name.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase()),
+    ) ?? [];
+
   return (
     <Card>
-      <CardHeader>
-        <CardTitle className="sr-only">云盘</CardTitle>
-        <CardDescription>
+      <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-3">
+        <CardTitle className="sr-only">{uiText("cloudDrive")}</CardTitle>
+        <CardDescription
+          className="shrink-0 whitespace-nowrap"
+          title={uiText("usedSpaceTotalCapacity")}
+        >
           {drive
-            ? `已用 ${formatSpace(drive.usedBytes)}，共 ${formatSpace(drive.limitBytes)}`
-            : "正在读取云盘…"}
+            ? `${formatSpace(drive.usedBytes)} / ${formatSpace(drive.limitBytes)}`
+            : uiText("loadingCloudDriveEllipsis")}
         </CardDescription>
-        <CardAction>
+        <CardAction className="flex min-w-0 flex-1 items-center gap-2 self-center sm:max-w-xs">
+          <Input
+            className="min-w-0 flex-1"
+            aria-label={uiText("searchCloudDrive")}
+            placeholder={uiText("searchEllipsis")}
+            value={query}
+            onChange={(event) => onQueryChange(event.target.value)}
+          />
           <Button
+            className="shrink-0"
             size="sm"
             variant="outline"
             disabled={pending}
-            onClick={() => void act(() => source.driveUpload())}
+            onClick={() => void upload()}
           >
-            上传…
+            {preparing ? uiText("preparingEllipsis") : uiText("uploadEllipsis")}
           </Button>
         </CardAction>
       </CardHeader>
-      {drive ? (
-        <CardContent className="flex flex-col gap-2">
-          <Progress
-            role="progressbar"
-            aria-label="云盘空间"
-            aria-valuemin={0}
-            aria-valuemax={100}
-            aria-valuenow={Math.round(
-              (drive.usedBytes / drive.limitBytes) * 100,
-            )}
-            value={(drive.usedBytes / drive.limitBytes) * 100}
-          />
-          {drive.items.length === 0 ? (
+      <CardContent className="flex flex-col">
+        <p role="status" className="sr-only">
+          {completedUploads
+            .map((name) => uiText("uploaded", { value0: name }))
+            .join("; ")}
+        </p>
+        {uploads.map((transfer, index) => (
+          <Fragment key={transfer.id}>
+            {index > 0 ? <Separator /> : null}
+            <TransferRow
+              source={source}
+              transfer={transfer}
+              onError={onError}
+              showPeer={false}
+            />
+          </Fragment>
+        ))}
+        {drive ? (
+          drive.items.length === 0 && uploads.length === 0 ? (
             <Empty>
               <EmptyHeader>
-                <EmptyTitle>云盘里还没有文件。</EmptyTitle>
-                <EmptyDescription>
-                  上传文件后，同一账户的其他设备也能取回。
-                </EmptyDescription>
+                <EmptyTitle>{uiText("noFilesInCloudDriveYet")}</EmptyTitle>
               </EmptyHeader>
             </Empty>
-          ) : drive.items.filter((file) =>
-              file.name
-                .toLocaleLowerCase()
-                .includes(query.trim().toLocaleLowerCase()),
-            ).length === 0 ? (
+          ) : drive.items.length > 0 && files.length === 0 ? (
             <Empty>
               <EmptyHeader>
-                <EmptyTitle>没有匹配的文件</EmptyTitle>
-                <EmptyDescription>换个关键词试试。</EmptyDescription>
+                <EmptyTitle>{uiText("noMatchingFiles")}</EmptyTitle>
               </EmptyHeader>
             </Empty>
           ) : (
-            drive.items
-              .filter((file) =>
-                file.name
-                  .toLocaleLowerCase()
-                  .includes(query.trim().toLocaleLowerCase()),
-              )
-              .map((file) => (
+            files.map((file, index) => (
+              <Fragment key={file.id}>
+                {index > 0 || uploads.length > 0 ? <Separator /> : null}
                 <DriveRow
-                  key={file.id}
                   source={source}
                   file={file}
                   confirming={confirming === file.id}
@@ -1075,10 +1191,11 @@ function DriveCard({
                   onCancel={() => setConfirming(null)}
                   act={act}
                 />
-              ))
-          )}
-        </CardContent>
-      ) : null}
+              </Fragment>
+            ))
+          )
+        ) : null}
+      </CardContent>
     </Card>
   );
 }
@@ -1101,13 +1218,13 @@ function DriveRow({
   act: (what: () => Promise<unknown>) => Promise<void>;
 }) {
   return (
-    <div className="flex flex-wrap items-start gap-3 rounded-lg border border-border px-3 py-2">
+    <div className="flex flex-wrap items-start gap-3 py-3">
       <div className="min-w-0 flex-1">
         <p className="truncate text-sm font-medium" title={file.name}>
           {file.name}
         </p>
         <p className="text-xs text-muted-foreground">
-          {formatSize(file.size)} · {file.createdAt.slice(0, 10)}
+          {formatSize(file.size)} · {formatStoredDate(file.createdAt)}
         </p>
       </div>
       <div className="flex shrink-0 flex-wrap gap-2">
@@ -1119,7 +1236,7 @@ function DriveRow({
               disabled={pending}
               onClick={() => void act(() => source.driveDelete(file.id))}
             >
-              确认删除
+              {uiText("confirmDeletion")}
             </Button>
             <Button
               size="sm"
@@ -1127,7 +1244,7 @@ function DriveRow({
               disabled={pending}
               onClick={onCancel}
             >
-              取消
+              {uiText("cancel")}
             </Button>
           </>
         ) : (
@@ -1138,7 +1255,7 @@ function DriveRow({
               disabled={pending}
               onClick={() => void act(() => source.driveDownload(file.id))}
             >
-              取回
+              {uiText("download")}
             </Button>
             <Button
               size="sm"
@@ -1146,7 +1263,7 @@ function DriveRow({
               disabled={pending}
               onClick={onConfirm}
             >
-              删除
+              {uiText("delete")}
             </Button>
           </>
         )}
@@ -1155,20 +1272,19 @@ function DriveRow({
   );
 }
 
-const LAUNCH_HINTS: Record<LaunchState, string | null> = {
+const launchHints = (): Record<LaunchState, string | null> => ({
   enabled: null,
   disabled: null,
-  unsupported: "开发运行不设置开机启动。",
-  unknown: "等待系统批准后生效。",
-};
+  unsupported: uiText("launchAtSignInIsUnavailableInDevelopmentBuilds"),
+  unknown: uiText("waitingForSystemApproval"),
+});
 
 /** 默认的接收位置。它是一个固定的系统位置，不是哪个具体文件夹的路径。 */
-const DEFAULT_RECEIVE = "下载/Assemble";
 
 function LaunchCard({ source, snapshot, onError }: CardProps) {
   const [pending, setPending] = useState(false);
   const state: LaunchState = snapshot?.launchAtLogin ?? "unknown";
-  const hint = LAUNCH_HINTS[state];
+  const hint = launchHints()[state];
   const customFolder = snapshot?.receive.customFolder ?? null;
   const receivePath = snapshot?.receive.displayPath ?? null;
   // 只有 Windows 上的打包运行才有右键菜单这一项。
@@ -1181,7 +1297,7 @@ function LaunchCard({ source, snapshot, onError }: CardProps) {
     try {
       await action();
     } catch (error: unknown) {
-      onError(messageFor(toBridgeError(error)));
+      onError(toBridgeError(error).code);
     } finally {
       setPending(false);
     }
@@ -1194,7 +1310,7 @@ function LaunchCard({ source, snapshot, onError }: CardProps) {
     try {
       await action();
     } catch (error: unknown) {
-      onError(messageFor(toBridgeError(error)));
+      onError(toBridgeError(error).code);
     } finally {
       setPending(false);
     }
@@ -1203,11 +1319,11 @@ function LaunchCard({ source, snapshot, onError }: CardProps) {
   return (
     <Card>
       <CardHeader>
-        <CardTitle className="sr-only">本机</CardTitle>
-        <CardDescription>开机启动</CardDescription>
+        <CardTitle className="sr-only">{uiText("thisDevice2")}</CardTitle>
+        <CardDescription>{uiText("launchAtSignIn")}</CardDescription>
         <CardAction>
           <Switch
-            aria-label="开机启动"
+            aria-label={uiText("launchAtSignIn")}
             checked={state === "enabled"}
             disabled={pending || state === "unsupported"}
             onCheckedChange={(checked) =>
@@ -1220,7 +1336,7 @@ function LaunchCard({ source, snapshot, onError }: CardProps) {
         {hint ? <p className="text-sm text-muted-foreground">{hint}</p> : null}
         <div className="flex flex-wrap items-center justify-between gap-3 pt-3">
           <div className="min-w-0">
-            <p className="text-sm font-medium">接收位置</p>
+            <p className="text-sm font-medium">{uiText("downloadLocation")}</p>
             <p
               className={cn(
                 "text-sm text-muted-foreground",
@@ -1229,8 +1345,8 @@ function LaunchCard({ source, snapshot, onError }: CardProps) {
             >
               {receivePath ??
                 (customFolder === null
-                  ? DEFAULT_RECEIVE
-                  : `「${customFolder}」文件夹`)}
+                  ? uiText("downloadsAssemble")
+                  : uiText("folder", { value0: customFolder }))}
             </p>
           </div>
           <div className="flex shrink-0 flex-wrap gap-2">
@@ -1240,7 +1356,7 @@ function LaunchCard({ source, snapshot, onError }: CardProps) {
               disabled={pending}
               onClick={() => void locate(() => source.chooseReceiveFolder())}
             >
-              更改…
+              {uiText("changeEllipsis")}
             </Button>
             {customFolder !== null ? (
               <Button
@@ -1249,7 +1365,7 @@ function LaunchCard({ source, snapshot, onError }: CardProps) {
                 disabled={pending}
                 onClick={() => void locate(() => source.resetReceiveFolder())}
               >
-                恢复默认
+                {uiText("restoreDefault")}
               </Button>
             ) : null}
           </div>
@@ -1258,15 +1374,21 @@ function LaunchCard({ source, snapshot, onError }: CardProps) {
         {snapshot?.session.phase === "signedIn" ? (
           <div className="flex flex-wrap items-center justify-between gap-3 pt-3">
             <div className="min-w-0">
-              <p className="text-sm font-medium">到点提醒</p>
+              <p className="text-sm font-medium">
+                {uiText("reminderNotifications")}
+              </p>
               <p className="text-sm text-muted-foreground">
                 {snapshot.plannerMuted
-                  ? "这台电脑不弹提醒，到点的只留在日程里。"
-                  : "日程和提醒到点时，这台电脑会弹系统通知。"}
+                  ? uiText(
+                      "remindersStayInYourScheduleWithoutNotifyingThisDevice",
+                    )
+                  : uiText(
+                      "showSystemNotificationsOnThisDeviceWhenSchedulesAndRemindersAreDue",
+                    )}
               </p>
             </div>
             <Switch
-              aria-label="到点时弹提醒"
+              aria-label={uiText("notifyWhenDue")}
               checked={!snapshot.plannerMuted}
               disabled={pending}
               onCheckedChange={(checked) =>
@@ -1278,15 +1400,15 @@ function LaunchCard({ source, snapshot, onError }: CardProps) {
         {sendMenu === "unsupported" ? null : (
           <div className="flex items-center justify-between gap-3 border-t border-border pt-3">
             <div className="min-w-0">
-              <p className="text-sm font-medium">右键菜单</p>
+              <p className="text-sm font-medium">{uiText("fileContextMenu")}</p>
               <p className="text-sm text-muted-foreground">
                 {sendMenu === "enabled"
-                  ? "在文件上点右键，选择「用 Assemble 发送」。"
-                  : "文件的右键菜单里没有「用 Assemble 发送」。"}
+                  ? uiText("rightClickAFileAndChooseSendWithAssemble")
+                  : uiText("sendWithAssembleIsDisabledInTheFileContextMenu")}
               </p>
             </div>
             <Switch
-              aria-label="右键菜单里的“用 Assemble 发送”"
+              aria-label={uiText("sendWithAssembleInTheFileContextMenu")}
               checked={sendMenu === "enabled"}
               disabled={pending}
               onCheckedChange={(checked) =>

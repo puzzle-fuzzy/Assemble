@@ -3,60 +3,34 @@
 // 主窗口的"传输"卡片与发送面板用的是同一套说法，所以放在这里，不各写一份。
 // 同一件事按方向与另一头各说各的：收到的、发出去的、存进云盘的、从云盘取回的。
 
-import type { TransferFailure, TransferView } from "@/lib/types";
+import { text, textLocale } from "@/lib/text-i18n";
+import type { TransferView } from "@/lib/types";
+import zhCN from "@/locales/text.zh-CN.json";
+
+function size(value: number, unit: string, decimals = 0): string {
+  return text("transfer.size", {
+    value: new Intl.NumberFormat(textLocale(), {
+      useGrouping: false,
+      minimumFractionDigits: decimals,
+      maximumFractionDigits: decimals,
+    }).format(value),
+    unit,
+  });
+}
 
 /** 文件大小怎么显示。单文件不超过 100 MB，所以最大到 MB 就够了。 */
 export function formatSize(bytes: number): string {
   const kilobytes = bytes / 1024;
-  if (kilobytes < 1) return `${bytes} B`;
-  if (kilobytes < 1024)
-    return `${kilobytes < 10 ? kilobytes.toFixed(1) : Math.round(kilobytes)} KB`;
-  return `${(kilobytes / 1024).toFixed(1)} MB`;
+  if (kilobytes < 1) return size(bytes, "B");
+  if (kilobytes < 1024) return size(kilobytes, "KB", kilobytes < 10 ? 1 : 0);
+  return size(kilobytes / 1024, "MB", 1);
 }
 
 /** 空间怎么显示：云盘的容量以 GB 计。 */
 export function formatSpace(bytes: number): string {
   const gigabytes = bytes / (1024 * 1024 * 1024);
-  return gigabytes >= 1 ? `${gigabytes.toFixed(1)} GB` : formatSize(bytes);
+  return gigabytes >= 1 ? size(gigabytes, "GB", 1) : formatSize(bytes);
 }
-
-/** 失败原因的说法。同一件事，收与发两边的说法不一样：谁的磁盘、谁没收到。 */
-const FAILURE_NAMES: Record<
-  TransferFailure,
-  { received: string | null; sent: string | null }
-> = {
-  diskFull: {
-    received: "这台电脑的磁盘已满",
-    sent: "对方设备的磁盘已满",
-  },
-  writeFailed: {
-    received: "文件没能写进接收文件夹",
-    sent: "对方设备没能把文件写下来",
-  },
-  verificationFailed: {
-    received: "收到的内容与发出的对不上",
-    sent: "对方收到的内容与发出的对不上",
-  },
-  cancelled: { received: "已取消", sent: "已取消" },
-  deviceOffline: {
-    received: null,
-    sent: "那台设备刚刚下线了",
-  },
-  tooLarge: { received: null, sent: "超过 100 MB" },
-  fileUnreadable: {
-    received: null,
-    sent: "文件读不出来，可能已被移走或改动",
-  },
-  rejected: {
-    received: null,
-    sent: "服务端拒绝了这次发送，请重新选择文件",
-  },
-  quotaExceeded: { received: null, sent: "云盘空间不够" },
-  vanished: {
-    received: "云盘里已经没有这个文件了",
-    sent: null,
-  },
-};
 
 /** 一条传输涉及的是哪一类事。 */
 type Kind = "received" | "sent" | "stored" | "fetched";
@@ -68,68 +42,46 @@ function kindOf(transfer: TransferView): Kind {
   return transfer.direction === "in" ? "received" : "sent";
 }
 
-/** 每一类事在各个阶段怎么说。 */
-const WORDS: Record<
-  Kind,
-  { queued: string; running: string; done: string; failed: string }
-> = {
-  received: {
-    queued: "等待接收…",
-    running: "正在接收",
-    done: "已保存",
-    failed: "接收失败",
-  },
-  sent: {
-    queued: "等待发送…",
-    running: "正在发送",
-    done: "对方已收下",
-    failed: "发送失败",
-  },
-  stored: {
-    queued: "等待上传…",
-    running: "正在上传到云盘",
-    done: "已存到云盘",
-    failed: "没能存进云盘",
-  },
-  fetched: {
-    queued: "等待取回…",
-    running: "正在从云盘取回",
-    done: "已取回",
-    failed: "取回失败",
-  },
-};
-
 /** 一条传输现在怎么样了，用一句话说清楚。 */
 export function transferStatus(transfer: TransferView): string {
   const kind = kindOf(transfer);
-  const words = WORDS[kind];
+  const state = (phase: "queued" | "running" | "done" | "failed") =>
+    text(`transfer.states.${kind}.${phase}`);
   const percent = Math.floor(transfer.progress * 100);
   switch (transfer.phase) {
     case "queued":
-      return words.queued;
+      return state("queued");
     case "inProgress":
-      return `${words.running} ${percent}%`;
+      return text("transfer.progress", { state: state("running"), percent });
     case "waiting":
       // 只有发给设备的文件才有"等对方接收"这一步。
-      return "已发出，等对方接收";
+      return text("transfer.waiting");
     case "complete":
-      return words.done;
+      return state("done");
     case "failed": {
-      const names = transfer.failure ? FAILURE_NAMES[transfer.failure] : null;
+      const names = transfer.failure
+        ? zhCN.transfer.failures[transfer.failure]
+        : null;
+      const side =
+        kind === "received" || kind === "fetched" ? "received" : "sent";
       const reason =
-        (kind === "received" || kind === "fetched"
-          ? names?.received
-          : names?.sent) ?? "原因不明";
-      return `${words.failed}：${reason}。`;
+        names && Object.hasOwn(names, side)
+          ? text(`transfer.failures.${transfer.failure}.${side}`)
+          : text("transfer.unknownReason");
+      return text("transfer.failed", { state: state("failed"), reason });
     }
     case "declined":
-      return "对方拒收了。";
+      return text("transfer.declined");
     case "cancelled":
-      return kind === "received" ? "对方撤回了，没有收到。" : "已取消。";
+      return text(
+        kind === "received" ? "transfer.withdrawn" : "transfer.cancelled",
+      );
     case "expired":
-      return kind === "received"
-        ? "过了时限，没有收到。"
-        : "对方没有在时限内接收。";
+      return text(
+        kind === "received"
+          ? "transfer.expiredReceived"
+          : "transfer.expiredSent",
+      );
   }
 }
 

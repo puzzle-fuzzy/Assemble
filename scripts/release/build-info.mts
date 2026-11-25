@@ -2,7 +2,7 @@
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import type { BuildInfo } from "../../apps/desktop/src/lib/build-info.ts";
+import type { BuildInfo } from "../../apps/desktop/src/lib/build-identity.ts";
 
 type Environment = Record<string, string | undefined>;
 

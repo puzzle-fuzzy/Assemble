@@ -4,41 +4,10 @@
 // 这里只认稳定的错误码，认不出的一律用通用提示。
 
 import type { BridgeError } from "@/lib/bridge";
-
-const MESSAGES: Record<string, string> = {
-  CREDENTIAL_STORE_UNAVAILABLE: "系统钥匙串不可用，无法保存登录状态。",
-  BROWSER_UNAVAILABLE: "无法打开系统浏览器，请重试。",
-  UNREACHABLE: "暂时连不上服务，请检查网络后重试。",
-  ACCOUNT_DISABLED: "这个账户已被禁用。",
-  UNSUPPORTED: "当前运行方式不支持设置开机启动。",
-  SYSTEM_REJECTED: "系统没有接受这个设置，请稍后重试。",
-  INVALID_INPUT: "输入的内容不合法：名字不能为空，也不能超过 60 个字符。",
-  NOT_FOUND: "这台设备已经不在账户里了。",
-  IS_THIS_DEVICE: "要移除这台设备，请使用「退出登录」。",
-  INVALID_RESPONSE: "服务端的回答看不懂，请稍后重试。",
-  INVALID_RECEIVE_FOLDER: "这个文件夹不能用来保存收到的文件，请换一个。",
-  NOT_SAVED: "这个文件还没有保存到这台电脑上。",
-  FILE_TOO_LARGE: "有文件超过 100 MB，发不出去。",
-  FILE_UNREADABLE: "有文件读不出来，可能已被移走或没有权限。",
-  PANEL_UNAVAILABLE: "发送面板没能打开，请重试。",
-  DEVICE_OFFLINE: "那台设备刚刚下线了，没法发送。",
-  NO_DRAFT: "没有待发送的文件，请重新选择。",
-  NOT_RETRYABLE: "这一次没法重发，请重新选择文件。",
-  ONLY_FOLDERS: "只能发送文件，不能发送文件夹。",
-  QUOTA_EXCEEDED: "云盘空间不够，删掉一些文件再试。",
-  FILE_GONE: "云盘里已经没有这个文件了。",
-  // 这两条是日程与提醒的：命令带着看到的版本号，对不上就是别处改过了。
-  // 命令出错后 Rust 已经换上服务端最新的名单，所以让用户"再看一眼"就够了。
-  VERSION_CONFLICT: "这一条在别的设备上被改过。已经换成最新的，请再看一眼。",
-  INVALID_STATE: "这一条现在的状态不能这样改。已经换成最新的，请再看一眼。",
-  // 日程与提醒的内容不合规则。表单自己先把最常见的几种填错拦下并说清楚；
-  // 走到这里的，是 Rust 那一道校验没放过去的。
-  PLANNER_INPUT:
-    "有内容不合规则，没有保存。请检查标题（最多 200 个字）、时间和重复的截止日。",
-};
-
-const GENERIC = "操作没有完成，请稍后重试。";
+import { text } from "@/lib/text-i18n";
+import zhCN from "@/locales/text.zh-CN.json";
 
 export function messageFor(error: BridgeError): string {
-  return MESSAGES[error.code] ?? GENERIC;
+  const code = Object.hasOwn(zhCN.errors, error.code) ? error.code : "GENERIC";
+  return text(`errors.${code}`);
 }

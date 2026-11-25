@@ -1,0 +1,174 @@
+{
+  "planner": {
+    "day": {
+      "today": "Today",
+      "yesterday": "Yesterday",
+      "tomorrow": "Tomorrow",
+      "dayAfterTomorrow": "Day after tomorrow"
+    },
+    "repeat": {
+      "none": "Does not repeat",
+      "daily": "Daily",
+      "weekly": "Weekly",
+      "monthly": "Monthly"
+    },
+    "lead": {
+      "atTime": "At the scheduled time",
+      "minutes_one": "{{count}} minute before",
+      "minutes_other": "{{count}} minutes before",
+      "hours_one": "{{count}} hour before",
+      "hours_other": "{{count}} hours before",
+      "days_one": "{{count}} day before",
+      "days_other": "{{count}} days before"
+    },
+    "ago": {
+      "justNow": "Just now",
+      "minutes_one": "{{count}} minute ago",
+      "minutes_other": "{{count}} minutes ago",
+      "hours_one": "{{count}} hour ago",
+      "hours_other": "{{count}} hours ago"
+    },
+    "timeSpan": "{{start}} to {{end}}",
+    "at": "{{day}} {{time}}",
+    "repeatUntil": "{{repeat}}, until {{date}}",
+    "later": {
+      "label": "Later: {{dates}}{{more}}",
+      "separator": ", ",
+      "totalSuffix_one": " ({{count}} occurrence total)",
+      "totalSuffix_other": " ({{count}} occurrences total)"
+    },
+    "fired": "Due · {{when}}",
+    "form": {
+      "titleRequired": "Enter a title first.",
+      "timeIncomplete": "Enter a complete date and time.",
+      "endIncomplete": "Enter a complete end time, or leave it empty.",
+      "endBeforeStart": "The end time must be after the start time."
+    }
+  },
+  "transfer": {
+    "size": "{{value}} {{unit}}",
+    "progress": "{{state}} {{percent}}%",
+    "failed": "{{state}}: {{reason}}.",
+    "unknownReason": "Unknown reason",
+    "waiting": "Sent, waiting for the other device to receive",
+    "declined": "The other device declined the file.",
+    "withdrawn": "The sender withdrew the file. Nothing was received.",
+    "cancelled": "Cancelled.",
+    "expiredReceived": "The transfer expired. Nothing was received.",
+    "expiredSent": "The other device did not receive the file before it expired.",
+    "states": {
+      "received": {
+        "queued": "Waiting to receive…",
+        "running": "Receiving",
+        "done": "Saved",
+        "failed": "Receive failed"
+      },
+      "sent": {
+        "queued": "Waiting to send…",
+        "running": "Sending",
+        "done": "Received by the other device",
+        "failed": "Send failed"
+      },
+      "stored": {
+        "queued": "Waiting to upload…",
+        "running": "Uploading to cloud drive",
+        "done": "Saved to cloud drive",
+        "failed": "Cloud upload failed"
+      },
+      "fetched": {
+        "queued": "Waiting to download…",
+        "running": "Downloading from cloud drive",
+        "done": "Downloaded",
+        "failed": "Download failed"
+      }
+    },
+    "failures": {
+      "diskFull": {
+        "received": "This computer's disk is full",
+        "sent": "The other device's disk is full"
+      },
+      "writeFailed": {
+        "received": "The file could not be saved to the receive folder",
+        "sent": "The other device could not save the file"
+      },
+      "verificationFailed": {
+        "received": "The received content does not match what was sent",
+        "sent": "The content received by the other device does not match what was sent"
+      },
+      "cancelled": {
+        "received": "Cancelled",
+        "sent": "Cancelled"
+      },
+      "deviceOffline": { "sent": "The other device just went offline" },
+      "tooLarge": { "sent": "The file exceeds 100 MB" },
+      "fileUnreadable": {
+        "sent": "The file cannot be read; it may have been moved or changed"
+      },
+      "rejected": {
+        "sent": "The server rejected this transfer; select the file again"
+      },
+      "quotaExceeded": { "sent": "There is not enough cloud storage" },
+      "vanished": { "received": "This file is no longer in the cloud drive" }
+    }
+  },
+  "errors": {
+    "CREDENTIAL_STORE_UNAVAILABLE": "The system keychain is unavailable. Your sign-in could not be saved.",
+    "BROWSER_UNAVAILABLE": "The system browser could not be opened. Try again.",
+    "UNREACHABLE": "The service is unavailable. Check your network and try again.",
+    "ACCOUNT_DISABLED": "This account has been disabled.",
+    "UNSUPPORTED": "Launch at login is not supported in this mode.",
+    "SYSTEM_REJECTED": "The system did not accept this setting. Try again later.",
+    "INVALID_INPUT": "The name must not be empty or longer than 60 characters.",
+    "NOT_FOUND": "This device is no longer in the account.",
+    "IS_THIS_DEVICE": "Use Sign out to remove this device.",
+    "INVALID_RESPONSE": "The server returned an invalid response. Try again later.",
+    "INVALID_RECEIVE_FOLDER": "Received files cannot be saved to this folder. Choose another folder.",
+    "NOT_SAVED": "This file has not been saved to this computer yet.",
+    "FILE_TOO_LARGE": "A file exceeds 100 MB and cannot be sent.",
+    "FILE_UNREADABLE": "A file cannot be read. It may have been moved, or you may not have permission.",
+    "PANEL_UNAVAILABLE": "The send panel could not be opened. Try again.",
+    "DEVICE_OFFLINE": "The other device just went offline. The file cannot be sent.",
+    "NO_DRAFT": "There are no files ready to send. Select them again.",
+    "NOT_RETRYABLE": "This transfer cannot be retried. Select the file again.",
+    "ONLY_FOLDERS": "Only files can be sent, not folders.",
+    "QUOTA_EXCEEDED": "There is not enough cloud storage. Delete some files and try again.",
+    "FILE_GONE": "This file is no longer in the cloud drive.",
+    "VERSION_CONFLICT": "This item changed on another device. The latest version is now shown; review it again.",
+    "INVALID_STATE": "This item cannot be changed in its current state. The latest version is now shown; review it again.",
+    "PLANNER_INPUT": "Some details are invalid and were not saved. Check the title (up to 200 characters), times, and repeat end date.",
+    "GENERIC": "The action could not be completed. Try again later."
+  },
+  "notice": {
+    "fixed": {
+      "sessionExpired": "Your sign-in has expired. Sign in again.",
+      "deviceSessionExpired": "This device's sign-in has expired. Sign in again.",
+      "signOutPending": "Unable to sign out: the server has not revoked this device's sign-in. Connect to the network and try again.",
+      "loginTimedOut": "Browser sign-in timed out. Please try again.",
+      "browserUnavailable": "The system browser could not be opened. Try again.",
+      "credentialStoreUnavailable": "The system keychain is unavailable. Your sign-in could not be saved.",
+      "loginRejected": "Sign-in was not approved. Try again.",
+      "unreachable": "The service is unavailable. Check your network and try again.",
+      "loginIncomplete": "Sign-in could not be completed. Try again.",
+      "onlyFolders": "Only files can be sent, not folders.",
+      "panelUnavailable": "The send panel could not be opened. Try again.",
+      "signInToSend": "Sign in before sending files.",
+      "signInToUpload": "Sign in before uploading files to the cloud drive.",
+      "receiveFolderFallback": "The receive folder is unavailable. This file was saved to the default location.",
+      "launchAtLoginFailed": "Launch at login could not be changed. Try again later."
+    },
+    "fileTooLarge": "“{{name}}” exceeds 100 MB and cannot be sent.",
+    "fileUnreadable": "“{{name}}” cannot be read. It may have been moved, or you may not have permission.",
+    "unknownInfo": "There is a new notification. Check the current status.",
+    "unknownError": "The action could not be completed. Try again later."
+  },
+  "build": {
+    "channels": {
+      "stable": "Stable release",
+      "preview": "Preview release",
+      "local": "Local build"
+    },
+    "identity": "{{channel}} - {{version}}.{{commit}}",
+    "currentVersion": "Current version",
+    "website": "Website"
+  }
+}

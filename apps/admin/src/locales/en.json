@@ -1,0 +1,132 @@
+{
+  "app": {
+    "title": "Assemble Admin",
+    "brand": "Assemble Admin",
+    "documentTitle": "{{page}} · Assemble Admin"
+  },
+  "navigation": {
+    "label": "Administration",
+    "openMenu": "Open admin menu",
+    "accountMenu": "Administrator account menu",
+    "overview": "Overview",
+    "users": "Users",
+    "devices": "Devices",
+    "logins": "Login history",
+    "userDetail": "User details",
+    "signOut": "Sign out"
+  },
+  "common": {
+    "loading": "Loading",
+    "refresh": "Refresh",
+    "retry": "Retry",
+    "search": "Search",
+    "emailMissing": "No linked email",
+    "unrecorded": "Not recorded",
+    "actions": "Actions",
+    "superAdmin": "Super administrator",
+    "user": "User",
+    "online": "Online",
+    "offline": "Offline",
+    "beijingTime": "Beijing time (UTC+8)",
+    "github": "GitHub"
+  },
+  "access": {
+    "signedOutTitle": "Sign in to Assemble Admin",
+    "signedOutDescription": "Sign in with an authorized super administrator account to continue to the web admin console.",
+    "signIn": "Go to sign in",
+    "forbiddenTitle": "Admin access required",
+    "forbiddenDescription": "This account is not a super administrator. To switch accounts, sign out on the account page, then sign in with an authorized account.",
+    "openAccount": "Open account page"
+  },
+  "error": {
+    "notFoundTitle": "User not found",
+    "notFoundDescription": "This user may no longer exist. Return to the user list and try again.",
+    "unavailableTitle": "Unable to load data",
+    "unavailableDescription": "Check your connection and try again."
+  },
+  "overview": {
+    "users": "Registered users",
+    "devices": "Registered devices",
+    "onlineDevices": "Online devices",
+    "registrationsToday": "Registered today"
+  },
+  "search": {
+    "usersLabel": "Search users",
+    "usersPlaceholder": "Name or email",
+    "devicesLabel": "Search devices",
+    "devicesPlaceholder": "Device name, user name or email",
+    "loginsLabel": "Search login history",
+    "loginsPlaceholder": "User name or email"
+  },
+  "empty": {
+    "noMatchesTitle": "No matching results",
+    "noMatchesDescription": "Try another keyword or clear the search.",
+    "usersTitle": "No registered users yet",
+    "usersDescription": "New users will appear here after registering.",
+    "devicesTitle": "No devices yet",
+    "devicesDescription": "Devices will appear here after users sign in to the desktop app or assistant tools.",
+    "loginsTitle": "No login history yet",
+    "loginsDescription": "Future successful sign-ins will appear here.",
+    "userDevicesTitle": "This account has no devices yet",
+    "userDevicesDescription": "Devices are registered when signing in to the desktop app or assistant tools.",
+    "userLoginsTitle": "This account has no login history yet",
+    "userLoginsDescription": "Past sign-ins that were not recorded will remain unavailable."
+  },
+  "pagination": {
+    "label": "List pagination",
+    "summary_one": "{{count, number}} result · Page {{page, number}} of {{pages, number}}",
+    "summary_other": "{{count, number}} results · Page {{page, number}} of {{pages, number}}",
+    "previous": "Previous",
+    "next": "Next"
+  },
+  "table": {
+    "usersRegion": "Registered users table, scroll horizontally",
+    "usersCaption": "Registered users",
+    "devicesRegion": "Devices table, scroll horizontally",
+    "devicesCaption": "Devices",
+    "loginsRegion": "Login history table, scroll horizontally",
+    "loginsCaption": "Login history",
+    "user": "User",
+    "createdAt": "Registered at",
+    "lastLoginAt": "Last sign-in",
+    "devices": "Devices",
+    "identity": "Role",
+    "deviceName": "Device name",
+    "deviceOwner": "Owner",
+    "platform": "Platform",
+    "status": "Status",
+    "deviceCreatedAt": "Added at",
+    "lastSeenAt": "Last seen",
+    "loginMethod": "Sign-in method",
+    "occurredAt": "Signed in at",
+    "deviceSummary_one": "{{count, number}} device / {{online, number}} online",
+    "deviceSummary_other": "{{count, number}} devices / {{online, number}} online",
+    "viewDetails": "View details",
+    "viewUserDetails": "View details for {{name}}"
+  },
+  "userDetail": {
+    "back": "Back to users",
+    "accountInfo": "Account information",
+    "accountId": "Account ID: {{id}}",
+    "githubLinked": "GitHub linked",
+    "githubUnlinked": "GitHub not linked",
+    "createdAt": "Registered at",
+    "lastLoginAt": "Last sign-in",
+    "deviceCount": "Total devices",
+    "onlineDeviceCount": "Online devices",
+    "devices_one": "{{count, number}} device",
+    "devices_other": "{{count, number}} devices",
+    "ownedDevices": "Devices",
+    "recentLogins": "Recent sign-ins"
+  },
+  "platform": {
+    "windows": "Windows",
+    "macos": "macOS",
+    "linux": "Linux",
+    "other": "Other"
+  },
+  "loginMethod": {
+    "email": "Email and password",
+    "github": "GitHub"
+  }
+}

@@ -12,7 +12,8 @@
     "@assemble/ui": "workspace:*",
     "lucide-react": "1.78.0",
     "react": "19.3.1",
-    "react-dom": "19.3.1"
+    "react-dom": "19.3.1",
+    "@assemble/display": "workspace:*"
   },
   "devDependencies": {
     "@tailwindcss/vite": "4.3.5",

@@ -1,5 +1,6 @@
 import { act, type ReactElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
+import { adminText } from "../lib/i18n";
 
 const mounted: { host: HTMLElement; root: Root }[] = [];
 
@@ -42,7 +43,7 @@ export async function click(element: HTMLElement) {
 
 export async function navigate(host: HTMLElement, view: string) {
   const link = host.querySelector<HTMLAnchorElement>(
-    `nav[aria-label="管理功能"] a[href="#${view}"]`,
+    `nav[aria-label="${adminText("navigation.label")}"] a[href="#${view}"]`,
   );
   if (!link) throw new Error(`找不到管理菜单：${view}`);
   await click(link);
@@ -58,5 +59,5 @@ export async function search(host: HTMLElement, value: string) {
     )?.set?.call(input, value);
     input.dispatchEvent(new Event("input", { bubbles: true }));
   });
-  await click(button(host, "搜索"));
+  await click(button(host, adminText("common.search")));
 }

@@ -1,79 +1,161 @@
 // 与管理端沿用 sidebar-13 的文字菜单；窄窗口通过共享菜单组件切换整页内容。
+
 import { Button } from "@assemble/ui/button";
+import { DisplayPreferencesItems } from "@assemble/ui/display-preferences";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@assemble/ui/dropdown-menu";
 import {
   Sidebar,
   SidebarContent,
+  SidebarFooter,
   SidebarGroup,
   SidebarGroupContent,
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
 } from "@assemble/ui/sidebar";
+import { SidebarAccountMenu } from "@assemble/ui/sidebar-account-menu";
 import {
   ArrowLeftRight,
   CalendarClock,
   Cloud,
   InfoIcon,
+  LogOutIcon,
   MenuIcon,
   Settings2,
   UserRound,
 } from "lucide-react";
 import { useRef } from "react";
+import { uiText, useDesktopTranslation } from "@/lib/i18n";
+import type { SessionView } from "@/lib/types";
 
-export const DESKTOP_MODULES = [
-  { id: "transfers", label: "文件传输", icon: ArrowLeftRight },
-  { id: "drive", label: "云盘", icon: Cloud },
-  { id: "planner", label: "日程与提醒", icon: CalendarClock },
-  { id: "settings", label: "本机设置", icon: Settings2 },
-  { id: "account", label: "账户中心", icon: UserRound },
-  { id: "about", label: "关于软件", icon: InfoIcon },
-] as const;
-export type DesktopModule = (typeof DESKTOP_MODULES)[number]["id"];
+export function desktopModules() {
+  return [
+    { id: "transfers", label: uiText("fileTransfers"), icon: ArrowLeftRight },
+    { id: "drive", label: uiText("cloudDrive"), icon: Cloud },
+    {
+      id: "planner",
+      label: uiText("schedulesAndReminders"),
+      icon: CalendarClock,
+    },
+    { id: "settings", label: uiText("deviceSettings"), icon: Settings2 },
+    { id: "account", label: uiText("accountCenter"), icon: UserRound },
+    { id: "about", label: uiText("about"), icon: InfoIcon },
+  ] as const;
+}
+export type DesktopModule = ReturnType<typeof desktopModules>[number]["id"];
 
 interface NavigationProps {
   section: DesktopModule;
   onNavigate: (section: DesktopModule) => void;
 }
 
-export function DesktopSidebar({ section, onNavigate }: NavigationProps) {
+export function DesktopSidebar({
+  section,
+  onNavigate,
+  session,
+  pending,
+  onSignOut,
+  onNavigateFocus,
+}: NavigationProps & {
+  session: SessionView | undefined;
+  pending: boolean;
+  onSignOut: () => void;
+  onNavigateFocus: () => void;
+}) {
+  useDesktopTranslation();
+  const account = session?.phase === "signedIn" ? session.account : null;
+  const identity = {
+    name:
+      account?.displayName ??
+      (session?.phase === "signingIn"
+        ? uiText("signingIn")
+        : uiText("signedOut")),
+    secondary:
+      account?.email ??
+      account?.username ??
+      uiText("signInWithYourSystemBrowser"),
+    avatarUrl: account?.avatarUrl ?? null,
+  };
   return (
     <Sidebar
       collapsible="none"
       className="sticky top-0 hidden h-svh md:flex"
-      aria-label="功能侧栏"
+      aria-label={uiText("sidebar")}
       role="complementary"
     >
       <SidebarContent>
         <SidebarGroup>
           <SidebarGroupContent>
-            <nav aria-label="主功能">
+            <nav aria-label={uiText("mainNavigation")}>
               <SidebarMenu>
-                {DESKTOP_MODULES.map(({ id, label, icon: Icon }) => (
-                  <SidebarMenuItem key={id}>
-                    <SidebarMenuButton
-                      onClick={() => onNavigate(id)}
-                      isActive={section === id}
-                      aria-label={label}
-                      aria-current={section === id ? "page" : undefined}
-                      aria-controls={`view-${id}`}
-                    >
-                      <Icon aria-hidden="true" />
-                      <span>{label}</span>
-                    </SidebarMenuButton>
-                  </SidebarMenuItem>
-                ))}
+                {desktopModules()
+                  .filter(
+                    (item) => item.id !== "account" && item.id !== "about",
+                  )
+                  .map(({ id, label, icon: Icon }) => (
+                    <SidebarMenuItem key={id}>
+                      <SidebarMenuButton
+                        onClick={() => onNavigate(id)}
+                        isActive={section === id}
+                        aria-label={label}
+                        aria-current={section === id ? "page" : undefined}
+                        aria-controls={`view-${id}`}
+                      >
+                        <Icon aria-hidden="true" />
+                        <span>{label}</span>
+                      </SidebarMenuButton>
+                    </SidebarMenuItem>
+                  ))}
               </SidebarMenu>
             </nav>
           </SidebarGroupContent>
         </SidebarGroup>
       </SidebarContent>
+      <SidebarFooter>
+        <SidebarAccountMenu
+          identity={identity}
+          label={uiText("accountMenu")}
+          pending={pending}
+          active={section === "account" || section === "about"}
+          onNavigateFocus={onNavigateFocus}
+          groups={[
+            [
+              {
+                label: uiText("accountCenter"),
+                icon: UserRound,
+                onSelect: () => onNavigate("account"),
+                focusPage: true,
+                current: section === "account",
+              },
+              {
+                label: uiText("about"),
+                icon: InfoIcon,
+                onSelect: () => onNavigate("about"),
+                focusPage: true,
+                current: section === "about",
+              },
+            ],
+            ...(account
+              ? [
+                  [
+                    {
+                      label: uiText("signOut"),
+                      icon: LogOutIcon,
+                      onSelect: onSignOut,
+                    },
+                  ],
+                ]
+              : []),
+          ]}
+        />
+      </SidebarFooter>
     </Sidebar>
   );
 }
@@ -83,6 +165,7 @@ export function DesktopMobileMenu({
   onNavigate,
   onNavigateFocus,
 }: NavigationProps & { onNavigateFocus: () => void }) {
+  useDesktopTranslation();
   const focusPageOnClose = useRef(false);
   return (
     <DropdownMenu>
@@ -91,7 +174,7 @@ export function DesktopMobileMenu({
           variant="ghost"
           size="icon-sm"
           className="md:hidden"
-          aria-label="打开功能菜单"
+          aria-label={uiText("openNavigationMenu")}
         >
           <MenuIcon aria-hidden="true" />
         </Button>
@@ -107,7 +190,7 @@ export function DesktopMobileMenu({
         }}
       >
         <DropdownMenuRadioGroup value={section}>
-          {DESKTOP_MODULES.map(({ id, label, icon: Icon }) => (
+          {desktopModules().map(({ id, label, icon: Icon }) => (
             <DropdownMenuRadioItem
               key={id}
               value={id}
@@ -121,6 +204,8 @@ export function DesktopMobileMenu({
             </DropdownMenuRadioItem>
           ))}
         </DropdownMenuRadioGroup>
+        <DropdownMenuSeparator />
+        <DisplayPreferencesItems />
       </DropdownMenuContent>
     </DropdownMenu>
   );

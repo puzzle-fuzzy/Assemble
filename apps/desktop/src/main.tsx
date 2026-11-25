@@ -13,3 +13,5 @@ if (!root) throw new Error("缺少 #root 容器");
 createRoot(root).render(
   <StrictMode>{which === "send" ? <SendPanel /> : <App />}</StrictMode>,
 );
+
+import "@assemble/display";

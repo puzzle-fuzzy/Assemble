@@ -127,9 +127,9 @@ export function buttons(host: HTMLElement, name: string) {
 }
 
 export function textField(host: HTMLElement): HTMLInputElement {
-  const found = host.querySelector<HTMLInputElement>(
-    "input:not([type=checkbox])",
-  );
+  const found = [
+    ...host.querySelectorAll<HTMLInputElement>("input:not([type=checkbox])"),
+  ].find((candidate) => !candidate.closest("[hidden]"));
   if (!found) throw new Error("没有找到输入框");
   return found;
 }

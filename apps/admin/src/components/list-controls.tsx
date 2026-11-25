@@ -3,6 +3,7 @@ import { Field, FieldGroup, FieldLabel } from "@assemble/ui/field";
 import { Input } from "@assemble/ui/input";
 import { ChevronLeftIcon, ChevronRightIcon, SearchIcon } from "lucide-react";
 import { useId, useState } from "react";
+import { useAdminTranslation } from "../lib/i18n";
 
 export function useListQuery() {
   const [search, setSearch] = useState({ draft: "", query: "", page: 1 });
@@ -28,6 +29,7 @@ export function SearchForm({
   setDraft: (value: string) => void;
   submit: () => void;
 }) {
+  const { t } = useAdminTranslation();
   const id = useId();
   return (
     <search aria-label={label}>
@@ -39,7 +41,9 @@ export function SearchForm({
       >
         <FieldGroup>
           <Field>
-            <FieldLabel htmlFor={id}>{label}</FieldLabel>
+            <FieldLabel htmlFor={id} className="sr-only">
+              {label}
+            </FieldLabel>
             <div className="flex items-center gap-2">
               <Input
                 id={id}
@@ -51,7 +55,7 @@ export function SearchForm({
               />
               <Button type="submit" variant="outline">
                 <SearchIcon data-icon="inline-start" aria-hidden="true" />
-                搜索
+                {t("common.search")}
               </Button>
             </div>
           </Field>
@@ -72,6 +76,7 @@ export function PageControls({
   total: number;
   setPage: (page: number) => void;
 }) {
+  const { t } = useAdminTranslation();
   const pages = Math.max(1, Math.ceil(total / pageSize));
   return (
     <div className="flex flex-wrap items-center justify-between gap-2">
@@ -80,9 +85,9 @@ export function PageControls({
         aria-live="polite"
         aria-atomic="true"
       >
-        共 {total} 条 · 第 {page} / {pages} 页
+        {t("pagination.summary", { count: total, page, pages })}
       </p>
-      <nav aria-label="列表分页" className="flex gap-2">
+      <nav aria-label={t("pagination.label")} className="flex gap-2">
         <Button
           variant="outline"
           size="sm"
@@ -90,7 +95,7 @@ export function PageControls({
           onClick={() => setPage(page - 1)}
         >
           <ChevronLeftIcon data-icon="inline-start" aria-hidden="true" />
-          上一页
+          {t("pagination.previous")}
         </Button>
         <Button
           variant="outline"
@@ -98,7 +103,7 @@ export function PageControls({
           disabled={page >= pages}
           onClick={() => setPage(page + 1)}
         >
-          下一页
+          {t("pagination.next")}
           <ChevronRightIcon data-icon="inline-end" aria-hidden="true" />
         </Button>
       </nav>

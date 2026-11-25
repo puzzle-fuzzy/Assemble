@@ -20,7 +20,7 @@
     "build": "bun run --filter @assemble/desktop build",
     "build:frontend": "bun run --filter @assemble/desktop build:frontend && bun run admin:build",
     "mcp": "ASSEMBLE_SERVER_ORIGIN=https://as.yxswy.com cargo build --release -p assemble-mcp",
-    "typecheck": "bun run --filter @assemble/desktop typecheck && bun run --filter @assemble/admin typecheck && bun run --filter @assemble/ui typecheck && bun run typecheck:tools",
+    "typecheck": "bun run --filter @assemble/desktop typecheck && bun run --filter @assemble/admin typecheck && bun run --filter @assemble/ui typecheck && bun run --filter @assemble/display typecheck && bun run typecheck:tools",
     "typecheck:tools": "tsc --noEmit",
     "test": "bun test",
     "lint": "biome check .",

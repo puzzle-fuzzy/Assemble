@@ -16,7 +16,8 @@ export interface SnapshotState {
 
 export function useSnapshot(source: Bridge = bridge): SnapshotState {
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
-  const [loadError, setLoadError] = useState<string | null>(null);
+  // 只保存稳定错误码，重渲染时按当前语言生成文案，不保留诊断信息。
+  const [failureCode, setFailureCode] = useState<string | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -27,7 +28,7 @@ export function useSnapshot(source: Bridge = bridge): SnapshotState {
         if (active) setSnapshot(current);
       },
       (error: unknown) => {
-        if (active) setLoadError(messageFor(toBridgeError(error)));
+        if (active) setFailureCode(toBridgeError(error).code);
       },
     );
 
@@ -43,7 +44,7 @@ export function useSnapshot(source: Bridge = bridge): SnapshotState {
       },
       (error: unknown) => {
         // 订阅不上就收不到后续变化：如实告诉用户，而不是停留在旧状态。
-        if (active) setLoadError(messageFor(toBridgeError(error)));
+        if (active) setFailureCode(toBridgeError(error).code);
       },
     );
 
@@ -53,5 +54,10 @@ export function useSnapshot(source: Bridge = bridge): SnapshotState {
     };
   }, [source]);
 
-  return { snapshot, loadError };
+  return {
+    snapshot,
+    loadError: failureCode
+      ? messageFor(toBridgeError({ code: failureCode }))
+      : null,
+  };
 }

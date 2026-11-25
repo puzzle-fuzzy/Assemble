@@ -3,14 +3,13 @@
 // 服务端给的时间都是 UTC；输入框（`datetime-local`）和显示用的都是这台电脑的本地时间。
 // 这里都是纯函数，不碰界面。
 
+import { text, textLocale } from "@/lib/text-i18n";
 import type {
   PlannerView,
   ReminderView,
   Repeat,
   ScheduleView,
 } from "@/lib/types";
-
-const WEEKDAYS = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"];
 
 /** 这一天在本机时区下从哪一刻开始。 */
 function startOfDay(date: Date): number {
@@ -62,66 +61,70 @@ export function dayLabel(iso: string, now: number): string {
   const days = Math.round(
     (startOfDay(at) - startOfDay(new Date(now))) / 86_400_000,
   );
-  if (days === 0) return "今天";
-  if (days === -1) return "昨天";
-  if (days === 1) return "明天";
-  if (days === 2) return "后天";
-  if (days > 2 && days < 7) return WEEKDAYS[at.getDay()];
-  return `${at.getMonth() + 1}月${at.getDate()}日`;
+  if (days === 0) return text("planner.day.today");
+  if (days === -1) return text("planner.day.yesterday");
+  if (days === 1) return text("planner.day.tomorrow");
+  if (days === 2) return text("planner.day.dayAfterTomorrow");
+  if (days > 2 && days < 7) {
+    return new Intl.DateTimeFormat(textLocale(), { weekday: "short" }).format(
+      at,
+    );
+  }
+  return monthDay(iso, now, false);
 }
 
 export function repeatLabel(repeat: Repeat): string {
-  switch (repeat) {
-    case "none":
-      return "不重复";
-    case "daily":
-      return "每天";
-    case "weekly":
-      return "每周";
-    case "monthly":
-      return "每月";
-  }
+  return text(`planner.repeat.${repeat}`);
 }
 
 /** 可以选的提前量：到点，或者提前这么多分钟。 */
-export const LEADS: ReadonlyArray<readonly [number | null, string]> = [
-  [null, "到点时提醒"],
-  [10, "提前 10 分钟"],
-  [30, "提前 30 分钟"],
-  [60, "提前 1 小时"],
-  [1440, "提前 1 天"],
-];
+const LEAD_MINUTES = [null, 10, 30, 60, 1440] as const;
+
+/** 组件每次渲染时读取，语言切换后不会继续使用导入时的文字。 */
+export function leadOptions(): ReadonlyArray<readonly [number | null, string]> {
+  return LEAD_MINUTES.map((minutes) => [
+    minutes,
+    minutes === null ? text("planner.lead.atTime") : leadLabel(minutes),
+  ]);
+}
+
+/** @deprecated 表单请在渲染时调用 leadOptions()，此常量只保留导入兼容。 */
+export const LEADS = leadOptions();
 
 export function leadLabel(minutes: number): string {
-  return (
-    LEADS.find(([lead]) => lead === minutes)?.[1] ?? `提前 ${minutes} 分钟`
-  );
+  if (minutes === 60) return text("planner.lead.hours", { count: 1 });
+  if (minutes === 1440) return text("planner.lead.days", { count: 1 });
+  return text("planner.lead.minutes", { count: minutes });
 }
 
 /** 一条通知是多久之前生成的。 */
 export function ago(iso: string, now: number): string {
   const raised = new Date(iso).getTime();
   const minutes = Math.floor((now - raised) / 60_000);
-  if (minutes < 1) return "刚刚";
-  if (minutes < 60) return `${minutes} 分钟前`;
+  if (minutes < 1) return text("planner.ago.justNow");
+  if (minutes < 60) return text("planner.ago.minutes", { count: minutes });
   const hours = Math.floor(minutes / 60);
   if (
     hours < 24 &&
     startOfDay(new Date(raised)) === startOfDay(new Date(now))
   ) {
-    return `${hours} 小时前`;
+    return text("planner.ago.hours", { count: hours });
   }
   return `${dayLabel(iso, now)} ${clock(iso)}`;
 }
 
 /** `M月D日`；不是 `now` 那一年的，前面带上年份。 */
-function monthDay(iso: string, now: number): string {
+function monthDay(iso: string, now: number, includeYear = true): string {
   const at = new Date(iso);
-  const year =
-    at.getFullYear() === new Date(now).getFullYear()
-      ? ""
-      : `${at.getFullYear()}年`;
-  return `${year}${at.getMonth() + 1}月${at.getDate()}日`;
+  const locale = textLocale();
+  return new Intl.DateTimeFormat(locale, {
+    // 语言只决定格式；不设置 timeZone，继续按本机的年月日显示。
+    month: locale === "en" ? "short" : "long",
+    day: "numeric",
+    ...(includeYear && at.getFullYear() !== new Date(now).getFullYear()
+      ? { year: "numeric" as const }
+      : {}),
+  }).format(at);
 }
 
 /** 安排里的一行：一条日程按它最近的一场排，一条提醒按到点时间排。 */
@@ -172,14 +175,24 @@ export function scheduleLine(schedule: ScheduleView, now: number): string {
   const parts: string[] = [];
   const at = placing(schedule, now);
   if (at !== null) {
-    const span = schedule.endAt ? ` 到 ${clock(schedule.endAt)}` : "";
-    parts.push(`${dayLabel(at, now)} ${clock(at)}${span}`);
+    const time = schedule.endAt
+      ? text("planner.timeSpan", {
+          start: clock(at),
+          end: clock(schedule.endAt),
+        })
+      : clock(at);
+    parts.push(text("planner.at", { day: dayLabel(at, now), time }));
   }
   if (schedule.repeat !== "none") {
-    const until = schedule.repeatUntil
-      ? `，到 ${monthDay(schedule.repeatUntil, now)}`
-      : "";
-    parts.push(`${repeatLabel(schedule.repeat)}${until}`);
+    const repeat = repeatLabel(schedule.repeat);
+    parts.push(
+      schedule.repeatUntil
+        ? text("planner.repeatUntil", {
+            repeat,
+            date: monthDay(schedule.repeatUntil, now),
+          })
+        : repeat,
+    );
   }
   if (schedule.remindBefore !== null) {
     parts.push(leadLabel(schedule.remindBefore));
@@ -198,14 +211,20 @@ export function laterLabel(schedule: ScheduleView, now: number): string | null {
   const shown = rest
     .slice(0, 3)
     .map((iso) => `${monthDay(iso, now)} ${clock(iso)}`);
-  const more = rest.length > 3 ? ` 等 ${rest.length} 场` : "";
-  return `之后：${shown.join("、")}${more}`;
+  const more =
+    rest.length > 3
+      ? text("planner.later.totalSuffix", { count: rest.length })
+      : "";
+  return text("planner.later.label", {
+    dates: shown.join(text("planner.later.separator")),
+    more,
+  });
 }
 
 /** 一条提醒什么时候到点；已经到点的说"已到点"。 */
 export function reminderLine(reminder: ReminderView, now: number): string {
   const when = `${dayLabel(reminder.dueAt, now)} ${clock(reminder.dueAt)}`;
-  return reminder.status === "fired" ? `已到点 · ${when}` : when;
+  return reminder.status === "fired" ? text("planner.fired", { when }) : when;
 }
 
 /** 表单里填的东西。时间都是输入框里的本地时间；没填的就是空串。 */
@@ -224,11 +243,12 @@ export interface PlannerDraft {
  * 这里只是把最常见的三种填错早一步说清楚，省得等一个来回。
  */
 export function problemWith(draft: PlannerDraft): string | null {
-  if (draft.title.trim().length === 0) return "先写一个标题。";
+  if (draft.title.trim().length === 0)
+    return text("planner.form.titleRequired");
   const start = fromLocalInput(draft.at);
-  if (start === null) return "时间要填到哪一天、几点几分。";
+  if (start === null) return text("planner.form.timeIncomplete");
   const end = draft.end ? fromLocalInput(draft.end) : null;
-  if (draft.end && end === null) return "结束时间没有填完整；不填也可以。";
-  if (end !== null && end <= start) return "结束时间要晚于开始时间。";
+  if (draft.end && end === null) return text("planner.form.endIncomplete");
+  if (end !== null && end <= start) return text("planner.form.endBeforeStart");
   return null;
 }

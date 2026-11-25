@@ -1,4 +1,3 @@
-import { Avatar, AvatarFallback, AvatarImage } from "@assemble/ui/avatar";
 import {
   Breadcrumb,
   BreadcrumbItem,
@@ -8,12 +7,12 @@ import {
   BreadcrumbSeparator,
 } from "@assemble/ui/breadcrumb";
 import { Button } from "@assemble/ui/button";
+import { DisplayPreferencesItems } from "@assemble/ui/display-preferences";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuGroup,
   DropdownMenuItem,
-  DropdownMenuLabel,
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
   DropdownMenuSeparator,
@@ -22,6 +21,7 @@ import {
 import {
   Sidebar,
   SidebarContent,
+  SidebarFooter,
   SidebarGroup,
   SidebarGroupContent,
   SidebarMenu,
@@ -29,9 +29,9 @@ import {
   SidebarMenuItem,
   SidebarProvider,
 } from "@assemble/ui/sidebar";
+import { SidebarAccountMenu } from "@assemble/ui/sidebar-account-menu";
 import {
   ChartNoAxesCombinedIcon,
-  ChevronDownIcon,
   LogOutIcon,
   LogsIcon,
   MenuIcon,
@@ -40,13 +40,14 @@ import {
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import type { AccessFailure, AdminSession } from "../lib/api";
+import { useAdminTranslation } from "../lib/i18n";
 import { DevicesPage, LoginsPage, OverviewPage, UsersPage } from "./pages";
 
 const navigation = [
-  { key: "overview", name: "概览", icon: ChartNoAxesCombinedIcon },
-  { key: "users", name: "用户", icon: UsersIcon },
-  { key: "devices", name: "设备", icon: MonitorIcon },
-  { key: "logins", name: "登录记录", icon: LogsIcon },
+  { key: "overview", icon: ChartNoAxesCombinedIcon },
+  { key: "users", icon: UsersIcon },
+  { key: "devices", icon: MonitorIcon },
+  { key: "logins", icon: LogsIcon },
 ] as const;
 
 type View = (typeof navigation)[number]["key"];
@@ -63,10 +64,10 @@ export function AdminShell({
   session: AdminSession;
   onAccessFailure: (failure: AccessFailure) => void;
 }) {
+  const { t } = useAdminTranslation();
   const [view, setView] = useState<View>(currentView);
   const pageHeading = useRef<HTMLSpanElement>(null);
   const [userDetail, setUserDetail] = useState(false);
-  const initial = useRef(true);
   const logout = useRef<HTMLFormElement>(null);
   const focusPageOnMenuClose = useRef(false);
   const selected =
@@ -81,12 +82,23 @@ export function AdminShell({
       window.removeEventListener("popstate", update);
     };
   }, []);
-  const pageName = view === "users" && userDetail ? "用户详情" : selected.name;
+  const pageName = t(
+    view === "users" && userDetail
+      ? "navigation.userDetail"
+      : `navigation.${selected.key}`,
+  );
   useEffect(() => {
-    document.title = `${pageName} · Assemble 管理控制台`;
-    if (initial.current) initial.current = false;
-    else pageHeading.current?.focus();
-  }, [pageName]);
+    document.title = t("app.documentTitle", { page: pageName });
+  }, [pageName, t]);
+  const focusKey = view === "users" && userDetail ? "user-detail" : view;
+  const previousFocusKey = useRef(focusKey);
+  useEffect(() => {
+    // 切换语言只更新文案，不把焦点从偏好菜单或搜索框抢到页面标题。
+    if (previousFocusKey.current !== focusKey) {
+      previousFocusKey.current = focusKey;
+      pageHeading.current?.focus();
+    }
+  }, [focusKey]);
 
   function navigate(next: View) {
     if (next === view) return;
@@ -98,11 +110,14 @@ export function AdminShell({
   return (
     // 沿用官方 sidebar-13 的内部骨架；按用户要求移出演示对话框，右侧使用整页空间。
     <SidebarProvider className="items-start">
+      <form ref={logout} method="post" action="/web/logout?next=/admin/" hidden>
+        <input type="hidden" name="csrf" value={session.csrfToken} />
+      </form>
       <Sidebar collapsible="none" className="sticky top-0 hidden h-svh md:flex">
         <SidebarContent>
           <SidebarGroup>
             <SidebarGroupContent>
-              <nav aria-label="管理功能">
+              <nav aria-label={t("navigation.label")}>
                 <SidebarMenu>
                   {navigation.map((item) => (
                     <SidebarMenuItem key={item.key}>
@@ -116,7 +131,7 @@ export function AdminShell({
                           }}
                         >
                           <item.icon aria-hidden="true" />
-                          <span>{item.name}</span>
+                          <span>{t(`navigation.${item.key}`)}</span>
                         </a>
                       </SidebarMenuButton>
                     </SidebarMenuItem>
@@ -126,6 +141,25 @@ export function AdminShell({
             </SidebarGroupContent>
           </SidebarGroup>
         </SidebarContent>
+        <SidebarFooter>
+          <SidebarAccountMenu
+            identity={{
+              name: session.account.displayName,
+              secondary: session.account.email ?? session.account.displayName,
+              avatarUrl: session.account.avatarUrl,
+            }}
+            label={t("navigation.accountMenu")}
+            groups={[
+              [
+                {
+                  label: t("navigation.signOut"),
+                  icon: LogOutIcon,
+                  onSelect: () => logout.current?.requestSubmit(),
+                },
+              ],
+            ]}
+          />
+        </SidebarFooter>
       </Sidebar>
       <main className="flex h-svh min-w-0 flex-1 flex-col overflow-hidden">
         <header className="flex h-16 shrink-0 items-center justify-between gap-2 transition-[width,height] ease-linear group-has-data-[collapsible=icon]/sidebar-wrapper:h-12">
@@ -136,7 +170,7 @@ export function AdminShell({
                   variant="ghost"
                   size="icon-sm"
                   className="md:hidden"
-                  aria-label="打开管理菜单"
+                  aria-label={t("navigation.openMenu")}
                 >
                   <MenuIcon aria-hidden="true" />
                 </Button>
@@ -162,10 +196,21 @@ export function AdminShell({
                       }}
                     >
                       <item.icon aria-hidden="true" />
-                      <span>{item.name}</span>
+                      <span>{t(`navigation.${item.key}`)}</span>
                     </DropdownMenuRadioItem>
                   ))}
                 </DropdownMenuRadioGroup>
+                <DropdownMenuSeparator />
+                <DisplayPreferencesItems />
+                <DropdownMenuSeparator />
+                <DropdownMenuGroup>
+                  <DropdownMenuItem
+                    onSelect={() => logout.current?.requestSubmit()}
+                  >
+                    <LogOutIcon aria-hidden="true" />
+                    {t("navigation.signOut")}
+                  </DropdownMenuItem>
+                </DropdownMenuGroup>
               </DropdownMenuContent>
             </DropdownMenu>
             <Breadcrumb>
@@ -178,7 +223,7 @@ export function AdminShell({
                       navigate("overview");
                     }}
                   >
-                    Assemble 管理
+                    {t("app.brand")}
                   </BreadcrumbLink>
                 </BreadcrumbItem>
                 <BreadcrumbSeparator className="hidden md:block" />
@@ -195,50 +240,9 @@ export function AdminShell({
               </BreadcrumbList>
             </Breadcrumb>
           </div>
-          <div className="min-w-0 shrink-0 px-4">
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button variant="ghost" size="sm" aria-label="管理员账户菜单">
-                  <Avatar className="size-6">
-                    {session.account.avatarUrl && (
-                      <AvatarImage src={session.account.avatarUrl} alt="" />
-                    )}
-                    <AvatarFallback>
-                      {session.account.displayName.slice(0, 1)}
-                    </AvatarFallback>
-                  </Avatar>
-                  <span className="hidden max-w-36 truncate sm:inline">
-                    {session.account.displayName}
-                  </span>
-                  <ChevronDownIcon data-icon="inline-end" aria-hidden="true" />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="max-w-72">
-                <DropdownMenuLabel className="break-all">
-                  {session.account.email ?? session.account.displayName}
-                </DropdownMenuLabel>
-                <DropdownMenuSeparator />
-                <DropdownMenuGroup>
-                  <DropdownMenuItem
-                    onSelect={() => logout.current?.requestSubmit()}
-                  >
-                    <LogOutIcon aria-hidden="true" />
-                    退出登录
-                  </DropdownMenuItem>
-                </DropdownMenuGroup>
-              </DropdownMenuContent>
-            </DropdownMenu>
-            <form
-              ref={logout}
-              method="post"
-              action="/web/logout?next=/admin/"
-              hidden
-            >
-              <input type="hidden" name="csrf" value={session.csrfToken} />
-            </form>
-          </div>
         </header>
-        <div className="admin-content flex min-w-0 flex-1 flex-col gap-4 overflow-y-auto p-4 pt-0 [&>*]:shrink-0">
+        {/* Card 的外描边需要留在滚动区内，避免顶部贴边时被视口裁掉。 */}
+        <div className="admin-content flex min-w-0 flex-1 flex-col gap-4 overflow-y-auto p-4 pt-1 [&>*]:shrink-0">
           {view === "overview" && (
             <OverviewPage onAccessFailure={onAccessFailure} />
           )}

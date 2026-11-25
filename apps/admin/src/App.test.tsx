@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
+import { setLanguage } from "@assemble/display";
 import { act } from "react";
 import { App } from "./App";
 import type {
@@ -92,6 +93,7 @@ function defaultResponse(path: string): Response {
 }
 
 beforeEach(() => {
+  setLanguage("zh-CN");
   document.body.replaceChildren();
   window.history.replaceState(null, "", "/admin/");
   requests.length = 0;
@@ -220,6 +222,37 @@ describe("管理端真实数据和访问权限", () => {
     expect(host.textContent).toContain("登录管理控制台");
     expect(host.textContent).not.toContain(user.email);
     expect(host.textContent).not.toContain(session.account.displayName);
+  });
+
+  test("管理员头像菜单位于侧栏底部，键盘退出提交原有同源表单", async () => {
+    const host = await render(<App />);
+    expect(host.querySelector('header [data-slot="avatar"]')).toBeNull();
+    const trigger = button(host, "管理员账户菜单");
+    expect(trigger.closest('[data-slot="sidebar-footer"]')).not.toBeNull();
+    expect(trigger.textContent).toContain(session.account.displayName);
+    expect(trigger.textContent).toContain("admin@example.test");
+    const form = host.querySelector<HTMLFormElement>(
+      "form[action='/web/logout?next=/admin/']",
+    );
+    if (!form) throw new Error("缺少退出表单");
+    const submit = mock(() => {});
+    form.requestSubmit = submit;
+    await act(async () => {
+      trigger.focus();
+      trigger.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "Enter", bubbles: true }),
+      );
+    });
+    await settle();
+    const item = [
+      ...document.body.querySelectorAll<HTMLElement>('[role="menuitem"]'),
+    ].find((candidate) => candidate.textContent === "退出登录");
+    expect(item?.textContent).toBe("退出登录");
+    if (!item) throw new Error("缺少退出菜单项");
+    await click(item);
+    expect(submit).toHaveBeenCalledTimes(1);
+    expect(document.body.querySelector('[role="menu"]')).toBeNull();
+    expect(document.activeElement).toBe(trigger);
   });
 });
 

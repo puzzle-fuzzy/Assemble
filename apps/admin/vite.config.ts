@@ -1,4 +1,5 @@
 import { fileURLToPath, URL } from "node:url";
+import { displayPreferencesPlugin } from "@assemble/display/vite";
 import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";
 import { defineConfig, type ProxyOptions } from "vite";
@@ -29,7 +30,7 @@ function proxy(): ProxyOptions {
 
 export default defineConfig({
   base: "/admin/",
-  plugins: [react(), tailwindcss()],
+  plugins: [displayPreferencesPlugin(), react(), tailwindcss()],
   resolve: {
     alias: { "@": fileURLToPath(new URL("./src", import.meta.url)) },
   },

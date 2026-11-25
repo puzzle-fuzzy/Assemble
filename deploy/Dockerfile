@@ -11,9 +11,11 @@ COPY package.json bun.lock bunfig.toml ./
 COPY apps/desktop/package.json apps/desktop/package.json
 COPY apps/admin/package.json apps/admin/package.json
 COPY packages/ui/package.json packages/ui/package.json
+COPY packages/display/package.json packages/display/package.json
 RUN bun install --frozen-lockfile
 COPY apps/admin/ apps/admin/
 COPY packages/ui/ packages/ui/
+COPY packages/display/ packages/display/
 RUN bun run admin:build
 
 # ---- 构建：官方 Rust 镜像自带编译 C 代码要用的工具链 ----

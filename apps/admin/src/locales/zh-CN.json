@@ -1,0 +1,132 @@
+{
+  "app": {
+    "title": "Assemble 管理控制台",
+    "brand": "Assemble 管理",
+    "documentTitle": "{{page}} · Assemble 管理控制台"
+  },
+  "navigation": {
+    "label": "管理功能",
+    "openMenu": "打开管理菜单",
+    "accountMenu": "管理员账户菜单",
+    "overview": "概览",
+    "users": "用户",
+    "devices": "设备",
+    "logins": "登录记录",
+    "userDetail": "用户详情",
+    "signOut": "退出登录"
+  },
+  "common": {
+    "loading": "正在加载",
+    "refresh": "刷新",
+    "retry": "重试",
+    "search": "搜索",
+    "emailMissing": "未绑定邮箱",
+    "unrecorded": "未记录",
+    "actions": "操作",
+    "superAdmin": "超级管理员",
+    "user": "用户",
+    "online": "在线",
+    "offline": "离线",
+    "beijingTime": "北京时间 UTC+8",
+    "github": "GitHub"
+  },
+  "access": {
+    "signedOutTitle": "登录管理控制台",
+    "signedOutDescription": "请使用已获授权的超级管理员账户登录，继续访问网页管理控制台。",
+    "signIn": "前往登录",
+    "forbiddenTitle": "没有管理权限",
+    "forbiddenDescription": "当前账户不是超级管理员。如需切换账户，请在账户页退出后，使用已获授权的账户重新登录。",
+    "openAccount": "前往账户页"
+  },
+  "error": {
+    "notFoundTitle": "找不到这位用户",
+    "notFoundDescription": "这位用户可能已不存在，请返回用户列表重新查看。",
+    "unavailableTitle": "暂时无法读取数据",
+    "unavailableDescription": "请检查网络连接后重试。"
+  },
+  "overview": {
+    "users": "注册用户",
+    "devices": "使用设备",
+    "onlineDevices": "在线设备",
+    "registrationsToday": "今日注册"
+  },
+  "search": {
+    "usersLabel": "搜索用户",
+    "usersPlaceholder": "姓名或邮箱",
+    "devicesLabel": "搜索设备",
+    "devicesPlaceholder": "设备名称、用户姓名或邮箱",
+    "loginsLabel": "搜索登录记录",
+    "loginsPlaceholder": "用户姓名或邮箱"
+  },
+  "empty": {
+    "noMatchesTitle": "没有匹配的结果",
+    "noMatchesDescription": "换一个关键词，或清空搜索后再试。",
+    "usersTitle": "还没有注册用户",
+    "usersDescription": "新用户注册后会出现在这里。",
+    "devicesTitle": "还没有设备",
+    "devicesDescription": "用户登录桌面端或助手入口后，已登记设备会出现在这里。",
+    "loginsTitle": "还没有登录记录",
+    "loginsDescription": "之后发生的成功登录会记录在这里。",
+    "userDevicesTitle": "这个账户还没有设备",
+    "userDevicesDescription": "登录桌面端或助手入口后会登记设备。",
+    "userLoginsTitle": "这个账户还没有登录记录",
+    "userLoginsDescription": "历史中没有采集的登录不会补写。"
+  },
+  "pagination": {
+    "label": "列表分页",
+    "summary_one": "共 {{count, number}} 条 · 第 {{page, number}} / {{pages, number}} 页",
+    "summary_other": "共 {{count, number}} 条 · 第 {{page, number}} / {{pages, number}} 页",
+    "previous": "上一页",
+    "next": "下一页"
+  },
+  "table": {
+    "usersRegion": "注册用户表格，可横向滚动",
+    "usersCaption": "注册用户",
+    "devicesRegion": "设备表格，可横向滚动",
+    "devicesCaption": "设备",
+    "loginsRegion": "登录记录表格，可横向滚动",
+    "loginsCaption": "登录记录",
+    "user": "用户",
+    "createdAt": "注册时间",
+    "lastLoginAt": "最近登录",
+    "devices": "设备",
+    "identity": "身份",
+    "deviceName": "设备名称",
+    "deviceOwner": "所属用户",
+    "platform": "平台",
+    "status": "状态",
+    "deviceCreatedAt": "添加时间",
+    "lastSeenAt": "最后在线",
+    "loginMethod": "登录方式",
+    "occurredAt": "登录时间",
+    "deviceSummary_one": "{{count, number}} 台 / {{online, number}} 在线",
+    "deviceSummary_other": "{{count, number}} 台 / {{online, number}} 在线",
+    "viewDetails": "查看详情",
+    "viewUserDetails": "查看 {{name}} 的详情"
+  },
+  "userDetail": {
+    "back": "返回用户列表",
+    "accountInfo": "账户信息",
+    "accountId": "账户编号：{{id}}",
+    "githubLinked": "已关联 GitHub",
+    "githubUnlinked": "未关联 GitHub",
+    "createdAt": "注册时间",
+    "lastLoginAt": "最近登录",
+    "deviceCount": "设备总数",
+    "onlineDeviceCount": "在线设备",
+    "devices_one": "{{count, number}} 台",
+    "devices_other": "{{count, number}} 台",
+    "ownedDevices": "所属设备",
+    "recentLogins": "最近登录记录"
+  },
+  "platform": {
+    "windows": "Windows",
+    "macos": "macOS",
+    "linux": "Linux",
+    "other": "其他"
+  },
+  "loginMethod": {
+    "email": "邮箱密码",
+    "github": "GitHub"
+  }
+}

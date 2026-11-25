@@ -6,7 +6,9 @@
 import { type ReactNode, type Ref, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Separator } from "@/components/ui/separator";
 import type { Bridge } from "@/lib/bridge";
+import { uiText, useDesktopTranslation } from "@/lib/i18n";
 import {
   ago,
   laterLabel,
@@ -14,6 +16,7 @@ import {
   scheduleLine,
 } from "@/lib/planner-text";
 import type { NotificationView, ReminderView, ScheduleView } from "@/lib/types";
+import { cn } from "@/lib/utils";
 import type { Form } from "@/PlannerForm";
 
 /** 做一件事；返回稳定错误码，成功时为 null。 */
@@ -27,6 +30,7 @@ interface ItemProps<T> {
   pending: boolean;
   act: Act;
   onEdit: (form: Form) => void;
+  separated?: boolean;
 }
 
 /** 名单里的一行：左边是说清楚的一叠文字，右边是几个按钮。 */
@@ -35,15 +39,18 @@ function Row({
   by,
   actions,
   children,
+  separated = false,
 }: {
   title: string;
   /** 记下它的设备；就是这台电脑时为 null。 */
   by: string | null;
   actions: ReactNode;
   children: ReactNode;
+  separated?: boolean;
 }) {
   return (
-    <li className="flex flex-wrap items-start gap-3 rounded-lg border border-border px-3 py-2">
+    <li className="relative flex flex-wrap items-start gap-3 py-3">
+      {separated ? <Separator className="absolute inset-x-0 top-0" /> : null}
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-center gap-2">
           <h3 className="truncate text-sm font-medium" title={title}>
@@ -102,7 +109,7 @@ function Confirming({
         {label}
       </Button>
       <Button size="sm" variant="outline" disabled={pending} onClick={onBail}>
-        算了
+        {uiText("neverMind")}
       </Button>
     </>
   );
@@ -117,6 +124,7 @@ export function NotificationRow({
   onRead,
   onDone,
   ref,
+  separated = false,
 }: {
   notification: NotificationView;
   /** 它对应的那条提醒；名单里找得到时才有。 */
@@ -127,14 +135,19 @@ export function NotificationRow({
   onRead: () => void;
   onDone: (reminder: ReminderView) => void;
   ref?: Ref<HTMLLIElement>;
+  separated?: boolean;
 }) {
+  useDesktopTranslation();
   return (
     <li
       ref={ref}
-      className={`flex items-start gap-3 rounded-lg border px-3 py-2 ${
-        highlighted ? "border-ring ring-2 ring-ring/40" : "border-border"
-      }`}
+      aria-current={highlighted ? "true" : undefined}
+      className={cn(
+        "relative flex items-start gap-3 py-3",
+        highlighted && "bg-accent",
+      )}
     >
+      {separated ? <Separator className="absolute inset-x-0 top-0" /> : null}
       <div className="min-w-0 flex-1">
         <h3 className="text-sm font-medium">{notification.title}</h3>
         {notification.body ? (
@@ -150,11 +163,11 @@ export function NotificationRow({
         {reminder ? (
           // 这条提醒已经到点了：看完就一起收掉，不用再去下面的名单里找它。
           <Button size="sm" disabled={pending} onClick={() => onDone(reminder)}>
-            看过了
+            {uiText("done")}
           </Button>
         ) : null}
         <Button size="sm" variant="outline" disabled={pending} onClick={onRead}>
-          知道了
+          {uiText("dismiss")}
         </Button>
       </div>
     </li>
@@ -168,17 +181,20 @@ export function ScheduleRow({
   pending,
   act,
   onEdit,
+  separated,
 }: ItemProps<ScheduleView>) {
+  useDesktopTranslation();
   const [confirming, setConfirming] = useState(false);
   const later = laterLabel(item, Date.now());
   return (
     <Row
+      separated={separated}
       title={item.title}
       by={item.createdBy === deviceName ? null : item.createdBy}
       actions={
         confirming ? (
           <Confirming
-            label="确认取消"
+            label={uiText("confirmCancellation")}
             pending={pending}
             onConfirm={() =>
               void act(() => source.scheduleCancel(item.id, item.version))
@@ -196,7 +212,7 @@ export function ScheduleRow({
                   void act(() => source.scheduleComplete(item.id, item.version))
                 }
               >
-                完成
+                {uiText("complete")}
               </Button>
             ) : null}
             <Button
@@ -205,7 +221,7 @@ export function ScheduleRow({
               disabled={pending}
               onClick={() => onEdit({ kind: "schedule", original: item })}
             >
-              改…
+              {uiText("editEllipsis")}
             </Button>
             <Button
               size="sm"
@@ -213,7 +229,7 @@ export function ScheduleRow({
               disabled={pending}
               onClick={() => setConfirming(true)}
             >
-              取消
+              {uiText("cancel")}
             </Button>
           </>
         )
@@ -234,18 +250,21 @@ export function ReminderRow({
   pending,
   act,
   onEdit,
+  separated,
 }: ItemProps<ReminderView>) {
+  useDesktopTranslation();
   const [confirming, setConfirming] = useState(false);
   // 到点的提醒不能再改时间，只能看完或者不办。
   const fired = item.status === "fired";
   return (
     <Row
+      separated={separated}
       title={item.title}
       by={item.createdBy === deviceName ? null : item.createdBy}
       actions={
         confirming ? (
           <Confirming
-            label="确认不办了"
+            label={uiText("confirmCancellation2")}
             pending={pending}
             onConfirm={() =>
               void act(() => source.reminderCancel(item.id, item.version))
@@ -261,7 +280,7 @@ export function ReminderRow({
                 void act(() => source.reminderDismiss(item.id, item.version))
               }
             >
-              {fired ? "看过了" : "办完了"}
+              {fired ? uiText("done") : uiText("markDone")}
             </Button>
             {fired ? null : (
               <Button
@@ -270,7 +289,7 @@ export function ReminderRow({
                 disabled={pending}
                 onClick={() => onEdit({ kind: "reminder", original: item })}
               >
-                改…
+                {uiText("editEllipsis")}
               </Button>
             )}
             <Button
@@ -279,7 +298,7 @@ export function ReminderRow({
               disabled={pending}
               onClick={() => setConfirming(true)}
             >
-              不办了
+              {uiText("cancelReminder")}
             </Button>
           </>
         )

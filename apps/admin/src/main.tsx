@@ -10,3 +10,5 @@ createRoot(root).render(
     <App />
   </StrictMode>,
 );
+
+import "@assemble/display";
