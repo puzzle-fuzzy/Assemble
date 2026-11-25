@@ -351,17 +351,23 @@ async fn recovery_revokes_web_sessions_and_cannot_overwrite_a_later_password_cha
         .unwrap();
     let browser = Browser::new(f.server.origin.as_str());
     assert_eq!(
-        request(&browser, "/web/forgot", "recover@example.test", &[])
-            .await
-            .status,
+        request(
+            &browser,
+            "/web/forgot?next=%2Fadmin%2F",
+            "recover@example.test",
+            &[("next", "/admin/")],
+        )
+        .await
+        .status,
         StatusCode::OK
     );
     let token = f.inbox.token();
-    assert_eq!(
-        confirm(&browser, &token, "the-recovered-password")
-            .await
-            .status,
-        StatusCode::OK
+    let recovered = confirm(&browser, &token, "the-recovered-password").await;
+    assert_eq!(recovered.status, StatusCode::OK);
+    assert!(
+        recovered
+            .html
+            .contains("href=\"/web/login?next=%2Fadmin%2F\"")
     );
     assert_eq!(
         send(f.browser.get("/web/account")).await.status,

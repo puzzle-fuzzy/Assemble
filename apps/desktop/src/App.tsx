@@ -5,15 +5,16 @@
 import {
   Breadcrumb,
   BreadcrumbItem,
+  BreadcrumbLink,
   BreadcrumbList,
   BreadcrumbPage,
   BreadcrumbSeparator,
 } from "@assemble/ui/breadcrumb";
-import { ArrowDownToLine, ArrowUpToLine, UserRound, X } from "lucide-react";
-import { type CSSProperties, useEffect, useId, useRef, useState } from "react";
+import { ArrowDownToLine, ArrowUpToLine, UserRound } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import {
-  type DesktopListItem,
+  DesktopMobileMenu,
   DesktopSidebar,
   DESKTOP_MODULES as SECTIONS,
   type DesktopModule as Section,
@@ -38,34 +39,15 @@ import {
   EmptyTitle,
 } from "@/components/ui/empty";
 import { Input } from "@/components/ui/input";
-import {
-  Popover,
-  PopoverContent,
-  PopoverHeader,
-  PopoverTitle,
-  PopoverTrigger,
-} from "@/components/ui/popover";
 import { Progress } from "@/components/ui/progress";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Separator } from "@/components/ui/separator";
-import {
-  SidebarInset,
-  SidebarProvider,
-  SidebarTrigger,
-} from "@/components/ui/sidebar";
+import { SidebarProvider } from "@/components/ui/sidebar";
 import { Toaster } from "@/components/ui/sonner";
 import { Switch } from "@/components/ui/switch";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
 import { useSnapshot } from "@/hooks/use-snapshot";
 import { type Bridge, bridge, toBridgeError } from "@/lib/bridge";
 import { formatBuildInfo } from "@/lib/build-info";
 import { messageFor } from "@/lib/messages";
-import { agenda, ago, reminderLine, scheduleLine } from "@/lib/planner-text";
 import {
   formatSize,
   formatSpace,
@@ -96,63 +78,47 @@ export function App({ bridge: source = bridge }: AppProps) {
   const { snapshot, loadError } = useSnapshot(source);
   const [actionError, setActionError] = useState<string | null>(null);
   const [section, setSection] = useState<Section>("transfers");
-  const [accountOpen, setAccountOpen] = useState(false);
-  const accountTitleId = useId();
-  const [selection, setSelection] = useState<Partial<Record<Section, string>>>(
-    {},
-  );
   const [queries, setQueries] = useState<Partial<Record<Section, string>>>({});
-  const [plannerDraft, setPlannerDraft] = useState(false);
-  const account =
-    snapshot?.session.phase === "signedIn" ? snapshot.session.account : null;
+  const contentHeading = useRef<HTMLHeadingElement>(null);
   const phase = snapshot?.session.phase;
-  const previousPhase = useRef(phase);
+  const accountId =
+    snapshot?.session.phase === "signedIn" ? snapshot.session.account.id : null;
+  const previousAccount = useRef(accountId);
+  const previousSection = useRef(section);
   const compose = snapshot?.planner?.compose ?? null;
   const focused = snapshot?.planner?.focus ?? null;
 
-  const accountId = account?.id ?? null;
-  const previousAccount = useRef(accountId);
   useEffect(() => {
     if (previousAccount.current === accountId) return;
     previousAccount.current = accountId;
-    setSelection({});
     setQueries({});
-    setPlannerDraft(false);
     setActionError(null);
   }, [accountId]);
 
-  // 入口分别响应变化：通知定位不会被先前尚未清理的托盘标记盖回草稿。
+  // 托盘与系统通知各自响应变化；普通状态刷新不会抢走当前页面。
   useEffect(() => {
     if (compose === null) return;
     setSection("planner");
     setQueries((previous) => ({ ...previous, planner: "" }));
-    setSelection((previous) => ({ ...previous, planner: "draft" }));
   }, [compose]);
   useEffect(() => {
     if (focused === null) return;
     setSection("planner");
     setQueries((previous) => ({ ...previous, planner: "" }));
-    setSelection((previous) => ({
-      ...previous,
-      planner: `notification:${focused}`,
-    }));
   }, [focused]);
 
+  const query = queries[section] ?? "";
+  const sectionLabel = SECTIONS.find((item) => item.id === section)?.label;
   useEffect(() => {
-    if (phase === "signedIn" && previousPhase.current === "signingIn")
-      setAccountOpen(false);
-    previousPhase.current = phase;
-  }, [phase]);
-
-  useEffect(() => {
-    document.title = `${SECTIONS.find((item) => item.id === section)?.label} · Assemble`;
-  }, [section]);
+    document.title = `${sectionLabel} · Assemble`;
+    if (previousSection.current !== section) contentHeading.current?.focus();
+    previousSection.current = section;
+  }, [section, sectionLabel]);
 
   function navigate(next: Section) {
     setSection(next);
-    setAccountOpen(false);
     setActionError(null);
-    // 让下一次点击同一条系统通知、同一种托盘入口也能再次触发导航。
+    // Rust 确认清除入口后，同一条通知或同类托盘操作才可再次触发定位。
     if (next !== "planner") {
       if (compose !== null)
         void source
@@ -169,122 +135,176 @@ export function App({ bridge: source = bridge }: AppProps) {
     }
   }
 
-  const allItems = desktopItems(section, snapshot);
-  const query = queries[section] ?? "";
-  const items = allItems.filter((item) =>
-    `${item.title} ${item.description}`
-      .toLocaleLowerCase()
-      .includes(query.trim().toLocaleLowerCase()),
-  );
-  const selected =
-    section === "planner" && selection.planner === "draft" && plannerDraft
-      ? "draft"
-      : (items.find((item) => item.id === selection[section])?.id ??
-        items[0]?.id ??
-        null);
-  const detailTitle =
-    selected === "draft"
-      ? "未保存的草稿"
-      : items.find((item) => item.id === selected)?.title;
-  function select(id: string) {
-    setSelection((previous) => ({ ...previous, [section]: id }));
-  }
-
   return (
     <>
       <Toaster closeButton containerAriaLabel="登录提示" />
-      <TooltipProvider delayDuration={250}>
-        <SidebarProvider
-          className="h-svh min-h-0 overflow-hidden"
-          style={{ "--sidebar-width": "350px" } as CSSProperties}
-        >
-          <DesktopSidebar
-            section={section}
-            onNavigate={navigate}
-            items={items}
-            selected={selected}
-            onSelect={select}
-            query={query}
-            onQuery={(value) =>
-              setQueries((previous) => ({ ...previous, [section]: value }))
-            }
-            signedIn={phase === "signedIn"}
-            loading={
-              snapshot === null ||
-              (phase === "signedIn" &&
-                ((section === "drive" && snapshot.drive === null) ||
-                  (section === "planner" && snapshot.planner === null)))
-            }
-            draft={plannerDraft}
-            account={
-              <Popover open={accountOpen} onOpenChange={setAccountOpen}>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <PopoverTrigger asChild>
-                      <Button
-                        type="button"
-                        size="icon"
-                        variant={accountOpen ? "secondary" : "ghost"}
-                        className="rounded-full"
-                        aria-label="账户"
-                      >
-                        <Avatar>
-                          {account?.avatarUrl ? (
-                            <AvatarImage
-                              src={account.avatarUrl}
-                              alt=""
-                              referrerPolicy="no-referrer"
-                            />
-                          ) : null}
-                          <AvatarFallback>
-                            {account ? (
-                              Array.from(
-                                account.displayName,
-                              )[0]?.toUpperCase() || "A"
-                            ) : (
-                              <UserRound aria-hidden="true" />
-                            )}
-                          </AvatarFallback>
-                        </Avatar>
-                      </Button>
-                    </PopoverTrigger>
-                  </TooltipTrigger>
-                  <TooltipContent side="right" sideOffset={12}>
-                    账户
-                  </TooltipContent>
-                </Tooltip>
-                <PopoverContent
-                  side="right"
-                  align="end"
-                  sideOffset={12}
-                  collisionPadding={12}
-                  aria-labelledby={accountTitleId}
-                  className="max-h-[calc(100svh-2rem)] w-[min(26rem,calc(100vw-5.5rem))] gap-4 overflow-y-auto p-4 motion-reduce:animate-none"
-                >
-                  <PopoverHeader className="flex-row items-center justify-between">
-                    <PopoverTitle id={accountTitleId}>
-                      {account ? "账户与设备" : "账户"}
-                    </PopoverTitle>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon-xs"
-                      aria-label="关闭账户面板"
-                      onClick={() => setAccountOpen(false)}
+      <SidebarProvider className="items-start">
+        <DesktopSidebar section={section} onNavigate={navigate} />
+        <main className="flex h-svh min-w-0 flex-1 flex-col overflow-hidden">
+          <header className="flex h-16 shrink-0 items-center justify-between gap-2 transition-[width,height] ease-linear group-has-data-[collapsible=icon]/sidebar-wrapper:h-12">
+            <div className="flex min-w-0 items-center gap-2 px-4">
+              <DesktopMobileMenu
+                section={section}
+                onNavigate={navigate}
+                onNavigateFocus={() => contentHeading.current?.focus()}
+              />
+              <Breadcrumb>
+                <BreadcrumbList>
+                  <BreadcrumbItem className="hidden md:block">
+                    <BreadcrumbLink
+                      href="#transfers"
+                      onClick={(event) => {
+                        event.preventDefault();
+                        navigate("transfers");
+                      }}
                     >
-                      <X aria-hidden="true" />
+                      Assemble
+                    </BreadcrumbLink>
+                  </BreadcrumbItem>
+                  <BreadcrumbSeparator className="hidden md:block" />
+                  <BreadcrumbItem>
+                    <BreadcrumbPage>{sectionLabel}</BreadcrumbPage>
+                  </BreadcrumbItem>
+                </BreadcrumbList>
+              </Breadcrumb>
+            </div>
+            <div className="min-w-0 shrink-0 px-4">
+              <ServiceStatus
+                service={snapshot?.service}
+                signedIn={phase === "signedIn"}
+              />
+            </div>
+          </header>
+          <ScrollArea className="min-h-0 flex-1">
+            <div className="@container mx-auto flex w-full min-w-0 flex-col gap-4 p-4 pt-0">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <h1
+                  ref={contentHeading}
+                  tabIndex={-1}
+                  className="text-xl font-semibold tracking-tight"
+                >
+                  {sectionLabel}
+                </h1>
+                {phase === "signedIn" &&
+                section !== "settings" &&
+                section !== "account" ? (
+                  <Input
+                    className="w-full sm:w-64"
+                    aria-label={`搜索${sectionLabel}`}
+                    placeholder="搜索…"
+                    value={query}
+                    onChange={(event) => {
+                      const value = event.target.value;
+                      setQueries((previous) => ({
+                        ...previous,
+                        [section]: value,
+                      }));
+                    }}
+                  />
+                ) : null}
+              </div>
+              {loadError ? (
+                <p role="alert" className="text-sm text-destructive">
+                  {loadError}
+                </p>
+              ) : null}
+              {snapshot?.notice ? (
+                <NoticeLine
+                  notice={snapshot.notice}
+                  onDismiss={() => void dismiss(source)}
+                />
+              ) : null}
+              {actionError ? (
+                <p role="alert" className="text-sm text-destructive">
+                  {actionError}
+                </p>
+              ) : null}
+              {phase !== "signedIn" &&
+              section !== "settings" &&
+              section !== "account" ? (
+                <Empty className="min-h-64">
+                  <EmptyHeader>
+                    <EmptyMedia variant="icon">
+                      <UserRound aria-hidden="true" />
+                    </EmptyMedia>
+                    <EmptyTitle>
+                      {snapshot ? "登录 Assemble" : "正在读取本机状态…"}
+                    </EmptyTitle>
+                    <EmptyDescription>
+                      通过左侧菜单的账户中心，在系统浏览器里登录。
+                    </EmptyDescription>
+                  </EmptyHeader>
+                  <EmptyContent>
+                    <Button
+                      variant="outline"
+                      onClick={() => navigate("account")}
+                    >
+                      打开账户中心
                     </Button>
-                  </PopoverHeader>
-                  {actionError && accountOpen ? (
-                    <p role="alert" className="text-sm text-destructive">
-                      {actionError}
-                    </p>
-                  ) : null}
-                  {loadError ? (
-                    <p role="alert" className="text-sm text-destructive">
-                      {loadError}
-                    </p>
-                  ) : null}
+                  </EmptyContent>
+                </Empty>
+              ) : null}
+              {/* 只隐藏非当前页面，同一账户的草稿与进行中的操作继续保留。 */}
+              <section
+                id="view-transfers"
+                aria-label="文件传输"
+                hidden={section !== "transfers"}
+              >
+                <TransfersCard
+                  key={accountId ?? "signedOut"}
+                  source={source}
+                  snapshot={snapshot}
+                  onError={setActionError}
+                  query={queries.transfers ?? ""}
+                />
+              </section>
+              <section
+                id="view-drive"
+                aria-label="云盘"
+                hidden={section !== "drive"}
+              >
+                <DriveCard
+                  key={accountId ?? "signedOut"}
+                  source={source}
+                  snapshot={snapshot}
+                  onError={setActionError}
+                  query={queries.drive ?? ""}
+                />
+              </section>
+              <section
+                id="view-planner"
+                aria-label="日程与提醒"
+                hidden={section !== "planner"}
+              >
+                <PlannerCard
+                  key={accountId ?? "signedOut"}
+                  active={section === "planner"}
+                  source={source}
+                  snapshot={snapshot}
+                  onError={setActionError}
+                  query={queries.planner ?? ""}
+                />
+              </section>
+              <section
+                id="view-settings"
+                aria-label="本机设置"
+                hidden={section !== "settings"}
+              >
+                <LaunchCard
+                  source={source}
+                  snapshot={snapshot}
+                  onError={setActionError}
+                />
+              </section>
+              <section
+                id="view-account"
+                aria-label="账户中心"
+                hidden={section !== "account"}
+              >
+                <div
+                  key={accountId ?? "signedOut"}
+                  className="flex flex-col gap-4"
+                >
                   <SessionCard
                     source={source}
                     snapshot={snapshot}
@@ -295,248 +315,20 @@ export function App({ bridge: source = bridge }: AppProps) {
                     snapshot={snapshot}
                     onError={setActionError}
                   />
-                </PopoverContent>
-              </Popover>
-            }
-          />
-          <SidebarInset className="h-full min-h-0 min-w-0 bg-background text-foreground">
-            <header className="sticky top-0 flex shrink-0 flex-wrap items-center gap-2 border-b bg-background p-4">
-              <SidebarTrigger className="-ml-1" aria-label="收折列表栏" />
-              <Separator
-                orientation="vertical"
-                className="mr-2 data-vertical:h-4 data-vertical:self-auto"
-              />
-              <Breadcrumb className="min-w-0 flex-1">
-                <BreadcrumbList className="flex-nowrap">
-                  <BreadcrumbItem className="shrink-0">
-                    {SECTIONS.find((item) => item.id === section)?.label}
-                  </BreadcrumbItem>
-                  {detailTitle ? (
-                    <>
-                      <BreadcrumbSeparator />
-                      <BreadcrumbItem className="min-w-0">
-                        <BreadcrumbPage className="truncate">
-                          {detailTitle}
-                        </BreadcrumbPage>
-                      </BreadcrumbItem>
-                    </>
-                  ) : null}
-                </BreadcrumbList>
-              </Breadcrumb>
-              <ServiceStatus
-                service={snapshot?.service}
-                signedIn={phase === "signedIn"}
-              />
-            </header>
-            <ScrollArea className="min-h-0 flex-1">
-              <div className="@container mx-auto flex w-full min-w-0 flex-col gap-4 p-4">
-                {loadError ? (
-                  <p role="alert" className="text-sm text-destructive">
-                    {loadError}
-                  </p>
-                ) : null}
-                {snapshot?.notice ? (
-                  <NoticeLine
-                    notice={snapshot.notice}
-                    onDismiss={() => void dismiss(source)}
-                  />
-                ) : null}
-                {actionError && !accountOpen ? (
-                  <p role="alert" className="text-sm text-destructive">
-                    {actionError}
-                  </p>
-                ) : null}
-                {phase !== "signedIn" && section !== "settings" ? (
-                  <Empty className="min-h-64">
-                    <EmptyHeader>
-                      <EmptyMedia variant="icon">
-                        <UserRound aria-hidden="true" />
-                      </EmptyMedia>
-                      <EmptyTitle>
-                        {snapshot ? "登录 Assemble" : "正在读取本机状态…"}
-                      </EmptyTitle>
-                      <EmptyDescription>
-                        通过左下角头像打开账户面板，在系统浏览器里登录。
-                      </EmptyDescription>
-                    </EmptyHeader>
-                    <EmptyContent>
-                      <Button
-                        variant="outline"
-                        onClick={() => setAccountOpen(true)}
-                      >
-                        打开账户面板
-                      </Button>
-                    </EmptyContent>
-                  </Empty>
-                ) : null}
-                {/* 保持同一账户的草稿与进行中的操作；隐藏的区域不进入键盘导航。 */}
-                <section
-                  id="view-transfers"
-                  aria-label="文件传输"
-                  hidden={section !== "transfers"}
-                >
-                  <TransfersCard
-                    key={accountId ?? "signedOut"}
-                    source={source}
-                    snapshot={snapshot}
-                    onError={setActionError}
-                    selected={
-                      section === "transfers"
-                        ? selected
-                        : (selection.transfers ?? null)
-                    }
-                  />
-                </section>
-                <section
-                  id="view-planner"
-                  aria-label="日程与提醒"
-                  hidden={section !== "planner"}
-                >
-                  <PlannerCard
-                    key={accountId ?? "signedOut"}
-                    active={section === "planner"}
-                    source={source}
-                    snapshot={snapshot}
-                    onError={setActionError}
-                    selected={
-                      section === "planner"
-                        ? selected
-                        : (selection.planner ?? null)
-                    }
-                    onSelect={(id) =>
-                      setSelection((previous) => ({ ...previous, planner: id }))
-                    }
-                    onDraftChange={setPlannerDraft}
-                  />
-                </section>
-                <section
-                  id="view-drive"
-                  aria-label="云盘"
-                  hidden={section !== "drive"}
-                >
-                  <DriveCard
-                    key={accountId ?? "signedOut"}
-                    source={source}
-                    snapshot={snapshot}
-                    onError={setActionError}
-                    selected={
-                      section === "drive" ? selected : (selection.drive ?? null)
-                    }
-                  />
-                </section>
-                <section
-                  id="view-settings"
-                  aria-label="本机设置"
-                  hidden={section !== "settings"}
-                >
-                  <LaunchCard
-                    source={source}
-                    snapshot={snapshot}
-                    onError={setActionError}
-                    selected={
-                      section === "settings"
-                        ? selected
-                        : (selection.settings ?? "startup")
-                    }
-                  />
-                </section>
-              </div>
-            </ScrollArea>
-            <footer className="shrink-0 border-t px-4 py-3 text-center text-xs text-muted-foreground">
-              <p>{formatBuildInfo(__ASSEMBLE_BUILD__)}</p>
-              <p className="mt-1 break-all select-text">
-                官网：{__ASSEMBLE_BUILD__.website}
-              </p>
-            </footer>
-          </SidebarInset>
-        </SidebarProvider>
-      </TooltipProvider>
+                </div>
+              </section>
+            </div>
+          </ScrollArea>
+          <footer className="shrink-0 border-t px-4 py-3 text-center text-xs text-muted-foreground">
+            <p>{formatBuildInfo(__ASSEMBLE_BUILD__)}</p>
+            <p className="mt-1 break-all select-text">
+              官网：{__ASSEMBLE_BUILD__.website}
+            </p>
+          </footer>
+        </main>
+      </SidebarProvider>
     </>
   );
-}
-
-function desktopItems(
-  section: Section,
-  snapshot: Snapshot | null,
-): DesktopListItem[] {
-  if (section === "settings")
-    return [
-      {
-        id: "startup",
-        title: "开机启动",
-        meta: "本机",
-        description: "设置登录系统后自动启动 Assemble。",
-      },
-      {
-        id: "receive",
-        title: "接收位置",
-        meta: "文件",
-        description: "查看与更改文件接收目录。",
-      },
-      ...(snapshot?.session.phase === "signedIn"
-        ? [
-            {
-              id: "notifications",
-              title: "到点提醒",
-              meta: "通知",
-              description: "设置这台电脑的日程与提醒通知。",
-            },
-          ]
-        : []),
-      ...(snapshot?.sendMenu && snapshot.sendMenu !== "unsupported"
-        ? [
-            {
-              id: "sendMenu",
-              title: "右键菜单",
-              meta: "Windows",
-              description: "在文件右键菜单中启用 Assemble 发送。",
-            },
-          ]
-        : []),
-    ];
-  if (snapshot?.session.phase !== "signedIn") return [];
-  if (section === "transfers")
-    return snapshot.transfers.map((item) => ({
-      id: item.id,
-      title: item.name,
-      meta: formatSize(item.size),
-      description: `${item.direction === "in" ? "来自" : "发给"} ${item.peer} · ${transferStatus(item)}${item.savedAs ? ` · 已存为「${item.savedAs}」` : ""}`,
-    }));
-  if (section === "drive")
-    return (snapshot.drive?.items ?? []).map((item) => ({
-      id: item.id,
-      title: item.name,
-      meta: formatSize(item.size),
-      description: `${item.createdAt.slice(0, 10)} 存入云盘`,
-    }));
-  const planner = snapshot.planner;
-  if (!planner) return [];
-  return [
-    ...planner.notifications.map((item) => ({
-      id: `notification:${item.id}`,
-      title: item.title,
-      meta: ago(item.raisedAt, Date.now()),
-      description: item.body ?? "到点的提醒",
-      group: "到点的提醒",
-    })),
-    ...agenda(planner, Date.now()).map((entry) =>
-      "schedule" in entry
-        ? {
-            id: entry.key,
-            title: entry.schedule.title,
-            meta: "日程",
-            description: scheduleLine(entry.schedule, Date.now()),
-            group: "接下来的安排",
-          }
-        : {
-            id: entry.key,
-            title: entry.reminder.title,
-            meta: "提醒",
-            description: reminderLine(entry.reminder, Date.now()),
-            group: "接下来的安排",
-          },
-    ),
-  ];
 }
 
 /** 官网地址由页脚展示；这里仅保留检测、断网与登录后的连接状态。 */
@@ -701,7 +493,19 @@ function SessionCard({ source, snapshot, onError }: CardProps) {
         <CardAction>{action}</CardAction>
       </CardHeader>
       {session?.phase === "signedIn" ? (
-        <CardContent>
+        <CardContent className="flex items-center gap-3">
+          <Avatar>
+            {session.account.avatarUrl ? (
+              <AvatarImage
+                src={session.account.avatarUrl}
+                alt=""
+                referrerPolicy="no-referrer"
+              />
+            ) : null}
+            <AvatarFallback>
+              {Array.from(session.account.displayName)[0]?.toUpperCase() || "A"}
+            </AvatarFallback>
+          </Avatar>
           <p className="text-sm text-muted-foreground">
             这台设备：{session.device.name}
           </p>
@@ -943,8 +747,8 @@ function TransfersCard({
   source,
   snapshot,
   onError,
-  selected,
-}: CardProps & { selected: string | null }) {
+  query,
+}: CardProps & { query: string }) {
   const [pending, setPending] = useState(false);
 
   // 选文件时系统选择器一直开着，命令要到它关掉才返回。
@@ -991,16 +795,24 @@ function TransfersCard({
               </EmptyDescription>
             </EmptyHeader>
           </Empty>
-        ) : selected === null ? (
+        ) : snapshot.transfers.filter((item) =>
+            `${item.name} ${item.peer} ${transferStatus(item)}`
+              .toLocaleLowerCase()
+              .includes(query.trim().toLocaleLowerCase()),
+          ).length === 0 ? (
           <Empty>
             <EmptyHeader>
-              <EmptyTitle>没有选中的传输</EmptyTitle>
-              <EmptyDescription>在列表中搜索或选择一条记录。</EmptyDescription>
+              <EmptyTitle>没有匹配的传输</EmptyTitle>
+              <EmptyDescription>换个关键词试试。</EmptyDescription>
             </EmptyHeader>
           </Empty>
         ) : (
           snapshot.transfers
-            .filter((transfer) => transfer.id === selected)
+            .filter((transfer) =>
+              `${transfer.name} ${transfer.peer} ${transferStatus(transfer)}`
+                .toLocaleLowerCase()
+                .includes(query.trim().toLocaleLowerCase()),
+            )
             .map((transfer) => (
               <TransferRow
                 key={transfer.id}
@@ -1129,8 +941,8 @@ function DriveCard({
   source,
   snapshot,
   onError,
-  selected,
-}: CardProps & { selected: string | null }) {
+  query,
+}: CardProps & { query: string }) {
   const [pending, setPending] = useState(false);
   const [confirming, setConfirming] = useState<string | null>(null);
   // 名单由 Rust 在连上服务时去拿；万一没拿到（比如刚登录时断了一下），这里补要一次。
@@ -1203,18 +1015,24 @@ function DriveCard({
                 </EmptyDescription>
               </EmptyHeader>
             </Empty>
-          ) : selected === null ? (
+          ) : drive.items.filter((file) =>
+              file.name
+                .toLocaleLowerCase()
+                .includes(query.trim().toLocaleLowerCase()),
+            ).length === 0 ? (
             <Empty>
               <EmptyHeader>
-                <EmptyTitle>没有选中的文件</EmptyTitle>
-                <EmptyDescription>
-                  在列表中搜索或选择一个文件。
-                </EmptyDescription>
+                <EmptyTitle>没有匹配的文件</EmptyTitle>
+                <EmptyDescription>换个关键词试试。</EmptyDescription>
               </EmptyHeader>
             </Empty>
           ) : (
             drive.items
-              .filter((file) => file.id === selected)
+              .filter((file) =>
+                file.name
+                  .toLocaleLowerCase()
+                  .includes(query.trim().toLocaleLowerCase()),
+              )
               .map((file) => (
                 <DriveRow
                   key={file.id}
@@ -1316,12 +1134,7 @@ const LAUNCH_HINTS: Record<LaunchState, string | null> = {
 /** 默认的接收位置。它是一个固定的系统位置，不是哪个具体文件夹的路径。 */
 const DEFAULT_RECEIVE = "下载/Assemble";
 
-function LaunchCard({
-  source,
-  snapshot,
-  onError,
-  selected,
-}: CardProps & { selected: string | null }) {
+function LaunchCard({ source, snapshot, onError }: CardProps) {
   const [pending, setPending] = useState(false);
   const state: LaunchState = snapshot?.launchAtLogin ?? "unknown";
   const hint = LAUNCH_HINTS[state];
@@ -1360,10 +1173,8 @@ function LaunchCard({
     <Card>
       <CardHeader>
         <CardTitle>本机</CardTitle>
-        <CardDescription>
-          {selected === "startup" ? "开机启动" : "系统设置"}
-        </CardDescription>
-        <CardAction hidden={selected !== "startup"}>
+        <CardDescription>开机启动</CardDescription>
+        <CardAction>
           <Switch
             aria-label="开机启动"
             checked={state === "enabled"}
@@ -1375,13 +1186,8 @@ function LaunchCard({
         </CardAction>
       </CardHeader>
       <CardContent className="flex flex-col gap-3">
-        {hint && selected === "startup" ? (
-          <p className="text-sm text-muted-foreground">{hint}</p>
-        ) : null}
-        <div
-          hidden={selected !== "receive"}
-          className="flex flex-wrap items-center justify-between gap-3 pt-3"
-        >
+        {hint ? <p className="text-sm text-muted-foreground">{hint}</p> : null}
+        <div className="flex flex-wrap items-center justify-between gap-3 pt-3">
           <div className="min-w-0">
             <p className="text-sm font-medium">接收位置</p>
             <p
@@ -1418,8 +1224,7 @@ function LaunchCard({
           </div>
         </div>
         {/* 提醒有没有用，要看登录没登录：没登录就收不到，这一项也不必摆出来。 */}
-        {snapshot?.session.phase === "signedIn" &&
-        selected === "notifications" ? (
+        {snapshot?.session.phase === "signedIn" ? (
           <div className="flex flex-wrap items-center justify-between gap-3 pt-3">
             <div className="min-w-0">
               <p className="text-sm font-medium">到点提醒</p>
@@ -1439,7 +1244,7 @@ function LaunchCard({
             />
           </div>
         ) : null}
-        {sendMenu === "unsupported" || selected !== "sendMenu" ? null : (
+        {sendMenu === "unsupported" ? null : (
           <div className="flex items-center justify-between gap-3 border-t border-border pt-3">
             <div className="min-w-0">
               <p className="text-sm font-medium">右键菜单</p>

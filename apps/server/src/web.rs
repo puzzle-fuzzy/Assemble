@@ -426,8 +426,13 @@ enum CreateSessionError {
     Database(#[from] sqlx::Error),
 }
 
-/// `POST /web/logout`
-pub async fn logout(State(state): State<Shared>, jar: CookieJar, headers: HeaderMap) -> Response {
+/// `POST /web/logout`。管理网页退出后回到本来源的管理登录页。
+pub async fn logout(
+    State(state): State<Shared>,
+    jar: CookieJar,
+    headers: HeaderMap,
+    uri: Uri,
+) -> Response {
     if !is_same_origin(&headers, state.config.public_origin.as_str()) {
         return refused("请回到登录页重新操作。");
     }
@@ -438,6 +443,7 @@ pub async fn logout(State(state): State<Shared>, jar: CookieJar, headers: Header
             .await
         {
             tracing::error!(%error, "a web session could not be revoked");
+            return unavailable();
         }
         audit::record(
             &state.pool,
@@ -448,11 +454,19 @@ pub async fn logout(State(state): State<Shared>, jar: CookieJar, headers: Header
         )
         .await;
     }
+    // 退出返回位置只认固定管理入口，不接受外部地址或设备授权回环地址。
+    let mut response = if query_param(&uri, "next")
+        .is_some_and(|next| matches!(next.as_str(), "/admin" | "/admin/"))
+    {
+        to_login(Some("/admin/"))
+    } else {
+        page(StatusCode::OK, templates::signed_out_page())
+    };
+    response
+        .headers_mut()
+        .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
     with_cookies(
-        page(
-            StatusCode::OK,
-            templates::message_page("已退出", "可以关闭此页面。"),
-        ),
+        response,
         [
             cleared_cookie(CSRF_COOKIE),
             cleared_cookie(crate::auth::WEB_COOKIE),

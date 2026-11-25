@@ -109,10 +109,10 @@ afterEach(async () => {
 });
 
 describe("管理端真实数据和访问权限", () => {
-  test("未登录只提供系统浏览器登录入口，不请求管理数据", async () => {
+  test("未登录通过当前网页进入管理登录，不请求管理数据", async () => {
     handle = () => json({ message: "sensitive body" }, 401);
     const host = await render(<App />);
-    expect(host.textContent).toContain("请先登录");
+    expect(host.textContent).toContain("登录管理控制台");
     expect(host.querySelector("a")?.getAttribute("href")).toBe(
       "/web/login?next=/admin/",
     );
@@ -179,7 +179,7 @@ describe("管理端真实数据和访问权限", () => {
     expect(document.title).toBe("登录记录 · Assemble 管理控制台");
   });
 
-  test("所有数据请求依赖同源 HttpOnly Cookie，退出表单只携带防伪值", async () => {
+  test("所有数据请求依赖同源 Cookie，网页退出后返回管理登录入口", async () => {
     const host = await render(<App />);
     for (const { init } of requests) {
       expect(init?.credentials).toBe("same-origin");
@@ -189,7 +189,9 @@ describe("管理端真实数据和访问权限", () => {
       expect(init?.signal).toBeInstanceOf(AbortSignal);
     }
     expect(
-      host.querySelector("form[action='/web/logout']")?.getAttribute("method"),
+      host
+        .querySelector("form[action='/web/logout?next=/admin/']")
+        ?.getAttribute("method"),
     ).toBe("post");
     expect(
       host.querySelector<HTMLInputElement>('input[name="csrf"]')?.value,
@@ -206,7 +208,7 @@ describe("管理端真实数据和访问权限", () => {
         ? json({}, 401)
         : defaultResponse(path);
     await navigate(host, "devices");
-    expect(host.textContent).toContain("请先登录");
+    expect(host.textContent).toContain("登录管理控制台");
     expect(host.textContent).not.toContain(user.email);
     expect(host.textContent).not.toContain(session.account.displayName);
   });

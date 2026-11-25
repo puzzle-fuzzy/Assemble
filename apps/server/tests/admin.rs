@@ -25,6 +25,129 @@ const PATHS: [&str; 6] = [
     "/v1/admin/logins",
 ];
 
+#[tokio::test]
+async fn admin_login_and_logout_stay_in_the_browser_without_registering_a_device() {
+    let mut f = fixture().await;
+    admin::grant_super_admin(&f.server.state.pool, EMAIL)
+        .await
+        .unwrap();
+    let form = send(f.browser.get("/web/login?next=%2Fadmin%2F")).await;
+    assert!(form.html.contains("<h1>登录管理控制台</h1>"));
+    assert!(form.html.contains("登录后会直接进入网页管理控制台"));
+    assert!(form.html.contains("/web/forgot?next=%2Fadmin%2F"));
+    assert!(!form.html.contains("/desktop/authorize"));
+    let csrf = hidden(&form.html, "csrf").unwrap();
+    let failed = submit_login(&f.browser, EMAIL, "wrong-password", "/admin/", &csrf).await;
+    assert_eq!(failed.status, StatusCode::UNAUTHORIZED);
+    assert!(failed.html.contains("<h1>登录管理控制台</h1>"));
+    let signed_in = submit_login(&f.browser, EMAIL, PASSWORD, "/admin/", &csrf).await;
+    assert_eq!(signed_in.status, StatusCode::SEE_OTHER);
+    assert_eq!(signed_in.location().as_deref(), Some("/admin/"));
+    let devices: i64 = sqlx::query_scalar("SELECT count(*) FROM devices")
+        .fetch_one(&f.server.state.pool)
+        .await
+        .unwrap();
+    assert_eq!(devices, 0);
+    let already_signed_in = send(f.browser.get("/web/login?next=%2Fadmin%2F")).await;
+    assert_eq!(already_signed_in.location().as_deref(), Some("/admin/"));
+    let cross_site = send(
+        f.browser
+            .http
+            .post(format!("{}/web/logout?next=/admin/", f.browser.origin))
+            .header("origin", "https://foreign.example.test")
+            .form(&[("csrf", &csrf)]),
+    )
+    .await;
+    assert_eq!(cross_site.status, StatusCode::FORBIDDEN);
+    assert_eq!(
+        get(&f.browser, "/v1/admin/session")
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::OK
+    );
+    let signed_out = send(f.browser.post_form("/web/logout?next=/admin/", &[])).await;
+    assert_eq!(signed_out.status, StatusCode::SEE_OTHER);
+    assert_eq!(signed_out.headers["cache-control"], "no-store");
+    assert_eq!(
+        signed_out.location().as_deref(),
+        Some("/web/login?next=%2Fadmin%2F")
+    );
+    let login = send(f.browser.get(&signed_out.location().unwrap())).await;
+    assert!(login.html.contains("<h1>登录管理控制台</h1>"));
+    assert_eq!(
+        get(&f.browser, "/v1/admin/session")
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::UNAUTHORIZED
+    );
+    f.server.stop().await;
+}
+
+#[tokio::test]
+async fn logout_never_redirects_to_a_supplied_external_or_device_return_address() {
+    let mut f = fixture().await;
+    for next in [
+        "https://foreign.example.test/admin/",
+        "//foreign.example.test/admin/",
+        "/admin/../desktop/authorize",
+        "/desktop/authorize?request=abc",
+        "/admin/?next=https://foreign.example.test",
+    ] {
+        let query: String = url::form_urlencoded::Serializer::new(String::new())
+            .append_pair("next", next)
+            .finish();
+        let page = send(f.browser.post_form(&format!("/web/logout?{query}"), &[])).await;
+        assert_eq!(page.status, StatusCode::OK);
+        assert!(page.location().is_none());
+        assert!(page.html.contains("你已退出当前网页账户"));
+        assert!(page.html.contains("登录管理控制台"));
+        assert!(!page.html.contains("可以关闭"));
+    }
+    f.server.stop().await;
+}
+
+#[tokio::test]
+async fn a_failed_logout_keeps_the_browser_session_until_revocation_is_confirmed() {
+    let mut f = fixture().await;
+    admin::grant_super_admin(&f.server.state.pool, EMAIL)
+        .await
+        .unwrap();
+    try_login(&f.browser, EMAIL, PASSWORD, "/admin/").await;
+    sqlx::query("CREATE TRIGGER fail_logout BEFORE DELETE ON web_sessions BEGIN SELECT RAISE(ABORT, 'synthetic failure'); END")
+        .execute(&f.server.state.pool).await.unwrap();
+    let failed = send(f.browser.post_form("/web/logout?next=/admin/", &[])).await;
+    assert_eq!(failed.status, StatusCode::SERVICE_UNAVAILABLE);
+    assert!(failed.location().is_none());
+    assert_eq!(failed.set_cookies().len(), 0);
+    assert_eq!(
+        get(&f.browser, "/v1/admin/session")
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::OK
+    );
+    sqlx::query("DROP TRIGGER fail_logout")
+        .execute(&f.server.state.pool)
+        .await
+        .unwrap();
+    let retry = send(f.browser.post_form("/web/logout?next=/admin/", &[])).await;
+    assert_eq!(retry.status, StatusCode::SEE_OTHER);
+    assert_eq!(
+        get(&f.browser, "/v1/admin/session")
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::UNAUTHORIZED
+    );
+    f.server.stop().await;
+}
+
 fn get(browser: &Browser, path: &str) -> reqwest::RequestBuilder {
     browser.get(path).header("origin", &browser.origin)
 }

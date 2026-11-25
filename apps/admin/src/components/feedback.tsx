@@ -87,10 +87,10 @@ export function AccessRequired({ failure }: { failure: AccessFailure }) {
             <ShieldXIcon aria-hidden="true" />
           )}
         </EmptyMedia>
-        <EmptyTitle>{signedOut ? "请先登录" : "没有管理权限"}</EmptyTitle>
+        <EmptyTitle>{signedOut ? "登录管理控制台" : "没有管理权限"}</EmptyTitle>
         <EmptyDescription>
           {signedOut
-            ? "请在浏览器中登录已获授权的超级管理员账户。"
+            ? "请使用已获授权的超级管理员账户登录，继续访问网页管理控制台。"
             : "当前账户不是超级管理员。如需切换账户，请在账户页退出后，使用已获授权的账户重新登录。"}
         </EmptyDescription>
       </EmptyHeader>

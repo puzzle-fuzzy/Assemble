@@ -1,4 +1,4 @@
-// 验证图标导航、账户浮层与托盘入口，防止拆分主窗口后丢失原有操作。
+// 验证文字导航、账户中心与托盘入口，防止更换布局后丢失原有操作。
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { act } from "react";
 import {
@@ -24,7 +24,7 @@ beforeEach(() => document.body.replaceChildren());
 afterEach(cleanup);
 
 describe("主窗口导航", () => {
-  test("默认只显示传输，图标有名称和唯一选中项，点击后切换内容", async () => {
+  test("默认显示传输，菜单展示文字与唯一选中项，点击后切换整页内容", async () => {
     const view = await renderApp(
       new FakeBridge(snapshot({ phase: "signedIn" })),
     );
@@ -34,7 +34,7 @@ describe("主窗口导航", () => {
     expect(view.host.querySelector('[data-slot="popover-content"]')).toBeNull();
     for (const name of ["文件传输", "云盘", "日程与提醒", "本机设置"]) {
       const trigger = button(view.host, name);
-      expect(trigger?.querySelector(".sr-only")?.textContent).toBe(name);
+      expect(trigger?.querySelector("span")?.textContent).toBe(name);
       await click(trigger);
       expect(current()).toBe(trigger ?? null);
       expect(
@@ -53,25 +53,24 @@ describe("主窗口导航", () => {
     expect(text(view.host)).not.toContain("还没有收发过文件。");
   });
 
-  test("账户和设备只在点头像后出现，关闭后保持原来选择的内容", async () => {
+  test("账户中心在左侧菜单中，账户和设备只在该页面显示", async () => {
     const view = await renderApp(
       new FakeBridge(snapshot({ phase: "signedIn" })),
       "云盘",
     );
     expect(text(view.host)).not.toContain("这台设备");
-    expect(button(document.body, "退出登录")).toBeUndefined();
-    await click(button(view.host, "账户"));
-    const panel = document.body.querySelector<HTMLElement>(
-      '[data-slot="popover-content"]',
-    );
-    expect(panel).not.toBeNull();
-    expect(text(panel as HTMLElement)).toContain("这台设备：MacBook-Pro");
-    expect(card(panel as HTMLElement, "设备")).toBeDefined();
-    await click(button(document.body, "关闭账户面板"));
-    expect(button(document.body, "退出登录")).toBeUndefined();
+    expect(button(view.host, "退出登录")).toBeUndefined();
+    await click(button(view.host, "账户中心"));
+    expect(text(card(view.host, "账户"))).toContain("这台设备：MacBook-Pro");
+    expect(card(view.host, "设备")).toBeDefined();
+    expect(
+      view.host.querySelector('[data-slot="popover-content"]') === null,
+    ).toBe(true);
+    await click(button(view.host, "云盘"));
+    expect(button(view.host, "退出登录")).toBeUndefined();
     expect(
       view.host
-        .querySelector('[aria-current="page"]')
+        .querySelector('nav [aria-current="page"]')
         ?.getAttribute("aria-label"),
     ).toBe("云盘");
   });
@@ -167,13 +166,13 @@ describe("主窗口导航", () => {
     ).toBe("日程与提醒");
   });
 
-  test("浏览器完成登录后收起账户浮层", async () => {
+  test("浏览器完成登录后账户中心显示当前账户与设备", async () => {
     const source = new FakeBridge(snapshot({ phase: "signingIn" }));
     const view = await renderApp(source, "账户");
     expect(text(view.host)).toContain("完成后会自动返回");
     await act(async () => source.push(snapshot({ phase: "signedIn" })));
     await settle();
-    expect(button(document.body, "退出登录")).toBeUndefined();
-    expect(text(view.host)).toContain("还没有收发过文件。");
+    expect(button(view.host, "退出登录")).toBeDefined();
+    expect(text(view.host)).toContain("这台设备：MacBook-Pro");
   });
 });

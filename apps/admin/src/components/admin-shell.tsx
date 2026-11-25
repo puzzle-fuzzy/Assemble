@@ -218,7 +218,12 @@ export function AdminShell({
                 </DropdownMenuGroup>
               </DropdownMenuContent>
             </DropdownMenu>
-            <form ref={logout} method="post" action="/web/logout" hidden>
+            <form
+              ref={logout}
+              method="post"
+              action="/web/logout?next=/admin/"
+              hidden
+            >
               <input type="hidden" name="csrf" value={session.csrfToken} />
             </form>
           </div>

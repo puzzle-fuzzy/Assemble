@@ -111,6 +111,14 @@ pub fn message_page(title: &str, body: &str) -> String {
     )
 }
 
+/// 普通网页退出后仍保留浏览器内的登录入口，不再让用户寻找桌面程序。
+pub fn signed_out_page() -> String {
+    page(
+        "已退出 · Assemble",
+        "<h1>已退出</h1><p>你已退出当前网页账户。</p><p><a href=\"/web/login?next=%2Fweb%2Faccount\">重新登录账户</a></p><p><a href=\"/web/login?next=%2Fadmin%2F\">登录管理控制台</a></p>",
+    )
+}
+
 /// 一条去另一个页面的链接，把"之后要回来"的参数原样带上。
 pub(crate) fn carry_next(link: &str, next: &str) -> String {
     if next.is_empty() {
@@ -132,6 +140,16 @@ pub(crate) fn alert(error: Option<&str>) -> String {
 
 /// 邮箱登录始终提供公开注册；GitHub 入口只在凭据配置完整后显示。
 pub fn login_page(error: Option<&str>, next: &str, csrf: &str, github_enabled: bool) -> String {
+    let admin = matches!(next, "/admin" | "/admin/");
+    let (title, heading, hint) = if admin {
+        (
+            "登录管理控制台 · Assemble",
+            "登录管理控制台",
+            "<p class=\"hint\">请使用已获授权的超级管理员账户。登录后会直接进入网页管理控制台。</p>",
+        )
+    } else {
+        ("登录 · Assemble", "登录 Assemble", "")
+    };
     let github = if github_enabled {
         format!(
             "<p><a href=\"{}\">使用 GitHub 登录</a></p>",
@@ -141,14 +159,15 @@ pub fn login_page(error: Option<&str>, next: &str, csrf: &str, github_enabled: b
         String::new()
     };
     page(
-        "登录 · Assemble",
+        title,
         &format!(
-            "<h1>登录 Assemble</h1>{}<form method=\"post\" action=\"/web/login\"><input type=\"hidden\" name=\"csrf\" value=\"{}\"><input type=\"hidden\" name=\"next\" value=\"{}\"><label for=\"email\">邮箱</label><input id=\"email\" type=\"email\" name=\"email\" autocomplete=\"username\" spellcheck=\"false\" maxlength=\"254\" required><label for=\"password\">密码</label><input id=\"password\" type=\"password\" name=\"password\" autocomplete=\"current-password\" maxlength=\"1024\" required><button type=\"submit\">登录</button></form>{}<p><a href=\"{}\">注册账户</a> · <a href=\"/web/forgot\">忘记密码</a></p><p class=\"hint\">原来使用用户名登录？<a href=\"{}\">为旧账户绑定邮箱</a></p>",
+            "<h1>{heading}</h1>{hint}{}<form method=\"post\" action=\"/web/login\"><input type=\"hidden\" name=\"csrf\" value=\"{}\"><input type=\"hidden\" name=\"next\" value=\"{}\"><label for=\"email\">邮箱</label><input id=\"email\" type=\"email\" name=\"email\" autocomplete=\"username\" spellcheck=\"false\" maxlength=\"254\" required><label for=\"password\">密码</label><input id=\"password\" type=\"password\" name=\"password\" autocomplete=\"current-password\" maxlength=\"1024\" required><button type=\"submit\">登录</button></form>{}<p><a href=\"{}\">注册账户</a> · <a href=\"{}\">忘记密码</a></p><p class=\"hint\">原来使用用户名登录？<a href=\"{}\">为旧账户绑定邮箱</a></p>",
             alert(error),
             escape(csrf),
             escape(next),
             github,
             escape(&carry_next("/web/register", next)),
+            escape(&carry_next("/web/forgot", next)),
             escape(&carry_next("/web/legacy", next))
         ),
     )

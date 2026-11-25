@@ -499,11 +499,18 @@ async fn verify_submit(
     )
     .await;
     if complete.kind == "reset" {
+        let login = templates::carry_next(
+            "/web/login",
+            web::safe_next(&complete.next).unwrap_or_default(),
+        );
         return page(
             StatusCode::OK,
             templates::page(
                 "密码已更新",
-                "<h1>密码已更新</h1><p>其他网页登录状态已退出，请使用新密码重新登录。</p><p><a href=\"/web/login\">登录 Assemble</a></p>",
+                &format!(
+                    "<h1>密码已更新</h1><p>其他网页登录状态已退出，请使用新密码重新登录。</p><p><a href=\"{}\">重新登录</a></p>",
+                    templates::escape(&login)
+                ),
             ),
         );
     }

@@ -16,12 +16,12 @@ import { BridgeError } from "@/lib/bridge";
 import type { PlannerView } from "@/lib/types";
 import {
   button,
-  buttons,
   card,
   cleanup,
   click,
   field,
   fill,
+  listUnder,
   rows,
   settle,
   switchNamed,
@@ -158,13 +158,11 @@ function listing(overrides: Partial<PlannerView> = {}): PlannerView {
 
 /** 通知那一行：同名的在名单里还有一行，通知的在前面。 */
 async function notice(host: HTMLElement, title: string): Promise<HTMLElement> {
-  await click(buttons(document.body, `选择${title}`)[0]);
   return rows(host, title)[0];
 }
 
 /** 接下来的安排里的那一行。 */
 async function planned(host: HTMLElement, title: string): Promise<HTMLElement> {
-  await click(buttons(document.body, `选择${title}`).at(-1));
   const found = rows(host, title).at(-1);
   if (!found) throw new Error(`没有找到安排里的「${title}」`);
   return found;
@@ -216,10 +214,8 @@ describe("日程", () => {
 
     // 今天 09:00 那条到点的提醒排最前；天天有的周会按明天那一场排。
     const order = [
-      ...view.host.querySelectorAll<HTMLElement>(
-        '[data-item-id^="schedule:"], [data-item-id^="reminder:"]',
-      ),
-    ].map((item) => item.getAttribute("aria-label")?.replace(/^选择/, ""));
+      ...listUnder(page, "接下来的安排").querySelectorAll("h3"),
+    ].map((heading) => heading.textContent);
     expect(order).toEqual(["取快递", "火车", "周会", "给妈妈打电话", "周报"]);
     expect(text(await planned(page, "取快递"))).toContain(
       "已到点 · 今天 09:00",
@@ -614,7 +610,6 @@ describe("到点提醒", () => {
     const source = new FakeBridge(snapshot({ phase: "signedIn" }));
     const view = await renderApp(source, "本机设置");
     await settle();
-    await click(button(view.host, "选择到点提醒"));
     const toggle = switchNamed(view.host, "到点时弹提醒");
     expect(toggle.getAttribute("aria-checked")).toBe("true");
     expect(text(view.host)).toContain("这台电脑会弹系统通知。");
