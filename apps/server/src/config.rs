@@ -18,6 +18,10 @@ pub const PUBLIC_ORIGIN: &str = "ASSEMBLE_PUBLIC_ORIGIN";
 pub const ADDR: &str = "ASSEMBLE_ADDR";
 /// 每个账户的云盘上限（字节）。
 pub const DRIVE_QUOTA_BYTES: &str = "ASSEMBLE_DRIVE_QUOTA_BYTES";
+/// 全站的内容总量上限（字节）：云盘与还没送达的发送一起算。
+pub const STORAGE_BUDGET_BYTES: &str = "ASSEMBLE_STORAGE_BUDGET_BYTES";
+/// 反向代理写进来源地址的那个请求头（例如 `X-Real-IP`）。配置之后，按来源设的限额才生效。
+pub const CLIENT_IP_HEADER: &str = "ASSEMBLE_CLIENT_IP_HEADER";
 /// 未送达的发送保留多少小时。
 pub const SEND_TTL_HOURS: &str = "ASSEMBLE_SEND_TTL_HOURS";
 /// 发送记录保留多少天。
@@ -31,6 +35,7 @@ pub const ADMIN_ASSETS_DIR: &str = "ASSEMBLE_ADMIN_ASSETS_DIR";
 pub const MEDIA_WEB_ASSETS_DIR: &str = "ASSEMBLE_MEDIA_WEB_ASSETS_DIR";
 pub const DEFAULT_ADDR: &str = "127.0.0.1:8787";
 pub const DEFAULT_DRIVE_QUOTA_BYTES: u64 = 2 * 1024 * 1024 * 1024;
+pub const DEFAULT_STORAGE_BUDGET_BYTES: u64 = 10 * 1024 * 1024 * 1024;
 pub const DEFAULT_SEND_TTL: Duration = Duration::from_hours(24);
 pub const DEFAULT_SEND_HISTORY: Duration = Duration::from_hours(24 * 30);
 pub const DEFAULT_WEB_SESSION_TTL: Duration = Duration::from_hours(12);
@@ -46,6 +51,7 @@ pub struct Config {
     pub data_dir: PathBuf,
     pub public_origin: ServerOrigin,
     pub drive_quota_bytes: u64,
+    pub storage_budget_bytes: u64,
     pub send_ttl: Duration,
     pub send_history: Duration,
     pub web_session_ttl: Duration,
@@ -55,6 +61,8 @@ pub struct Config {
     pub admin_assets_dir: PathBuf,
     pub media: crate::media::MediaConfig,
     pub media_web_assets_dir: PathBuf,
+    /// 只有说明了"哪个请求头可信"，服务端才按它区分请求的来源；见 [`crate::source`]。
+    pub client_ip_header: Option<axum::http::HeaderName>,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -155,6 +163,12 @@ impl Config {
             whole(1, u64::MAX),
         )?
         .unwrap_or(DEFAULT_DRIVE_QUOTA_BYTES);
+        let storage_budget_bytes = optional(
+            STORAGE_BUDGET_BYTES,
+            get(STORAGE_BUDGET_BYTES),
+            whole(1, u64::MAX),
+        )?
+        .unwrap_or(DEFAULT_STORAGE_BUDGET_BYTES);
         let send_ttl =
             optional(SEND_TTL_HOURS, get(SEND_TTL_HOURS), hours)?.unwrap_or(DEFAULT_SEND_TTL);
         let send_history = optional(SEND_HISTORY_DAYS, get(SEND_HISTORY_DAYS), |value| {
@@ -169,6 +183,7 @@ impl Config {
             data_dir,
             public_origin,
             drive_quota_bytes,
+            storage_budget_bytes,
             send_ttl,
             send_history,
             web_session_ttl,
@@ -185,6 +200,10 @@ impl Config {
             media_web_assets_dir: get(MEDIA_WEB_ASSETS_DIR)
                 .filter(|value| !value.trim().is_empty())
                 .map_or_else(|| PathBuf::from("apps/media-web/dist"), PathBuf::from),
+            client_ip_header: optional(CLIENT_IP_HEADER, get(CLIENT_IP_HEADER), |value| {
+                <axum::http::HeaderName as std::str::FromStr>::from_str(value)
+                    .map_err(|_| "要是一个请求头的名字，例如 X-Real-IP".to_owned())
+            })?,
         })
     }
 
@@ -195,6 +214,7 @@ impl Config {
             data_dir: data_dir.into(),
             public_origin: ServerOrigin::development(),
             drive_quota_bytes: DEFAULT_DRIVE_QUOTA_BYTES,
+            storage_budget_bytes: DEFAULT_STORAGE_BUDGET_BYTES,
             send_ttl: DEFAULT_SEND_TTL,
             send_history: DEFAULT_SEND_HISTORY,
             web_session_ttl: DEFAULT_WEB_SESSION_TTL,
@@ -204,6 +224,7 @@ impl Config {
             super_admin_email: None,
             admin_assets_dir: PathBuf::from("apps/admin/dist"),
             media_web_assets_dir: PathBuf::from("apps/media-web/dist"),
+            client_ip_header: None,
         }
     }
 

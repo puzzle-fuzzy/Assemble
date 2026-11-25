@@ -6,6 +6,7 @@ use assemble_server::email_identity::{self as identity, Action};
 use assemble_server::github::{Exchange, GithubConfig, Profile, Provider};
 use assemble_server::http::TestServer;
 use assemble_server::mail::{Delivery, Mail, Mailer};
+use assemble_server::source::Source;
 use assemble_server::{Config, SecretString};
 use common::*;
 use reqwest::StatusCode;
@@ -266,15 +267,60 @@ async fn requests_require_csrf_and_mail_limits_survive_concurrent_requests() {
         StatusCode::BAD_REQUEST
     );
     let pool = &f.server.state.pool;
+    let unknown = Source::unknown();
     let (first, second) = tokio::join!(
-        identity::reserve_mail(pool, "one@example.test"),
-        identity::reserve_mail(pool, "one@example.test")
+        identity::reserve_mail(pool, "one@example.test", &unknown),
+        identity::reserve_mail(pool, "one@example.test", &unknown)
     );
     assert_eq!(usize::from(first.is_ok()) + usize::from(second.is_ok()), 1);
     assert!(matches!(
-        identity::reserve_mail(pool, "one@example.test").await,
+        identity::reserve_mail(pool, "one@example.test", &unknown).await,
         Err(identity::Error::RateLimited)
     ));
+}
+
+/// 一个来源已知的请求：请求头里带着代理记下的地址。
+fn from(address: &'static str) -> Source {
+    let mut headers = axum::http::HeaderMap::new();
+    headers.insert("x-real-ip", axum::http::HeaderValue::from_static(address));
+    let trusted = axum::http::HeaderName::from_static("x-real-ip");
+    Source::read(&headers, Some(&trusted))
+}
+
+/// 换着邮箱提交，用不掉别人的发信份额：来源已知时，每个来源每小时也最多五封。
+/// 不然谁都能让全站一小时收不到验证邮件。
+#[tokio::test]
+async fn one_source_cannot_use_up_the_mail_budget_of_everyone_else() {
+    let f = setup().await;
+    let pool = &f.server.state.pool;
+    let stranger = from("203.0.113.7");
+    let myself = from("198.51.100.9");
+    for index in 0..5 {
+        identity::reserve_mail(pool, &format!("stranger-{index}@example.test"), &stranger)
+            .await
+            .unwrap();
+    }
+    assert!(matches!(
+        identity::reserve_mail(pool, "stranger-5@example.test", &stranger).await,
+        Err(identity::Error::RateLimited)
+    ));
+    // 被拦的那一次不占全站的份额：别的来源照常，全站这一小时只少了六封。
+    identity::reserve_mail(pool, "mine@example.test", &myself)
+        .await
+        .unwrap();
+    let used: i64 =
+        sqlx::query_scalar("SELECT requests FROM email_rate_limits WHERE bucket = 'global'")
+            .fetch_one(pool)
+            .await
+            .unwrap();
+    assert_eq!(used, 6);
+    // 来源未知时不设这一项：只按邮箱各算各的。
+    let unknown = Source::unknown();
+    for index in 0..10 {
+        identity::reserve_mail(pool, &format!("unknown-{index}@example.test"), &unknown)
+            .await
+            .unwrap();
+    }
 }
 
 #[tokio::test]
@@ -740,4 +786,63 @@ async fn registration_remains_visible_without_smtp_and_delivery_failure_removes_
         .await
         .unwrap();
     assert_eq!(pending, 0);
+}
+
+/// 一个来源挤不满 GitHub 登录的那张表。起点不需要登录，谁都能点；不按来源分的话，
+/// 点满之后所有人都进不了 GitHub 登录。
+#[tokio::test]
+async fn one_source_cannot_fill_the_table_of_pending_github_logins() {
+    let dir = tempfile::tempdir().unwrap();
+    let pool = assemble_server::db::open(dir.path()).await.unwrap();
+    let inbox = Arc::new(Inbox::default());
+    let github = Arc::new(Github(Mutex::new(Profile {
+        id: "123".into(),
+        login: "octocat".into(),
+        name: "Octocat".into(),
+        verified_emails: vec!["github@example.test".into()],
+    })));
+    let mut config = Config::development(dir.path());
+    config.github = Some(GithubConfig {
+        client_id: "test-client".into(),
+        client_secret: SecretString::new("test-secret"),
+    });
+    config.client_ip_header = Some(axum::http::HeaderName::from_static("x-real-ip"));
+    let server = TestServer::start_with_services(config, pool, inbox, github)
+        .await
+        .unwrap();
+    let browser = Browser::new(server.origin.as_str());
+
+    // 同一个来源连着发起八次，每次都扔下不走。
+    for _ in 0..8 {
+        let page = send(
+            browser
+                .get("/web/github/start")
+                .header("x-real-ip", "203.0.113.7"),
+        )
+        .await;
+        assert_eq!(page.status, StatusCode::SEE_OTHER);
+    }
+    // 第九次：请稍后再来，没有跳去 GitHub。
+    let ninth = send(
+        browser
+            .get("/web/github/start")
+            .header("x-real-ip", "203.0.113.7"),
+    )
+    .await;
+    assert_eq!(ninth.status, StatusCode::SERVICE_UNAVAILABLE);
+    assert!(ninth.location().is_none());
+    assert_eq!(ninth.headers.get("retry-after").unwrap(), "60");
+    // 别的来源不受牵连。
+    let mine = send(
+        browser
+            .get("/web/github/start")
+            .header("x-real-ip", "198.51.100.9"),
+    )
+    .await;
+    assert_eq!(mine.status, StatusCode::SEE_OTHER);
+    assert!(
+        mine.location()
+            .unwrap()
+            .starts_with("https://github.com/login/oauth/authorize")
+    );
 }

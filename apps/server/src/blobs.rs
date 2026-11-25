@@ -292,6 +292,38 @@ where
     Ok(())
 }
 
+/// 这份内容留下来之后，全站的内容会不会超过总量上限。
+///
+/// 每个账户各有各的云盘配额，磁盘却是所有账户共用的一块。注册是公开的，只按账户设限，
+/// 攒起来仍能把服务器写满，所以另有一道总量的闸：云盘与还没送达的发送一起算。
+/// 已经在库里的内容不多占地方，所以重传同一份内容不受它拦。
+///
+/// 要在写事务里问，问与留之间才插不进别的上传；事务外问只能当作提前的粗筛。
+pub async fn over_budget<'e, E>(
+    executor: E,
+    digest: &str,
+    size: u64,
+    budget: u64,
+) -> Result<bool, sqlx::Error>
+where
+    E: sqlx::Executor<'e, Database = sqlx::Sqlite>,
+{
+    let size = i64::try_from(size).map_err(|_| {
+        sqlx::Error::Protocol("file size does not fit the database column".to_owned())
+    })?;
+    let budget = i64::try_from(budget).unwrap_or(i64::MAX);
+    let exceeded: i64 = sqlx::query_scalar(
+        "SELECT CASE WHEN EXISTS(SELECT 1 FROM blobs WHERE sha256 = ?1) THEN 0 \
+         ELSE coalesce((SELECT sum(size) FROM blobs), 0) + ?2 > ?3 END",
+    )
+    .bind(digest)
+    .bind(size)
+    .bind(budget)
+    .fetch_one(executor)
+    .await?;
+    Ok(exceeded != 0)
+}
+
 /// 暂存文件名是 `<摘要>.<随机>.part`，由 `assemble-transfer` 生成。
 fn is_staging_name(name: &str) -> bool {
     let Some(stem) = name.strip_suffix(".part") else {

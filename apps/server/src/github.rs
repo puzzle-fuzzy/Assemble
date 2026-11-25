@@ -23,6 +23,7 @@ use crate::email_identity::{self as identity, Action};
 use crate::http::Shared;
 use crate::identity_templates as view;
 use crate::secrets::{random_token, token_digest};
+use crate::source::Source;
 use crate::web::{self, page, refused, unavailable, with_cookies};
 
 pub const CALLBACK: &str = "/web/github/callback";
@@ -30,6 +31,8 @@ const FLOW_COOKIE: &str = "assemble_github_flow";
 const PROFILE_COOKIE: &str = "assemble_github_profile";
 const TTL: Duration = Duration::from_secs(600);
 const MAX_FLOWS: usize = 256;
+/// 同一个来源同时最多有这么多没走完的登录。
+const MAX_FLOWS_PER_SOURCE: usize = 8;
 
 #[derive(Debug, Clone)]
 pub struct GithubConfig {
@@ -262,6 +265,8 @@ struct Attempt {
     verifier: SecretString,
     next: String,
     link: Option<(String, String, String)>,
+    /// 发起登录的来源；分不开来源时是 `None`。
+    source: Option<String>,
     at: Instant,
 }
 #[derive(Debug, Clone)]
@@ -298,11 +303,12 @@ pub fn routes() -> axum::Router<Shared> {
         )
 }
 
-async fn start(State(state): State<Shared>, uri: Uri) -> Response {
+async fn start(State(state): State<Shared>, uri: Uri, headers: HeaderMap) -> Response {
     let next = web::query_param(&uri, "next")
         .filter(|s| web::safe_next(s).is_some())
         .unwrap_or_else(|| "/web/account".to_owned());
-    begin(&state, next, None)
+    let source = Source::read(&headers, state.config.client_ip_header.as_ref());
+    begin(&state, next, None, &source)
 }
 
 #[derive(Deserialize)]
@@ -335,7 +341,8 @@ async fn link(
     }
     let key = account.email.as_deref().unwrap_or(&account.username);
     let now = Instant::now();
-    if state.throttle.is_blocked(key, now) {
+    let source = Source::read(&headers, state.config.client_ip_header.as_ref());
+    if state.throttle.is_blocked(key, &source, now) {
         return web::retry_after(
             page(
                 StatusCode::TOO_MANY_REQUESTS,
@@ -349,9 +356,10 @@ async fn link(
             .await
             .unwrap_or(false)
     {
-        state.throttle.record_failure(key, now);
+        state.throttle.record_failure(key, &source, now);
         return refused("请核对当前密码后再绑定 GitHub。");
     }
+    let source = Source::read(&headers, state.config.client_ip_header.as_ref());
     begin(
         &state,
         "/web/account".to_owned(),
@@ -360,10 +368,16 @@ async fn link(
             session.id,
             identity::account_proof(&account),
         )),
+        &source,
     )
 }
 
-fn begin(state: &Shared, next: String, link: Option<(String, String, String)>) -> Response {
+fn begin(
+    state: &Shared,
+    next: String,
+    link: Option<(String, String, String)>,
+    source: &Source,
+) -> Response {
     let Some(config) = state.config.github.as_ref() else {
         return unavailable();
     };
@@ -382,6 +396,17 @@ fn begin(state: &Shared, next: String, link: Option<(String, String, String)>) -
     if attempts.len() >= MAX_FLOWS {
         return unavailable();
     }
+    // 起点不需要登录，谁都能往这张表里塞一条。不按来源分的话，塞满之后所有人都进不了
+    // GitHub 登录；所以同一个来源同时只能有这么多没走完的，每一条十分钟后自己过期。
+    if !source.is_unknown()
+        && attempts
+            .values()
+            .filter(|attempt| attempt.source.as_deref() == source.known())
+            .count()
+            >= MAX_FLOWS_PER_SOURCE
+    {
+        return web::retry_after(unavailable(), 60);
+    }
     attempts.insert(
         token_digest(oauth_state.expose()),
         Attempt {
@@ -389,6 +414,7 @@ fn begin(state: &Shared, next: String, link: Option<(String, String, String)>) -
             verifier,
             next,
             link,
+            source: source.known().map(ToOwned::to_owned),
             at: Instant::now(),
         },
     );
@@ -674,7 +700,8 @@ async fn profile_submit(
         )
         .await
     } else {
-        if let Err(e) = identity::reserve_mail(&state.pool, &email).await {
+        let source = Source::read(&headers, state.config.client_ip_header.as_ref());
+        if let Err(e) = identity::reserve_mail(&state.pool, &email, &source).await {
             return crate::identity_web::problem(&e);
         }
         let Ok(response) = crate::identity_web::send_bound(&state, action, None).await else {

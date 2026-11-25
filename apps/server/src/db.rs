@@ -128,7 +128,7 @@ mod tests {
             .fetch_one(&again)
             .await
             .unwrap();
-        assert_eq!(applied, 5);
+        assert_eq!(applied, 6);
     }
 
     #[tokio::test]

@@ -224,6 +224,15 @@ fn target_offline() -> ApiError {
     conflict(codes::DEVICE_OFFLINE, "the target device is offline")
 }
 
+/// 服务端的内容总量到了上限。和"云盘空间不够"回答同一个码：对发文件的一方来说下一步一样。
+fn storage_full() -> ApiError {
+    ApiError::new(
+        StatusCode::PAYLOAD_TOO_LARGE,
+        codes::QUOTA_EXCEEDED,
+        "the server has no room for this file",
+    )
+}
+
 fn is_online(state: &Shared, account_id: &str, device_id: &str) -> bool {
     state.presence.is_online(account_id, device_id)
 }
@@ -247,10 +256,20 @@ pub async fn create(
     ) {
         (Ok(name), Some(target)) if target.id != identity.device_id => {
             // 只能发给在线设备：离线的设备没人收，服务端也不替它保管。
-            if is_online(&state, &identity.account_id, &target.id) {
-                Ok((target, name))
-            } else {
+            if !is_online(&state, &identity.account_id, &target.id) {
                 Err(target_offline())
+            } else if blobs::over_budget(
+                &state.pool,
+                &input.sha256,
+                input.size,
+                state.config.storage_budget_bytes,
+            )
+            .await?
+            {
+                // 全站的总量先粗筛一遍，免得白收；作数的是入库时事务里的那一次。
+                Err(storage_full())
+            } else {
+                Ok((target, name))
             }
         }
         (Ok(_), Some(_)) => Err(ApiError::invalid("a device cannot send to itself")),
@@ -278,7 +297,15 @@ pub async fn create(
         return Err(target_offline());
     }
 
-    let row = record_send(&state, &identity, &target, &input, name).await?;
+    let row = match record_send(&state, &identity, &target, &input, name).await {
+        Ok(row) => row,
+        Err(error) => {
+            // 没记成发送，刚收下的内容就没人引用：别把它留在磁盘上等着清扫。
+            // 真的记上了的话，这里会看见它还被引用着，什么都不删。
+            state.blobs.discard_unreferenced(&input.sha256).await?;
+            return Err(error);
+        }
+    };
     audit::record(
         &state.pool,
         Some(&identity.account_id),
@@ -318,6 +345,18 @@ async fn record_send(
     let size = i64::try_from(input.size).map_err(|_| ApiError::invalid("the file is too large"))?;
     let now = Timestamp::now().as_millis();
     let mut tx = state.pool.begin_with("BEGIN IMMEDIATE").await?;
+    if blobs::over_budget(
+        &mut *tx,
+        &input.sha256,
+        input.size,
+        state.config.storage_budget_bytes,
+    )
+    .await?
+    {
+        tx.rollback().await?;
+        tracing::warn!("the storage budget is reached: a send was refused");
+        return Err(storage_full());
+    }
     blobs::retain(&mut *tx, &input.sha256, input.size).await?;
     sqlx::query(
         "INSERT INTO sends \

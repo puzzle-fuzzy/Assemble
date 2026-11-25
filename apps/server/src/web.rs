@@ -31,6 +31,7 @@ use crate::audit::{self, actions};
 use crate::auth::{CSRF_COOKIE, cleared_cookie, is_same_origin, session_cookie, web_session};
 use crate::http::Shared;
 use crate::secrets::{DECOY_HASH, random_id, random_token, token_digest};
+use crate::source::Source;
 use crate::templates;
 
 pub const LOGIN_PATH: &str = "/web/login";
@@ -39,10 +40,12 @@ pub const LOGOUT_PATH: &str = "/web/logout";
 /// 登录表单的防伪 Cookie 能用多久。
 const CSRF_LIFETIME: Duration = Duration::from_hours(1);
 
-/// 失败的窗口与上限：同一个用户名 15 分钟内最多错 5 次。
+/// 失败的窗口与上限：同一个来源对同一个账户 15 分钟内最多错 5 次；
+/// 同一个来源在这段时间里对所有账户加起来最多错 30 次。
 /// 旧账户过渡和敏感操作使用不同的键。
 pub(crate) const WINDOW: Duration = Duration::from_mins(15);
 const MAX_FAILURES: usize = 5;
+const MAX_SOURCE_FAILURES: usize = 30;
 
 /// 登录页上说的话。失败的原因对外只有这一句。
 const WRONG_CREDENTIALS: &str = "邮箱或密码不对。";
@@ -56,44 +59,85 @@ pub(crate) fn retry_after(mut response: Response, seconds: u64) -> Response {
     response
 }
 
-/// 连续失败的保护。只在内存里：服务端重启后清零，这对单机部署足够。
+/// 连续失败的保护，分两层，都只在内存里：单机部署，重启清零。
+///
+/// - 同一个来源对同一个账户连错 [`MAX_FAILURES`] 次：这个来源暂时不能再试这个账户；
+/// - 来源已知时，同一个来源连错 [`MAX_SOURCE_FAILURES`] 次：它暂时不能试任何账户。
+///
+/// 只按账户计的话，知道某个邮箱的人乱输五次就能把那个账户锁上。按来源与账户一起计，
+/// 旁人锁不住别人；换着账户去猜密码的，被第二层拦住。来源未知时（没有配置可信的
+/// 代理头）所有请求算同一个来源，第二层不生效：不然一个乱试的人就能把全站的登录锁死。
 #[derive(Debug)]
 pub struct LoginThrottle {
-    failures: Mutex<HashMap<String, Vec<Instant>>>,
+    /// （账户，来源）到失败的时刻。
+    failures: Mutex<HashMap<(String, String), Vec<Instant>>>,
+    /// 来源到失败的时刻。只记来源已知的。
+    sources: Mutex<HashMap<String, Vec<Instant>>>,
 }
 
 impl LoginThrottle {
     pub fn new() -> Self {
         Self {
             failures: Mutex::new(HashMap::new()),
+            sources: Mutex::new(HashMap::new()),
         }
     }
 
-    /// 这个用户名现在是否被暂时拒绝。
-    pub fn is_blocked(&self, username: &str, now: Instant) -> bool {
-        self.recent(username, now).len() >= MAX_FAILURES
+    /// 这个来源现在能不能替这个账户再试一次。
+    pub fn is_blocked(&self, account: &str, source: &Source, now: Instant) -> bool {
+        let pair = (account.to_owned(), source.key().to_owned());
+        let own = recent(
+            self.failures
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .get(&pair),
+            now,
+        );
+        if own >= MAX_FAILURES {
+            return true;
+        }
+        // 来源未知的请求共用一个键，彼此分不开，所以不对它们计第二层。
+        !source.is_unknown()
+            && recent(
+                self.sources
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .get(source.key()),
+                now,
+            ) >= MAX_SOURCE_FAILURES
     }
 
-    pub fn record_failure(&self, username: &str, now: Instant) {
-        let mut failures = self.failures.lock().unwrap_or_else(PoisonError::into_inner);
-        failures.retain(|_, entries| now.duration_since(entries[entries.len() - 1]) < WINDOW);
-        let entry = failures.entry(username.to_owned()).or_default();
-        entry.push(now);
+    pub fn record_failure(&self, account: &str, source: &Source, now: Instant) {
+        {
+            let mut failures = self.failures.lock().unwrap_or_else(PoisonError::into_inner);
+            // 久未活动的条目顺手清掉，内存不随时间增长。
+            failures.retain(|_, entries| now.duration_since(entries[entries.len() - 1]) < WINDOW);
+            failures
+                .entry((account.to_owned(), source.key().to_owned()))
+                .or_default()
+                .push(now);
+        }
+        if source.is_unknown() {
+            return;
+        }
+        let mut sources = self.sources.lock().unwrap_or_else(PoisonError::into_inner);
+        sources.retain(|_, entries| now.duration_since(entries[entries.len() - 1]) < WINDOW);
+        sources
+            .entry(source.key().to_owned())
+            .or_default()
+            .push(now);
     }
+}
 
-    fn recent(&self, username: &str, now: Instant) -> Vec<Instant> {
-        self.failures
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .get(username)
-            .map_or_default(|entries| {
-                entries
-                    .iter()
-                    .copied()
-                    .filter(|at| now.duration_since(*at) < WINDOW)
-                    .collect()
-            })
-    }
+/// 窗口之内的失败次数。
+fn recent(entries: Option<&Vec<Instant>>, now: Instant) -> usize {
+    entries.map_or(0, |entries| {
+        entries
+            .iter()
+            .copied()
+            .filter(|at| now.duration_since(*at) < WINDOW)
+            .count()
+    })
 }
 
 impl Default for LoginThrottle {
@@ -277,7 +321,9 @@ pub async fn login_submit(
     let password = SecretString::new(std::mem::take(&mut form.password));
     let username = form.email.trim().to_ascii_lowercase();
     let now = Instant::now();
-    if state.throttle.is_blocked(&username, now) {
+    // 来源只在配置了可信的代理头之后才分得开；见 [`crate::source`]。
+    let source = Source::read(&headers, state.config.client_ip_header.as_ref());
+    if state.throttle.is_blocked(&username, &source, now) {
         return retry_after(
             page(
                 StatusCode::TOO_MANY_REQUESTS,
@@ -305,7 +351,7 @@ pub async fn login_submit(
 
     let attempted = account.as_ref().map(|account| account.id.clone());
     let Some(account) = account.filter(|_| matched) else {
-        state.throttle.record_failure(&username, now);
+        state.throttle.record_failure(&username, &source, now);
         audit::record(
             &state.pool,
             attempted.as_deref(),
@@ -348,6 +394,14 @@ pub(crate) async fn signed_in(
 ) -> Response {
     let session = match create_session(state, account_id, method).await {
         Ok(session) => session,
+        Err(CreateSessionError::Suspended) => {
+            // 密码或者 GitHub 授权都对，可这个账户被停用了：如实说，不放进来。
+            tracing::info!("a suspended account was refused a web session");
+            return page(
+                StatusCode::FORBIDDEN,
+                templates::message_page("账户已停用", "这个账户已被停用，有疑问请联系管理员。"),
+            );
+        }
         Err(error) => {
             tracing::error!(%error, "a web session could not be saved");
             return unavailable();
@@ -389,6 +443,17 @@ async fn create_session(
     let now = assemble_protocol::primitives::Timestamp::now();
     let expires_at = now + state.config.web_session_ttl;
     let mut tx = state.pool.begin().await?;
+    // 停用的账户哪里都登不进去。所有的登录方式最后都走到这里，所以只在这一处把关。
+    // 这一列可空：没停用时是空值，要按可空的类型读。
+    let suspended: Option<Option<i64>> =
+        sqlx::query_scalar("SELECT suspended_at FROM accounts WHERE id = ?")
+            .bind(account_id)
+            .fetch_optional(&mut *tx)
+            .await?;
+    // 外面一层是"有没有这个账户"，里面一层才是"停用时间有没有值"。
+    if suspended.flatten().is_some() {
+        return Err(CreateSessionError::Suspended);
+    }
     sqlx::query(
         "INSERT INTO web_sessions (id, account_id, token_hash, csrf_token, created_at, expires_at) \
          VALUES (?, ?, ?, ?, ?, ?)",
@@ -424,6 +489,8 @@ enum CreateSessionError {
     Random(#[from] crate::secrets::SecretError),
     #[error("database error: {0}")]
     Database(#[from] sqlx::Error),
+    #[error("the account is suspended")]
+    Suspended,
 }
 
 /// `POST /web/logout`。管理网页退出后回到本来源的管理登录页。
@@ -523,32 +590,88 @@ mod tests {
         assert!(!same_secret("", ""));
     }
 
+    /// 一个来源已知的请求：请求头里带着代理记下的地址。
+    fn from(address: &'static str) -> Source {
+        let mut headers = HeaderMap::new();
+        headers.insert("x-real-ip", HeaderValue::from_static(address));
+        let trusted = axum::http::HeaderName::from_static("x-real-ip");
+        Source::read(&headers, Some(&trusted))
+    }
+
     #[test]
     fn a_username_is_blocked_after_five_failures_inside_the_window() {
         let throttle = LoginThrottle::new();
         let start = Instant::now();
         let key = "alex";
+        let source = Source::unknown();
         for _ in 0..MAX_FAILURES {
-            assert!(!throttle.is_blocked(key, start));
-            throttle.record_failure(key, start);
+            assert!(!throttle.is_blocked(key, &source, start));
+            throttle.record_failure(key, &source, start);
         }
-        assert!(throttle.is_blocked(key, start));
+        assert!(throttle.is_blocked(key, &source, start));
         // 别的用户名不受影响。
-        assert!(!throttle.is_blocked("sam", start));
+        assert!(!throttle.is_blocked("sam", &source, start));
         // 窗口过后恢复。
         let later = start + WINDOW;
-        assert!(!throttle.is_blocked(key, later));
+        assert!(!throttle.is_blocked(key, &source, later));
+    }
+
+    #[test]
+    fn nobody_else_can_lock_an_account_and_no_source_can_spray() {
+        let throttle = LoginThrottle::new();
+        let start = Instant::now();
+        let stranger = from("203.0.113.7");
+        let myself = from("198.51.100.9");
+        // 旁人连错五次：只拦住旁人，本人照常能试。
+        for _ in 0..MAX_FAILURES {
+            throttle.record_failure("alex", &stranger, start);
+        }
+        assert!(throttle.is_blocked("alex", &stranger, start));
+        assert!(!throttle.is_blocked("alex", &myself, start));
+
+        // 同一个来源换着账户去猜：总计到了上限，哪个账户都不能再试；别的来源不受牵连。
+        for index in 0..(MAX_SOURCE_FAILURES - MAX_FAILURES) {
+            throttle.record_failure(&format!("user-{index}"), &stranger, start);
+        }
+        assert!(throttle.is_blocked("sam", &stranger, start));
+        assert!(!throttle.is_blocked("sam", &myself, start));
+        // 窗口过后都恢复。
+        assert!(!throttle.is_blocked("sam", &stranger, start + WINDOW));
+    }
+
+    #[test]
+    fn an_unknown_source_never_locks_the_whole_service() {
+        let throttle = LoginThrottle::new();
+        let start = Instant::now();
+        let source = Source::unknown();
+        // 分不开来源的时候，再多失败也只按账户各算各的。
+        for index in 0..(MAX_SOURCE_FAILURES + 10) {
+            throttle.record_failure(&format!("user-{index}"), &source, start);
+        }
+        assert!(!throttle.is_blocked("sam", &source, start));
+        for _ in 0..MAX_FAILURES {
+            throttle.record_failure("sam", &source, start);
+        }
+        assert!(throttle.is_blocked("sam", &source, start));
+        assert!(!throttle.is_blocked("jo", &source, start));
     }
 
     #[test]
     fn old_failures_are_forgotten_so_memory_does_not_grow() {
         let throttle = LoginThrottle::new();
         let start = Instant::now();
-        throttle.record_failure("alex", start);
-        throttle.record_failure("sam", start + Duration::from_secs(1));
-        // 很久以后有新的失败：久未活动的用户名被清掉。
-        throttle.record_failure("jo", start + WINDOW + Duration::from_secs(1));
-        let kept: Vec<String> = throttle.failures.lock().unwrap().keys().cloned().collect();
+        let source = Source::unknown();
+        throttle.record_failure("alex", &source, start);
+        throttle.record_failure("sam", &source, start + Duration::from_secs(1));
+        // 很久以后有新的失败：久未活动的条目被清掉。
+        throttle.record_failure("jo", &source, start + WINDOW + Duration::from_secs(1));
+        let kept: Vec<String> = throttle
+            .failures
+            .lock()
+            .unwrap()
+            .keys()
+            .map(|(account, _)| account.clone())
+            .collect();
         assert_eq!(kept, vec!["jo".to_owned()]);
         assert_eq!(MAX_FAILURES, 5);
     }

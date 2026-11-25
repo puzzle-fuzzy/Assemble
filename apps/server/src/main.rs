@@ -42,6 +42,11 @@ enum Command {
     ListAccounts,
     /// 为已验证的邮箱账户授予超级管理员权限，并写入审计记录。
     GrantSuperAdmin { email: String },
+    /// 停用一个账户，按邮箱指定。之后它哪里都登不进去：密码或 GitHub 授权对了也不行，
+    /// 网页登录状态当场作废，电脑与助手上的 Assemble 被拒绝。数据留着，随时可以恢复。
+    SuspendAccount { email: String },
+    /// 恢复一个被停用的账户。电脑与助手上的 Assemble 照旧能用，网页要重新登录。
+    ResumeAccount { email: String },
 }
 
 fn init_logging() {
@@ -114,6 +119,48 @@ fn explain_set(error: &assemble_server::SetPasswordError) -> String {
         SetPasswordError::Startup(StartupError::Config(config)) => explain_config(config),
         SetPasswordError::Password(error) => explain_password(error),
         other => other.to_string(),
+    }
+}
+
+/// 停用或者恢复一个账户，把结果说成人话。
+fn suspend(runtime: &tokio::runtime::Runtime, email: &str, suspended: bool) -> ExitCode {
+    let outcome = runtime.block_on(async {
+        let (_, pool) = assemble_server::load()
+            .await
+            .map_err(|error| error.to_string())?;
+        let result = assemble_server::admin::set_suspended(&pool, email, suspended)
+            .await
+            .map_err(|error| match error {
+                assemble_server::admin::SuspendError::Email => "邮箱格式不合法。".to_owned(),
+                assemble_server::admin::SuspendError::NotFound => "没有这个邮箱的账户。".to_owned(),
+                assemble_server::admin::SuspendError::Database(error) => {
+                    tracing::error!(%error, "the account state could not be changed");
+                    "数据库操作失败，账户状态没有改变。".to_owned()
+                }
+            });
+        pool.close().await;
+        result
+    });
+    match outcome {
+        Ok(outcome) => {
+            let who = format!("{}（{}）", outcome.username, outcome.display_name);
+            let said = match (suspended, outcome.changed) {
+                (true, true) => format!(
+                    "已停用账户 {who}：它的网页登录状态已作废，电脑与助手上的 Assemble 会被拒绝。数据留着，要恢复用 resume-account。"
+                ),
+                (true, false) => format!("账户 {who} 本来就是停用的。"),
+                (false, true) => {
+                    format!("已恢复账户 {who}：电脑与助手上的 Assemble 照旧能用，网页要重新登录。")
+                }
+                (false, false) => format!("账户 {who} 没有被停用。"),
+            };
+            println!("{said}");
+            ExitCode::SUCCESS
+        }
+        Err(error) => {
+            eprintln!("没有办成：{error}");
+            ExitCode::FAILURE
+        }
     }
 }
 
@@ -191,6 +238,8 @@ fn main() -> ExitCode {
                 }
             }
         }
+        Command::SuspendAccount { email } => suspend(&runtime, &email, true),
+        Command::ResumeAccount { email } => suspend(&runtime, &email, false),
         Command::Serve => match runtime.block_on(assemble_server::run_server()) {
             Ok(()) => ExitCode::SUCCESS,
             Err(error) => {

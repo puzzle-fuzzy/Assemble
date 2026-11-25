@@ -16,6 +16,7 @@ use axum_extra::extract::CookieJar;
 use serde::Deserialize;
 use sqlx::{Sqlite, SqlitePool, Transaction};
 
+use crate::audit::actions;
 use crate::auth::{WebSession, web_session};
 use crate::error::ApiError;
 use crate::http::Shared;
@@ -75,6 +76,78 @@ pub async fn grant_super_admin(pool: &SqlitePool, email: &str) -> Result<String,
     grant_in(&mut tx, &email, "cli").await?;
     tx.commit().await?;
     Ok(id)
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum SuspendError {
+    #[error("the email is invalid")]
+    Email,
+    #[error("no account has this email")]
+    NotFound,
+    #[error(transparent)]
+    Database(#[from] sqlx::Error),
+}
+
+/// 停用一个账户的结果：给命令行报信用。
+#[derive(Debug)]
+pub struct Suspended {
+    pub username: String,
+    pub display_name: String,
+    /// 这次调用有没有真的改变状态。本来就在要求的状态里时是 `false`。
+    pub changed: bool,
+}
+
+/// 停用或者恢复一个账户，和审计记在同一个事务里。只由服务器的命令行调用。
+///
+/// 停用之后，这个账户哪里都登不进去：密码或者 GitHub 授权对了也不行，网页会话当场作废，
+/// 设备与助手的令牌每一次请求都被拒。数据原样留着，所以它占的空间不会自己让出来；
+/// 恢复之后设备照旧能用，网页要重新登录。已经连着的事件流要等它自己重连才断。
+pub async fn set_suspended(
+    pool: &SqlitePool,
+    email: &str,
+    suspended: bool,
+) -> Result<Suspended, SuspendError> {
+    let email = crate::email_identity::normalize_email(email).map_err(|_| SuspendError::Email)?;
+    let mut tx = pool.begin().await?;
+    let (id, username, display_name, current): (String, String, String, Option<i64>) =
+        sqlx::query_as(
+            "SELECT id, username, display_name, suspended_at FROM accounts WHERE email = ?",
+        )
+        .bind(&email)
+        .fetch_optional(&mut *tx)
+        .await?
+        .ok_or(SuspendError::NotFound)?;
+    let changed = current.is_some() != suspended;
+    if changed {
+        sqlx::query("UPDATE accounts SET suspended_at = ? WHERE id = ?")
+            .bind(suspended.then_some(Timestamp::now().as_millis()))
+            .bind(&id)
+            .execute(&mut *tx)
+            .await?;
+        sqlx::query("INSERT INTO audit_log (account_id, action, created_at) VALUES (?, ?, ?)")
+            .bind(&id)
+            .bind(if suspended {
+                actions::ACCOUNT_SUSPENDED
+            } else {
+                actions::ACCOUNT_RESUMED
+            })
+            .bind(Timestamp::now().as_millis())
+            .execute(&mut *tx)
+            .await?;
+    }
+    if suspended {
+        // 网页会话当场作废：恢复之后要重新登录，不停用期间签发的会话不会回来。
+        sqlx::query("DELETE FROM web_sessions WHERE account_id = ?")
+            .bind(&id)
+            .execute(&mut *tx)
+            .await?;
+    }
+    tx.commit().await?;
+    Ok(Suspended {
+        username,
+        display_name,
+        changed,
+    })
 }
 
 /// 和会话创建共用事务：失败的登录不更新最后登录时间，也不生成成功事件。

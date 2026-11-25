@@ -83,7 +83,7 @@ fn quota_exceeded() -> ApiError {
     ApiError::new(
         StatusCode::PAYLOAD_TOO_LARGE,
         codes::QUOTA_EXCEEDED,
-        "the drive has no room for this file",
+        "the drive or the server has no room for this file",
     )
 }
 
@@ -161,7 +161,15 @@ pub async fn upload(
         Ok(name) => {
             // 先按"收下之后会不会超"拒绝，免得白收一遍。
             let used = used_bytes(&state.pool, &identity.account_id).await?;
-            if used.saturating_add(input.size) > limit {
+            // 全站的总量也先看一眼，免得白收一遍。作数的是入库时事务里的那一次。
+            let full = blobs::over_budget(
+                &state.pool,
+                &input.sha256,
+                input.size,
+                state.config.storage_budget_bytes,
+            )
+            .await?;
+            if used.saturating_add(input.size) > limit || full {
                 Err(quota_exceeded())
             } else {
                 Ok(name)
@@ -220,6 +228,18 @@ async fn record_file(
     let used = used_bytes(&mut *tx, &identity.account_id).await?;
     if used.saturating_add(input.size) > state.config.drive_quota_bytes {
         tx.rollback().await?;
+        return Err(quota_exceeded());
+    }
+    if blobs::over_budget(
+        &mut *tx,
+        &input.sha256,
+        input.size,
+        state.config.storage_budget_bytes,
+    )
+    .await?
+    {
+        tx.rollback().await?;
+        tracing::warn!("the storage budget is reached: an upload to the drive was refused");
         return Err(quota_exceeded());
     }
     blobs::retain(&mut *tx, &input.sha256, input.size).await?;

@@ -310,8 +310,13 @@ async fn search(
 async fn catalog(
     State(state): State<Shared>,
     Query(identity): Query<MediaIdentity>,
+    headers: HeaderMap,
 ) -> Result<Json<MediaItem<MediaCandidate>>, ApiError> {
-    let item = state.media.catalog.details(&state, &identity).await?;
+    let item = state
+        .media
+        .catalog
+        .details(&state, &headers, &identity)
+        .await?;
     Ok(Json(MediaItem { item }))
 }
 #[derive(Deserialize)]
@@ -323,6 +328,7 @@ async fn actor(
     State(state): State<Shared>,
     Path((provider, external_id)): Path<(MediaProvider, String)>,
     Query(query): Query<ActorQuery>,
+    headers: HeaderMap,
 ) -> Result<Json<MediaActorCredits>, ApiError> {
     Ok(Json(
         state
@@ -330,6 +336,7 @@ async fn actor(
             .catalog
             .actor(
                 &state,
+                &headers,
                 &MediaPersonIdentity {
                     provider,
                     external_id,

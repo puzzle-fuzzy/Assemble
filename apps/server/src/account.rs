@@ -23,6 +23,7 @@ use crate::audit::{self, actions};
 use crate::auth::{is_same_origin, web_session};
 use crate::http::Shared;
 use crate::identity_templates as templates;
+use crate::source::Source;
 use crate::web::{TOO_MANY_ATTEMPTS, WINDOW, page, refused, retry_after, to_login, unavailable};
 
 pub const ACCOUNT_PATH: &str = "/web/account";
@@ -141,10 +142,9 @@ pub async fn password_submit(
 
     // 现在的密码连错太多次：和登录失败记在一起，键是这个账户的已验证邮箱（旧会话回退到用户名）。
     let now = Instant::now();
-    if state
-        .throttle
-        .is_blocked(account.email.as_deref().unwrap_or(&session.username), now)
-    {
+    let key = account.email.as_deref().unwrap_or(&session.username);
+    let source = Source::read(&headers, state.config.client_ip_header.as_ref());
+    if state.throttle.is_blocked(key, &source, now) {
         return retry_after(
             shown(
                 Some(TOO_MANY_ATTEMPTS),
@@ -163,9 +163,7 @@ pub async fn password_submit(
     match accounts::change_password(&state.pool, &session.account_id, current, new).await {
         Ok(()) => {}
         Err(ChangePasswordError::WrongCurrent) => {
-            state
-                .throttle
-                .record_failure(account.email.as_deref().unwrap_or(&session.username), now);
+            state.throttle.record_failure(key, &source, now);
             audit::record(
                 &state.pool,
                 Some(&session.account_id),

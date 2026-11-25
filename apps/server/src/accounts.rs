@@ -18,6 +18,8 @@ pub struct AccountRow {
     pub email_verified_at: Option<i64>,
     pub password_enabled: bool,
     pub avatar_url: Option<String>,
+    /// 有值就是被停用了；见 [`crate::admin::set_suspended`]。
+    pub suspended_at: Option<i64>,
 }
 
 /// 用户名的长度范围。
@@ -150,6 +152,7 @@ pub async fn create(
         email_verified_at: None,
         password_enabled: true,
         avatar_url: None,
+        suspended_at: None,
     })
 }
 
@@ -268,6 +271,11 @@ pub async fn list_usernames(pool: &SqlitePool) -> Result<Vec<String>, sqlx::Erro
 }
 
 impl AccountRow {
+    /// 被停用的账户哪里都登不进去。
+    pub fn suspended(&self) -> bool {
+        self.suspended_at.is_some()
+    }
+
     /// 交给接口的公开信息。
     pub fn public(&self) -> assemble_protocol::account::Account {
         assemble_protocol::account::Account {

@@ -191,6 +191,77 @@ async fn too_many_failures_lock_a_username_out_for_a_while() {
     );
 }
 
+/// 旁人锁不住别人的账户：配置了可信的代理头之后，连错五次只拦住连错的那个来源。
+#[tokio::test]
+async fn a_stranger_cannot_lock_an_account_out_once_sources_can_be_told_apart() {
+    // 每次都换一个新的防伪值：被拦的是失败的次数，不是表单。
+    async fn attempt(fixture: &Fixture, password: &str, from: &'static str) -> Page {
+        let form = open_login(&fixture.browser).await;
+        let csrf = hidden(&form.html, "csrf").unwrap();
+        send(
+            fixture
+                .browser
+                .post_form(
+                    "/web/login",
+                    &[
+                        ("email", EMAIL),
+                        ("password", password),
+                        ("next", ""),
+                        ("csrf", &csrf),
+                    ],
+                )
+                .header("x-real-ip", from),
+        )
+        .await
+    }
+
+    let dir = tempfile::tempdir().unwrap();
+    let pool = assemble_server::db::open(dir.path()).await.unwrap();
+    let config = assemble_server::Config::development(dir.path());
+    let config = assemble_server::Config {
+        client_ip_header: Some(axum::http::HeaderName::from_static("x-real-ip")),
+        ..config
+    };
+    let server = assemble_server::http::TestServer::start(config, pool)
+        .await
+        .unwrap();
+    assemble_server::accounts::create(
+        &server.state.pool,
+        USERNAME,
+        "Alex Wang",
+        SecretString::new(PASSWORD.to_owned()),
+    )
+    .await
+    .unwrap();
+    sqlx::query("UPDATE accounts SET email = 'alex@example.test', email_verified_at = 1 WHERE username = 'alex'")
+        .execute(&server.state.pool)
+        .await
+        .unwrap();
+    let fixture = Fixture {
+        dir,
+        browser: Browser::new(server.origin.as_str()),
+        server,
+    };
+
+    // 旁人连错五次。
+    for _ in 0..5 {
+        assert_eq!(
+            attempt(&fixture, "wrong", "203.0.113.7").await.status,
+            StatusCode::UNAUTHORIZED
+        );
+    }
+    // 拦住的是他：从同一个地方来，密码对了也进不去。
+    let locked = attempt(&fixture, PASSWORD, "203.0.113.7").await;
+    assert_eq!(locked.status, StatusCode::TOO_MANY_REQUESTS);
+    assert!(!locked.html.contains("已登录"));
+    // 本人从别处来：照常登录。
+    let mine = attempt(&fixture, PASSWORD, "198.51.100.9").await;
+    assert!(
+        mine.html.contains("已登录"),
+        "the account itself is not locked out"
+    );
+}
+
 // ---- 登录与授权 ----
 
 #[tokio::test]
@@ -937,4 +1008,82 @@ async fn stopping_the_server_ends_open_event_streams_promptly() {
         "the offline time should be written on shutdown"
     );
     mac.cancel.cancel();
+}
+
+/// 停用的账户哪里都登不进去：密码对了也不行，网页会话作废，设备令牌被拒；恢复之后照旧。
+#[tokio::test]
+async fn a_suspended_account_cannot_get_in_anywhere_until_it_is_resumed() {
+    let fixture = fixture().await;
+    let pc = register(&fixture, 'a', "工作电脑", Platform::Windows).await;
+    log_in(&fixture.browser).await;
+    let pool = &fixture.server.state.pool;
+
+    // 停用之前一切照常。
+    assert_eq!(
+        pc.me(&pc.options()).await.unwrap().account.username,
+        USERNAME
+    );
+    assert_eq!(
+        send(fixture.browser.get("/web/account")).await.status,
+        StatusCode::OK
+    );
+
+    let suspended = assemble_server::admin::set_suspended(pool, EMAIL, true)
+        .await
+        .unwrap();
+    assert!(suspended.changed);
+    assert_eq!(suspended.username, USERNAME);
+
+    // 设备的令牌每一次请求都被拒。
+    assert!(
+        pc.me(&pc.options())
+            .await
+            .is_err_and(|error| error.is_unauthorized())
+    );
+    // 网页会话当场作废：账户页把人送去登录。
+    let away = send(fixture.browser.get("/web/account")).await;
+    assert_eq!(away.status, StatusCode::SEE_OTHER);
+    // 密码对了也登不进去，并且如实说是被停用了。
+    let refused = try_login(&fixture.browser, USERNAME, PASSWORD, "").await;
+    assert_eq!(refused.status, StatusCode::FORBIDDEN);
+    assert!(refused.html.contains("账户已停用"));
+    assert!(
+        !refused
+            .set_cookies()
+            .iter()
+            .any(|cookie| cookie.starts_with("assemble_web="))
+    );
+    // 再停一次：状态没变，也不多记一笔。
+    assert!(
+        !assemble_server::admin::set_suspended(pool, EMAIL, true)
+            .await
+            .unwrap()
+            .changed
+    );
+    let audits: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM audit_log WHERE action = 'account.suspended'")
+            .fetch_one(pool)
+            .await
+            .unwrap();
+    assert_eq!(audits, 1);
+
+    // 恢复：设备照旧能用，网页要重新登录。
+    assert!(
+        assemble_server::admin::set_suspended(pool, EMAIL, false)
+            .await
+            .unwrap()
+            .changed
+    );
+    assert_eq!(
+        pc.me(&pc.options()).await.unwrap().account.username,
+        USERNAME
+    );
+    let back = try_login(&fixture.browser, USERNAME, PASSWORD, "").await;
+    assert!(back.html.contains("已登录"));
+
+    // 没有这个邮箱的账户：如实说，什么都不动。
+    assert!(matches!(
+        assemble_server::admin::set_suspended(pool, "nobody@example.test", true).await,
+        Err(assemble_server::admin::SuspendError::NotFound)
+    ));
 }

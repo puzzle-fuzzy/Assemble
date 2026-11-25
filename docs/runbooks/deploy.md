@@ -106,6 +106,28 @@ docker compose exec -T assemble assemble-server list-accounts
 docker compose exec assemble assemble-server set-password <用户名>   # 密码在终端里输两遍
 ```
 
+某个账户出了事（比如在往磁盘里灌东西），按邮箱停用它。之后它哪里都登不进去，电脑与助手上的 Assemble 被拒绝；数据留着，所以不会自己腾出空间，但它再也放不进新的东西：
+
+```sh
+docker compose exec -T assemble assemble-server suspend-account <邮箱>
+docker compose exec -T assemble assemble-server resume-account <邮箱>   # 恢复：设备照旧能用，网页要重新登录
+```
+
+停用会写一条审计记录；已经连着的事件流要等它自己重连才断。这两条只在服务器的命令行上做，管理端的网页里没有这个入口。
+
+### 按来源的限额与总量上限
+
+两件事都在 `.env` 里设，改完 `docker compose up -d`，再用 `check-config` 看一眼：
+
+```sh
+#   ASSEMBLE_CLIENT_IP_HEADER=X-Real-IP          # 例子里 nginx 写来源地址的头；不填则按来源的限额不生效
+#   ASSEMBLE_STORAGE_BUDGET_BYTES=8589934592     # 全站的内容总量（这里是 8 GiB），按磁盘留给 Assemble 的余量填
+docker compose exec -T assemble assemble-server check-config
+#   报告里应有"全站内容总量上限"和"请求来源：按来源的限额读 x-real-ip 头"
+```
+
+总量上限管的是云盘和还没送达的发送加起来的字节数，到了就一律拒绝上传与发送。每个账户仍有自己的配额，可注册是公开的，只按账户设限攒起来仍能把磁盘写满——而这台服务器上还有别的站点。
+
 ### 公开邮箱注册
 
 任何人可从 `/web/register` 申请邮件；验证后设置密码并建立账户，不再读取 `ASSEMBLE_INVITE_CODE`。SMTP、GitHub、网页找回密码与旧账户绑定步骤见[账户配置手册](email-and-github.md)。
@@ -161,7 +183,7 @@ docker compose start
 - **不缓冲请求体。** 服务端会提前拒绝超限或不合法的上传，并等发送方把话说完；nginx 边收边转，不在自己的磁盘上再存一份。
 - **事件流。** `/v1/events` 是一条不结束的长连接，服务端每 15 秒发一次心跳；读超时要放宽，缓冲要关掉。
 - **只映射到本机。** compose 里端口绑在 `127.0.0.1` 上。不要为了省事把它直接对外，那样会绕过 TLS。
-- **服务端不读转发头。** 在它看来，所有请求都来自反向代理。日志里看到的对端都是 `127.0.0.1`；以后如果要按来源限流或者封禁，要先决定怎么信任代理头。
+- **服务端默认不读转发头。** 在它看来，所有请求都来自反向代理，日志里看到的对端都是 `127.0.0.1`。2026-11-25 起有一个显式的开关：在 `.env` 里写 `ASSEMBLE_CLIENT_IP_HEADER=X-Real-IP`（示例配置里的 nginx 就是把来源地址写在这个头里），服务端才按它区分请求的来源，而且只用来分限额——旁人锁不住你的账户，一个来源也用不掉全站的额度。它成立的条件是只有反向代理能连到服务端，所以端口必须继续只绑在本机。来源不进日志。
 - **安全响应头。** CSP 与 Referrer-Policy 由服务端自己发；`X-Content-Type-Options` 与 HSTS 是 nginx 加的。
 
 ## 换成 systemd 的话

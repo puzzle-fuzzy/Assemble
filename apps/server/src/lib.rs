@@ -34,6 +34,7 @@ pub mod presence;
 pub mod register;
 pub mod secrets;
 pub mod sends;
+pub mod source;
 pub mod templates;
 pub mod web;
 
@@ -154,13 +155,25 @@ pub async fn check_config() -> Result<String, StartupError> {
     } else {
         "未配置，入口隐藏"
     };
+    // 按来源设的限额（登录失败、发信、GitHub 起点、公开目录查询）都要靠这个头才生效。
+    let source = config.client_ip_header.as_ref().map_or_else(
+        || "未配置，按来源的限额不生效".to_owned(),
+        |header| format!("按来源的限额读 {} 头", header.as_str()),
+    );
+    let stopped: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM accounts WHERE suspended_at IS NOT NULL")
+            .fetch_one(&pool)
+            .await
+            .map_err(db::DbError::from)?;
     Ok(format!(
-        "配置可用。\n  监听地址：{}\n  数据目录：{}\n  对外地址：{}\n  云盘上限：{} 字节\n  账户数：{}\n  网页注册：{registration}\n  SMTP：{smtp}\n  GitHub：{github}",
+        "配置可用。\n  监听地址：{}\n  数据目录：{}\n  对外地址：{}\n  云盘上限：{} 字节\n  全站内容总量上限：{} 字节\n  账户数：{}（其中停用 {}）\n  网页注册：{registration}\n  SMTP：{smtp}\n  GitHub：{github}\n  请求来源：{source}",
         config.addr,
         config.data_dir.display(),
         config.public_origin,
         config.drive_quota_bytes,
-        accounts
+        config.storage_budget_bytes,
+        accounts,
+        stopped
     ))
 }
 

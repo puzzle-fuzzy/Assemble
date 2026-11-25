@@ -33,6 +33,8 @@ pub mod actions {
     pub const PASSWORD_CHANGED: &str = "account.password_changed";
     pub const PASSWORD_CHANGE_FAILED: &str = "account.password_change_failed";
     pub const PASSWORD_RESET: &str = "account.password_reset";
+    pub const ACCOUNT_SUSPENDED: &str = "account.suspended";
+    pub const ACCOUNT_RESUMED: &str = "account.resumed";
     pub const WEB_LOGIN: &str = "web.login";
     pub const WEB_LOGIN_FAILED: &str = "web.login_failed";
     pub const WEB_LOGOUT: &str = "web.logout";

@@ -47,11 +47,13 @@ impl FromRequestParts<Shared> for Identity {
 }
 
 /// 按 `Authorization` 头找出设备。任何一步不对都是 401，不区分原因。
+/// 账户被停用时它的设备一并被拒：每次请求都查一遍，停用当场生效。
 pub async fn identity(pool: &SqlitePool, headers: &HeaderMap) -> Result<Identity, ApiError> {
     let token = bearer(headers).ok_or_else(ApiError::unauthorized)?;
     let row = sqlx::query_as::<_, (String, String, String)>(
         "SELECT devices.account_id, devices.id, devices.name \
-         FROM devices WHERE devices.token_hash = ?",
+         FROM devices JOIN accounts ON accounts.id = devices.account_id \
+         WHERE devices.token_hash = ? AND accounts.suspended_at IS NULL",
     )
     .bind(token_digest(token.expose()))
     .fetch_optional(pool)
@@ -91,7 +93,7 @@ pub struct WebSession {
     pub csrf_token: String,
 }
 
-/// 按 Cookie 找出有效的网页会话。过期、被撤销或读不出来都算没有。
+/// 按 Cookie 找出有效的网页会话。过期、被撤销、账户被停用或读不出来都算没有。
 pub async fn web_session(pool: &SqlitePool, jar: &CookieJar) -> Option<WebSession> {
     let token = jar.get(WEB_COOKIE)?.value();
     let now = assemble_protocol::primitives::Timestamp::now().as_millis();
@@ -99,7 +101,8 @@ pub async fn web_session(pool: &SqlitePool, jar: &CookieJar) -> Option<WebSessio
         "SELECT sessions.id, sessions.account_id, sessions.csrf_token, accounts.username, accounts.display_name, CASE WHEN accounts.email_verified_at IS NOT NULL THEN accounts.email ELSE NULL END \
          FROM web_sessions sessions \
          JOIN accounts ON accounts.id = sessions.account_id \
-         WHERE sessions.token_hash = ? AND sessions.expires_at > ?",
+         WHERE sessions.token_hash = ? AND sessions.expires_at > ? \
+         AND accounts.suspended_at IS NULL",
     )
     .bind(token_digest(token))
     .bind(now)

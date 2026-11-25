@@ -15,6 +15,7 @@ use crate::http::Shared;
 use crate::identity_templates as view;
 use crate::mail::Mail;
 use crate::secrets::{self, random_token, token_digest};
+use crate::source::Source;
 use crate::templates;
 use crate::web::{self, page, refused, unavailable, with_cookies};
 
@@ -148,7 +149,7 @@ pub(crate) fn problem(error: &Error) -> Response {
         ),
         Error::RateLimited => (
             StatusCode::TOO_MANY_REQUESTS,
-            "发送过于频繁，请稍后重试。每个邮箱 1 分钟可申请一次，每小时最多 5 次。",
+            "发送过于频繁，请稍后重试。每个邮箱 1 分钟可申请一次，每小时最多 5 次；同一个网络每小时也最多 5 次。",
         ),
         Error::Profile => (
             StatusCode::BAD_REQUEST,
@@ -181,7 +182,9 @@ async fn request_mail(
         Ok(v) => v,
         Err(e) => return problem(&e),
     };
-    if let Err(error) = identity::reserve_mail(&state.pool, &email).await {
+    // 匿名就能走到这里：除了按邮箱，还按来源限一份，免得有人换着邮箱把全站的额度用光。
+    let source = Source::read(&headers, state.config.client_ip_header.as_ref());
+    if let Err(error) = identity::reserve_mail(&state.pool, &email, &source).await {
         return problem(&error);
     }
     let next = web::safe_next(&form.next).unwrap_or_default().to_owned();
@@ -205,7 +208,8 @@ async fn request_mail(
                 token_digest(&form.username.to_ascii_lowercase())
             );
             let now = std::time::Instant::now();
-            if state.throttle.is_blocked(&key, now) {
+            let source = Source::read(&headers, state.config.client_ip_header.as_ref());
+            if state.throttle.is_blocked(&key, &source, now) {
                 return problem(&Error::RateLimited);
             }
             let account = crate::accounts::find_by_username(&state.pool, form.username.trim())
@@ -224,7 +228,7 @@ async fn request_mail(
             let Some(account) =
                 account.filter(|a| correct && a.password_enabled && a.email.is_none())
             else {
-                state.throttle.record_failure(&key, now);
+                state.throttle.record_failure(&key, &source, now);
                 return sent();
             };
             if existing.is_some() {
@@ -373,7 +377,8 @@ async fn change_email(
     if email == old {
         return refused("新邮箱与当前邮箱相同。");
     }
-    if let Err(error) = identity::reserve_mail(&state.pool, old).await {
+    let source = Source::read(&headers, state.config.client_ip_header.as_ref());
+    if let Err(error) = identity::reserve_mail(&state.pool, old, &source).await {
         return problem(&error);
     }
     let action = Action::new("change_old", email, String::new()).for_account(&account);
@@ -478,7 +483,8 @@ async fn verify_submit(
         Err(e) => return problem(&e),
     };
     if let Some(followup) = complete.followup {
-        if let Err(error) = identity::reserve_mail(&state.pool, &followup.email).await {
+        let source = Source::read(&headers, state.config.client_ip_header.as_ref());
+        if let Err(error) = identity::reserve_mail(&state.pool, &followup.email, &source).await {
             return problem(&error);
         }
         return match send_bound(&state, followup, None).await {

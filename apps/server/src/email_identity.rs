@@ -6,6 +6,7 @@ use sqlx::SqlitePool;
 
 use crate::accounts::{self, AccountRow};
 use crate::secrets::{self, token_digest};
+use crate::source::Source;
 
 pub const LIFETIME_MILLIS: i64 = 15 * 60 * 1000;
 
@@ -107,20 +108,36 @@ impl Action {
     }
 }
 
-/// 每邮箱每分钟一次、每小时五次，服务每小时最多 120 封。失败请求也占额，不能用它探测账号。
-pub async fn reserve_mail(pool: &SqlitePool, email: &str) -> Result<(), Error> {
+/// 来源已知时，同一个来源每小时最多申请这么多封：和一个邮箱自己的上限一样。
+const MAILS_PER_SOURCE_PER_HOUR: i64 = 5;
+
+/// 每邮箱每分钟一次、每小时五次，服务每小时最多 120 封；来源已知的请求，每个来源
+/// 每小时也最多五封。失败请求也占额，不能用它探测账号。
+///
+/// 全站那一项是所有人共用的。只按邮箱计的话，谁换着邮箱提交一百多次，所有人就都收不到
+/// 验证邮件了；所以再按来源分一份，一个来源用不掉别人的份额。来源未知时不设这一项
+/// （见 [`crate::source`]）。限额的键只存摘要：库里不留邮箱和地址本身。
+pub async fn reserve_mail(pool: &SqlitePool, email: &str, source: &Source) -> Result<(), Error> {
     let now = Timestamp::now().as_millis();
     let key = token_digest(email);
+    let mut buckets = vec![
+        (format!("minute:{key}"), 60_000, 1),
+        (format!("hour:{key}"), 3_600_000, 5),
+    ];
+    if !source.is_unknown() {
+        buckets.push((
+            format!("source:{}", token_digest(source.key())),
+            3_600_000,
+            MAILS_PER_SOURCE_PER_HOUR,
+        ));
+    }
+    buckets.push(("global".to_owned(), 3_600_000, 120));
     let mut tx = pool.begin().await?;
     sqlx::query("DELETE FROM email_rate_limits WHERE started_at < ?")
         .bind(now - 3_600_000)
         .execute(&mut *tx)
         .await?;
-    for (bucket, window, limit) in [
-        (format!("minute:{key}"), 60_000, 1),
-        (format!("hour:{key}"), 3_600_000, 5),
-        ("global".to_owned(), 3_600_000, 120),
-    ] {
+    for (bucket, window, limit) in buckets {
         let count: Option<i64> = sqlx::query_scalar(
             "INSERT INTO email_rate_limits (bucket, started_at, requests) VALUES (?, ?, 1) \
              ON CONFLICT(bucket) DO UPDATE SET \

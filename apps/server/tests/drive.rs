@@ -367,6 +367,119 @@ async fn a_file_kept_in_the_drive_and_sent_to_a_device_shares_one_copy() {
     assert_eq!(refcount(&fixture.server, &file.sha256).await, None);
 }
 
+/// 全站的内容总量有上限：每个账户各有各的配额，磁盘却是所有账户共用的一块。
+/// 注册是公开的，只按账户设限，攒起来仍能把服务器写满。
+#[tokio::test]
+async fn the_storage_budget_is_shared_by_every_account_and_by_sends() {
+    let dir = tempfile::tempdir().unwrap();
+    let pool = assemble_server::db::open(dir.path()).await.unwrap();
+    let config = assemble_server::Config::development(dir.path());
+    let config = assemble_server::Config {
+        // 每个账户放得下 1000，全站只放得下 1500。
+        drive_quota_bytes: 1_000,
+        storage_budget_bytes: 1_500,
+        ..config
+    };
+    let server = TestServer::start(config, pool).await.unwrap();
+    for (username, display_name) in [("alex", "Alex Wang"), ("blake", "Blake")] {
+        assemble_server::accounts::create(
+            &server.state.pool,
+            username,
+            display_name,
+            SecretString::new(PASSWORD.to_owned()),
+        )
+        .await
+        .unwrap();
+    }
+    // 登录页只认邮箱：给 alex 补上，替身设备才登得进去。
+    sqlx::query(
+        "UPDATE accounts SET email = 'alex@example.test', email_verified_at = 1 \
+         WHERE username = 'alex'",
+    )
+    .execute(&server.state.pool)
+    .await
+    .unwrap();
+    let fixture = Fixture {
+        dir,
+        browser: Browser::new(server.origin.as_str()),
+        server,
+    };
+    let alex = register(&fixture, 'a', "工作电脑", Platform::Windows).await;
+    let mac = register(&fixture, 'b', "MacBook", Platform::Macos).await;
+    let blake = device_of_another_account(&fixture.server, "blake").await;
+
+    // alex 把自己的配额放满。
+    let big = outgoing(&fixture.dir, "big.bin", &payload(1_000)).await;
+    let kept = alex
+        .drive_upload("big.bin", &big, TransferOptions::new(&alex.cancel), None)
+        .await
+        .unwrap();
+
+    // blake 的云盘是空的，可全站只剩 500 了：600 字节放不下，什么都没留下。
+    let other = outgoing(&fixture.dir, "other.bin", &payload(600)).await;
+    assert_eq!(
+        blake
+            .drive_upload(
+                "other.bin",
+                &other,
+                TransferOptions::new(&blake.cancel),
+                None
+            )
+            .await
+            .unwrap_err(),
+        http(413, "QUOTA_EXCEEDED")
+    );
+    assert_eq!(refcount(&fixture.server, &other.sha256).await, None);
+    assert!(!fixture.server.state.blobs.path_for(&other.sha256).exists());
+
+    // 同一份内容已经在库里，不多占地方：重传进自己的云盘照样可以。
+    let copy = outgoing(&fixture.dir, "copy.bin", &payload(1_000)).await;
+    assert_eq!(copy.sha256, big.sha256);
+    let copied = blake
+        .drive_upload("copy.bin", &copy, TransferOptions::new(&blake.cancel), None)
+        .await
+        .unwrap();
+    assert_eq!(refcount(&fixture.server, &big.sha256).await, Some(2));
+
+    // 发给设备的内容也算在这道闸里：收之前就拒绝，不留暂存文件。
+    let mut mac_events = mac.open_events();
+    wait_devices(&mut mac_events, |devices| {
+        online_of(devices, "MacBook").is_some_and(|device| device.online)
+    })
+    .await;
+    let more = outgoing(&fixture.dir, "more.bin", &payload(600)).await;
+    assert_eq!(
+        alex.send_to_device(
+            &mac.device.id,
+            &more,
+            TransferOptions::new(&alex.cancel),
+            None
+        )
+        .await
+        .unwrap_err(),
+        http(413, "QUOTA_EXCEEDED")
+    );
+    assert_eq!(refcount(&fixture.server, &more.sha256).await, None);
+    assert!(!fixture.server.state.blobs.path_for(&more.sha256).exists());
+
+    // 两个人都删掉之后才腾得出地方：那时 600 字节就放得下了。
+    alex.drive_delete(&kept.id, &alex.options()).await.unwrap();
+    blake
+        .drive_delete(&copied.id, &blake.options())
+        .await
+        .unwrap();
+    assert_eq!(refcount(&fixture.server, &big.sha256).await, None);
+    blake
+        .drive_upload(
+            "other.bin",
+            &other,
+            TransferOptions::new(&blake.cancel),
+            None,
+        )
+        .await
+        .unwrap();
+}
+
 /// 从云盘里取回一个文件的全部内容。
 async fn fetched(pc: &Registered, id: &str) -> Vec<u8> {
     let download = pc

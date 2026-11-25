@@ -763,6 +763,16 @@ async fn every_change_reaches_every_device_of_the_account() {
     let phone = register(&fixture, 'h', "手机", Platform::Windows).await;
     let mut laptop_events = laptop.open_events();
     let mut phone_events = phone.open_events();
+    // 两条事件流都要先在服务端挂上，后面的名单才收得到。刚打开的那一刻未必挂上了：
+    // 机器一忙，建日程就抢在前面，另一台等满五秒什么也等不到（2026-11-25 连跑六轮抓到过一次）。
+    wait_devices(&mut laptop_events, |devices| {
+        online_of(devices, "手机").is_some_and(|device| device.online)
+    })
+    .await;
+    wait_devices(&mut phone_events, |devices| {
+        online_of(devices, "笔记本").is_some_and(|device| device.online)
+    })
+    .await;
 
     let created = laptop
         .create_schedule(&train(), None, &laptop.options())

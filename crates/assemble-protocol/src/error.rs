@@ -20,7 +20,9 @@ pub mod codes {
     pub const FILE_TOO_LARGE: &str = "FILE_TOO_LARGE";
     /// 内容与声明的摘要不一致，或长度与声明的不符。
     pub const HASH_MISMATCH: &str = "HASH_MISMATCH";
-    /// 云盘空间不够。
+    /// 云盘空间不够，或者服务端的内容总量已经到了上限。
+    ///
+    /// 两种情形回答同一个码：对发文件的一方来说下一步是一样的——删掉一些东西再试。
     pub const QUOTA_EXCEEDED: &str = "QUOTA_EXCEEDED";
     /// 一次发送已不在可以执行这个操作的状态（比如已经送达又来拒绝）。
     pub const SEND_STATE_CONFLICT: &str = "SEND_STATE_CONFLICT";
