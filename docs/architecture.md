@@ -336,23 +336,24 @@ target/release/assemble-mcp print-config zcode --name "ZCode 的助手"
 - **命令。** 界面只调用具名命令。原有设备、文件与日程命令包括：`snapshot`、`sign_in`、`cancel_sign_in`、`sign_out`、`launch_at_login`、`set_launch_at_login`、`rename_device`、`remove_device`、`choose_receive_folder`、`reset_receive_folder`、`reveal_received`、`start_send`、`send_to_device`、`send_to_drive`、`close_send_panel`、`open_main`、`cancel_transfer`、`retry_transfer`、`drive_refresh`、`drive_upload`、`drive_download`、`drive_delete`、`set_send_menu`、`dismiss_notice`、`planner_refresh`、`schedule_create`、`schedule_update`、`schedule_complete`、`schedule_cancel`、`schedule_reopen`、`schedule_delete`、`reminder_create`、`reminder_update`、`reminder_dismiss`、`reminder_cancel`、`reminder_delete`、`notifications_read`、`notifications_read_all`、`planner_focus`、`planner_compose`、`set_planner_muted`。影视另有 `media_capabilities`、`media_list`、`media_get`、`media_create`、`media_update`、`media_remove`、`media_search`、`media_catalog`、`media_actor`、`media_import`、`media_job`、`media_gallery`、`media_sync_gallery`、`media_select_poster`、`media_image`、`media_copy_magnet`；其中写入仅支持私人范围。命令失败只返回稳定错误码。
 - **标识，不是操作路径。** 界面引用一条传输、一个云盘文件、一台设备、一条日程、一条提醒、一条通知，用的都是标识。文件的位置由系统选择器、右键菜单或拖放直接交给 Rust；唯一的显示例外是 Windows 的接收目录文字，不能把它传回作为文件操作参数。
 - **助手。** `assemble-mcp` 只有上面那十个具名工具，全部围着日程、提醒与通知；没有文件、云盘，也没有"随便调一个接口"的工具。新增能力时在 `apps/mcp` 里加工具并补测试。它不碰窗口，也不接收文件路径。
-- **凭据。** 设备令牌存在系统钥匙串里，条目名按服务来源区分；助手的登录是另一条条目，账号位是助手的名字，不会顶掉桌面应用的。令牌、Cookie、密码、SMTP 授权码与 OAuth Secret 不进桌面界面、日志、命令返回值与状态；邮件凭据只存摘要，密钥只在受保护环境或文件中；写操作的网页表单都要来自本站，并带着与 Cookie 或会话成对的随机值；`assemble-mcp status` 与工具的返回值里都不出现令牌，它的标准输出上只有协议消息，日志一律写标准错误。桌面端另有一份本机日志文件，写的是和标准错误上同样的行，这一条对它同样成立。
+- **凭据。** 设备令牌存在系统钥匙串里，条目名按服务来源区分；助手的登录是另一条条目，账号位是助手的名字，不会顶掉桌面应用的。令牌、Cookie、密码、SMTP 授权码与 OAuth Secret 不进桌面界面、日志、命令返回值与状态；邮件凭据只存摘要，密钥只在受保护环境或文件中；写操作的网页表单都要来自本站，并带着与 Cookie 或会话成对的随机值；`assemble-mcp status` 与工具的返回值里都不出现令牌，它的标准输出上只有协议消息，日志一律写标准错误。桌面端另有一份本机日志文件，写的是和标准错误上同样的行，这一条对它同样成立。macOS 的钥匙串按程序的签名认人：签名每次构建都变的程序，读以前保存的登录时系统要再问一次用户，所以会读钥匙串的发布构建在这台 Mac 上构建完都自动用本地证书签名。Windows 的凭据管理器不这样认人，那边没有签名。
 - **联网。** 客户端只访问构建时确定的那个来源，不跟随重定向；标识符与路径在拼进请求之前先校验。
 - **文件。** 接收目录只能来自默认位置或系统选择器，必须是真实的目录、不能是整块磁盘；文件名来自网络，收敛成单个在 Windows 上也合法的名字。发布之前再确认一次接收目录还是原来那个——下载途中目录被删、被换成链接，文件都不会落到别处。收到的内容按声明的长度与摘要核对，对不上就不出现。通知与"在文件夹中显示"只选中文件，不打开它。
 - **公开的入口。** 注册公开之后，谁都能访问的几处各有限额，并且都按来源再分一份（见上面"谁都能来的地方，各有一道闸"）。来源只在配置了可信的代理头之后才读，只用于限额；停用账户只在服务器的命令行上做，管理端的网页里没有这个入口。
 
 ## 数据放在哪里
 
-| 内容               | 位置                                                                                                                                                          | 说明                                                                              |
-| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------- |
-| 设备会话与账户     | 系统钥匙串，服务名 `assemble.device-session:<服务来源>`                                                                                                       | 退出登录时删除                                                                    |
-| 桌面端的本机日志   | 系统给应用留的日志目录：macOS 是 `~/Library/Logs/com.puzzlefuzzy.assemble/desktop.log`，Windows 是 `%LOCALAPPDATA%\com.puzzlefuzzy.assemble\logs\desktop.log` | 一兆一份、至多一份旧的；仅本人可读写；写的是和标准错误上同样的行，不含凭据        |
-| 助手的登录         | 系统钥匙串，服务名 `assemble.mcp-session:<服务来源>`，账号位是助手的名字                                                                                      | `assemble-mcp logout` 时删除；在别处被移除之后这条还留着，`status` 如实说它已失效 |
-| 本机设置           | 应用数据目录下的 `settings.json`                                                                                                                              | 接收位置、右键菜单开关、这台电脑弹不弹提醒、已经弹过哪些通知；不随账户变化        |
-| 收到的文件         | "下载/Assemble"，或用户选的文件夹                                                                                                                             | 只在 Rust 里记着完整位置                                                          |
-| 服务端的数据       | 数据目录下的 `assemble.sqlite3` 与 `blobs/`                                                                                                                   | 结构只经迁移脚本改动；影视图片原图/衍生图为 SQLite BLOB，不在 `blobs/`            |
-| 设备令牌（服务端） | 数据库里只存摘要                                                                                                                                              | 密码只以 argon2id 散列保存                                                        |
-| Windows 右键菜单   | `HKCU\Software\Classes\*\shell\AssembleSend`                                                                                                                  | 指向这个可执行文件，不需要管理员权限                                              |
+| 内容                 | 位置                                                                                                                                                          | 说明                                                                              |
+| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------- |
+| 设备会话与账户       | 系统钥匙串，服务名 `assemble.device-session:<服务来源>`                                                                                                       | 退出登录时删除                                                                    |
+| 桌面端的本机日志     | 系统给应用留的日志目录：macOS 是 `~/Library/Logs/com.puzzlefuzzy.assemble/desktop.log`，Windows 是 `%LOCALAPPDATA%\com.puzzlefuzzy.assemble\logs\desktop.log` | 一兆一份、至多一份旧的；仅本人可读写；写的是和标准错误上同样的行，不含凭据        |
+| 助手的登录           | 系统钥匙串，服务名 `assemble.mcp-session:<服务来源>`，账号位是助手的名字                                                                                      | `assemble-mcp logout` 时删除；在别处被移除之后这条还留着，`status` 如实说它已失效 |
+| 开发机的本地签名证书 | 登录钥匙串，名字 `Assemble Local Signing`                                                                                                                     | 自签，只为让钥匙串认得每一次构建；私钥的访问名单里只有 `codesign`                 |
+| 本机设置             | 应用数据目录下的 `settings.json`                                                                                                                              | 接收位置、右键菜单开关、这台电脑弹不弹提醒、已经弹过哪些通知；不随账户变化        |
+| 收到的文件           | "下载/Assemble"，或用户选的文件夹                                                                                                                             | 只在 Rust 里记着完整位置                                                          |
+| 服务端的数据         | 数据目录下的 `assemble.sqlite3` 与 `blobs/`                                                                                                                   | 结构只经迁移脚本改动；影视图片原图/衍生图为 SQLite BLOB，不在 `blobs/`            |
+| 设备令牌（服务端）   | 数据库里只存摘要                                                                                                                                              | 密码只以 argon2id 散列保存                                                        |
+| Windows 右键菜单     | `HKCU\Software\Classes\*\shell\AssembleSend`                                                                                                                  | 指向这个可执行文件，不需要管理员权限                                              |
 
 传输记录只在内存里：应用重启后名单清空，已经落盘的文件留在接收位置。
 
@@ -361,7 +362,7 @@ target/release/assemble-mcp print-config zcode --name "ZCode 的助手"
 - **真实验证只走了一小段。** 服务端、替身设备与桌面端的启动是真实跑过的；正式服务上，你本人已经在两台电脑上登录（2026-11-25），从 Mac 发给 Windows 一个文件并确认收到了，助手也经工具建出过一条日程（2026-11-26）。还没有真人做过的：桌面上的到点提醒（2026-11-27 07:30 是第一次）、反方向和大文件的互传、云盘的上传取回删除、拖放、登录之后的发送面板、托盘菜单、开机启动、退出清理。这些目前只有对着真实服务端跑的自动化测试。逐条见运行手册。
 - **Windows 上只走过开头几步。** 代码第一次在 Windows 上编译、检查与测试是持续集成的 Windows 那一栏跑起来的（2026-11-24）；2026-11-25 在真机上装好并显示了主窗口，单实例通过，右键菜单点了能唤起应用（没登录时提示先登录），并收到了 Mac 发来的文件。托盘菜单、通知、拖放、开机启动、退出清理，都还没有在 Windows 桌面上试过。
 - **收到的文件只有本人可读写。** 暂存文件以 `0600` 建立，发布用的是硬链接，所以落到"下载/Assemble"里的文件也是 `0600`，而浏览器下载的文件一般是 `0644`。在只有一个人用的电脑上没有差别；接收位置如果是和别人共用的文件夹，别人就读不了。Windows 不看这几个权限位。要不要改成跟随系统的默认权限，待定。
-- **签名与分发没有做。** 持续集成能打出不带签名的安装包，两个平台的都成功过多次。没有签名、公证与自动更新。
+- **签名与分发没有做。** 持续集成能打出不带签名的安装包，两个平台的都成功过多次。没有签名、公证与自动更新。开发机上另有一张本地的自签证书，`bun run build`、`bun run mcp` 与 `bun run browser:host` 构建完会自动用它签名（钥匙串里有才签）：它只为了让系统钥匙串认得每一次构建，不是分发用的，见运行手册"本地签名"。
 - **云盘是平铺的一层。** 没有文件夹；改名只有接口，桌面端没有入口。
 - **收到的文件自动收下，不先询问。** 服务端支持拒收，桌面端没有拒收的按钮。
 - **单文件 100 MB 以内，不支持文件夹，没有断点续传。** 中断了从头再来。

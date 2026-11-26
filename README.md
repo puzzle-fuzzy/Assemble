@@ -56,6 +56,7 @@ bun run browser:host  # 单独构建本机 Chrome 连接宿主；登记步骤见
 
 bun run media:dev    # 影视展示站开发页面：127.0.0.1:1422/movies/，复用本地服务端
 bun run mcp          # 构建给助手用的入口 target/release/assemble-mcp，连正式服务
+bun run sign:mac     # macOS 上用本地自签证书给刚构建的程序签名；build、mcp、browser:host 构建完会自动接着做
 ```
 
 `bun run acceptance` 启动前先按[账户配置手册](docs/runbooks/email-and-github.md)设置本机 SMTP；第一次运行时让你给本机账户 `dev` 设一个密码，再由本人在浏览器里补绑、验证邮箱，然后启动桌面应用；要你亲手做的只有三件：在应用里登录、往回发一个文件、从菜单栏退出。其余的——起服务端、让一台叫"工作电脑"的替身设备发文件、核对落盘的摘要与回执——都由它做。用完 `bun run acceptance stop` 收摊。只起其中一样、或者主流程之外的不顺利情况怎么试，见[运行手册](docs/runbooks/verify-macos-launch.md)。
