@@ -711,7 +711,7 @@ async fn settle(
                 &row.account_id,
                 &NewDevice {
                     name: row.device_name.clone().unwrap_or_default(),
-                    platform: Platform::Iphone,
+                    platform: Platform::Ios,
                 },
                 &token_digest(token.expose()),
             )

@@ -207,7 +207,7 @@ async fn a_phone_that_the_owner_allows_is_signed_in_and_joins_the_account() {
     let finished = body(finished).await;
     assert_eq!(finished["state"], "complete");
     assert_eq!(finished["account"]["username"], USERNAME);
-    assert_eq!(finished["device"]["platform"], "iphone");
+    assert_eq!(finished["device"]["platform"], "ios");
     assert_eq!(finished["device"]["name"], PHONE_NAME);
     let token = finished["token"].as_str().unwrap();
     assert_eq!(token.len(), 43);
@@ -229,7 +229,7 @@ async fn a_phone_that_the_owner_allows_is_signed_in_and_joins_the_account() {
         .iter()
         .find(|device| device.name == PHONE_NAME)
         .expect("the phone is listed");
-    assert_eq!(listed.platform, Platform::Iphone);
+    assert_eq!(listed.platform, Platform::Ios);
     assert_eq!(listed.id, finished["device"]["id"].as_str().unwrap());
 
     // 这张票据到此为止。

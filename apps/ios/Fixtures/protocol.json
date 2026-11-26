@@ -33,10 +33,10 @@
     },
     {
       "createdAt": "2026-11-11T12:26:40.000Z",
-      "id": "device-Iphone",
+      "id": "device-Ios",
       "name": "我的 iPhone",
       "online": false,
-      "platform": "iphone"
+      "platform": "ios"
     },
     {
       "createdAt": "2026-11-11T12:26:40.000Z",
@@ -104,10 +104,10 @@
     },
     "device": {
       "createdAt": "2026-11-11T12:26:40.000Z",
-      "id": "device-Iphone",
+      "id": "device-Ios",
       "name": "我的 iPhone",
       "online": false,
-      "platform": "iphone"
+      "platform": "ios"
     }
   },
   "pairingClaim": {
@@ -135,10 +135,10 @@
       },
       "device": {
         "createdAt": "2026-11-11T12:26:40.000Z",
-        "id": "device-Iphone",
+        "id": "device-Ios",
         "name": "我的 iPhone",
         "online": false,
-        "platform": "iphone"
+        "platform": "ios"
       },
       "state": "complete",
       "token": "ttttttttttttttttttttttttttttttttttttttttttt"

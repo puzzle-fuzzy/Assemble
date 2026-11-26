@@ -36,7 +36,7 @@ pub(crate) fn platform_from(stored: &str) -> Platform {
         "windows" => Platform::Windows,
         "macos" => Platform::Macos,
         "linux" => Platform::Linux,
-        "iphone" => Platform::Iphone,
+        "ios" => Platform::Ios,
         other => {
             tracing::warn!(
                 platform = other,
@@ -520,7 +520,7 @@ mod tests {
         assert_eq!(platform_from("windows"), Platform::Windows);
         assert_eq!(platform_from("macos"), Platform::Macos);
         assert_eq!(platform_from("linux"), Platform::Linux);
-        assert_eq!(platform_from("iphone"), Platform::Iphone);
+        assert_eq!(platform_from("ios"), Platform::Ios);
         // 这里的值可以是更新版本的服务端写进去的：读成兜底的那一个，不报错。
         assert_eq!(platform_from("darwin"), Platform::Other);
         assert_eq!(platform_from(""), Platform::Other);

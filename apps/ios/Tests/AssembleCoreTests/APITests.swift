@@ -128,7 +128,7 @@ struct APITests {
             .json(200, String(data: try! JSONEncoder().encode(Fixtures.wire.me), encoding: .utf8)!)
         }
         let me = try await api.me()
-        #expect(me.device.platform == .iphone)
+        #expect(me.device.platform == .ios)
         let request = try #require(StubServer.last())
         #expect(request.headers["Authorization"] == "Bearer \(token)")
         #expect(request.headers["Accept"] == "application/json")

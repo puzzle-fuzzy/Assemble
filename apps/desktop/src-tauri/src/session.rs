@@ -123,7 +123,7 @@ pub fn device_name_from_host(host: Option<&str>, platform: Platform) -> String {
             Platform::Windows => "Windows 电脑".to_owned(),
             Platform::Macos => "Mac".to_owned(),
             Platform::Linux => "Linux 电脑".to_owned(),
-            Platform::Iphone => "iPhone".to_owned(),
+            Platform::Ios => "iPhone".to_owned(),
             Platform::Other => "设备".to_owned(),
         };
     }

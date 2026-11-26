@@ -40,7 +40,7 @@ fn account() -> Account {
 
 fn device(platform: Platform, online: bool, last_seen: Option<i64>) -> Device {
     let name = match platform {
-        Platform::Iphone => "我的 iPhone",
+        Platform::Ios => "我的 iPhone",
         Platform::Other => "将来的设备",
         _ => "工作电脑",
     };
@@ -55,7 +55,7 @@ fn device(platform: Platform, online: bool, last_seen: Option<i64>) -> Device {
 }
 
 fn phone() -> Device {
-    device(Platform::Iphone, false, None)
+    device(Platform::Ios, false, None)
 }
 
 fn content(

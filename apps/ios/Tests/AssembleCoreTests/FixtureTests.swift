@@ -49,10 +49,10 @@ struct FixtureTests {
         let fixture = Fixtures.wire
         #expect(fixture.account.username == "烟熏三文鱼")
         #expect(fixture.account.avatarUrl?.hasPrefix("https://avatars.githubusercontent.com/") == true)
-        #expect(fixture.devices.map(\.platform) == [.windows, .macos, .linux, .iphone, .other])
+        #expect(fixture.devices.map(\.platform) == [.windows, .macos, .linux, .ios, .other])
         #expect(fixture.devices[0].lastSeenAt?.millis == 1_794_390_000_000)
         #expect(fixture.devices[3].lastSeenAt == nil)
-        #expect(fixture.me.device.platform == .iphone)
+        #expect(fixture.me.device.platform == .ios)
 
         #expect(fixture.pairingClaimed.confirmationCode == "004757")
         #expect(fixture.pairingOutcomes.pending.state == .pending)

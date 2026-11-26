@@ -50,7 +50,7 @@ export interface AdminDevice {
   accountDisplayName: string;
   accountEmail: string | null;
   name: string;
-  platform: "windows" | "macos" | "linux" | "iphone" | "other";
+  platform: "windows" | "macos" | "linux" | "ios" | "other";
   online: boolean;
   createdAt: string;
   lastSeenAt: string | null;

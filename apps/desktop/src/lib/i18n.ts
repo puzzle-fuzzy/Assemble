@@ -26,7 +26,7 @@ export function platformName(platform: Platform): string {
       return "Mac";
     case "linux":
       return "Linux";
-    case "iphone":
+    case "ios":
       return "iPhone";
     case "other":
       return uiText("platformOther");

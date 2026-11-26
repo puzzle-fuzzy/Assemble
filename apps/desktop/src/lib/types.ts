@@ -4,8 +4,8 @@
 // Rust 在测试里把同一样本读进来再原样写出去。任何一边改了形状，测试都会失败。
 // 凭据与系统诊断不在这里出现；Windows 接收目录仅作为只读展示文字给出。
 
-/** 设备运行的平台，与服务端的拼法一致。手机应用是 `iphone`；服务端这一版不认识的值归成 `other`。 */
-export type Platform = "windows" | "macos" | "linux" | "iphone" | "other";
+/** 设备运行的平台，与服务端的拼法一致。手机应用是 `ios`（按操作系统命名）；服务端这一版不认识的值归成 `other`。 */
+export type Platform = "windows" | "macos" | "linux" | "ios" | "other";
 
 export interface AccountView {
   id: string;

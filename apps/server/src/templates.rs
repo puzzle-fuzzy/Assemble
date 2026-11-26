@@ -456,7 +456,7 @@ pub fn platform_label(platform: assemble_protocol::primitives::Platform) -> &'st
         Platform::Windows => "Windows",
         Platform::Macos => "Mac",
         Platform::Linux => "Linux",
-        Platform::Iphone => "iPhone",
+        Platform::Ios => "iPhone",
         Platform::Other => "未知平台",
     }
 }
@@ -597,7 +597,7 @@ mod tests {
         assert_eq!(platform_label(Platform::Windows), "Windows");
         assert_eq!(platform_label(Platform::Macos), "Mac");
         assert_eq!(platform_label(Platform::Linux), "Linux");
-        assert_eq!(platform_label(Platform::Iphone), "iPhone");
+        assert_eq!(platform_label(Platform::Ios), "iPhone");
         assert_eq!(platform_label(Platform::Other), "未知平台");
     }
 }

@@ -8,7 +8,7 @@ public enum Platform: String, Codable, Hashable, Sendable {
     case windows
     case macos
     case linux
-    case iphone
+    case ios
     case other
 
     public init(from decoder: Decoder) throws {

@@ -161,7 +161,7 @@
     "windows": "Windows",
     "macos": "macOS",
     "linux": "Linux",
-    "iphone": "iPhone",
+    "ios": "iOS",
     "other": "其他"
   },
   "loginMethod": {

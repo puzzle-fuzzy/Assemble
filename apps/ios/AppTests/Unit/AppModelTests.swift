@@ -159,7 +159,7 @@ struct AppModelTests {
         )
     }
 
-    nonisolated static let sessionJSON = #"{"state":"complete","account":{"id":"u1","username":"alex","displayName":"Alex","email":null,"avatarUrl":null,"createdAt":"2026-11-11T12:26:40.123Z"},"device":{"id":"d1","name":"测试的手机","platform":"iphone","online":false,"createdAt":"2026-11-11T12:26:40.123Z"},"token":"\#(String(repeating: "t", count: 43))"}"#
+    nonisolated static let sessionJSON = #"{"state":"complete","account":{"id":"u1","username":"alex","displayName":"Alex","email":null,"avatarUrl":null,"createdAt":"2026-11-11T12:26:40.123Z"},"device":{"id":"d1","name":"测试的手机","platform":"ios","online":false,"createdAt":"2026-11-11T12:26:40.123Z"},"token":"\#(String(repeating: "t", count: 43))"}"#
 
     @Test
     func scanningTheCodeSignsThePhoneInOnceTheOwnerAllows() async throws {

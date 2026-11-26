@@ -22,15 +22,15 @@ fn http(status: u16, code: &str) -> assemble_client::ClientError {
 async fn a_phone_signs_in_the_same_way_as_a_computer_and_joins_the_account() {
     let fixture = fixture().await;
     let mac = register(&fixture, 'm', "MacBook", Platform::Macos).await;
-    let phone = register(&fixture, 'h', "我的 iPhone", Platform::Iphone).await;
+    let phone = register(&fixture, 'h', "我的 iPhone", Platform::Ios).await;
 
-    assert_eq!(phone.device.platform, Platform::Iphone);
+    assert_eq!(phone.device.platform, Platform::Ios);
     let devices = mac.devices(&mac.options()).await.unwrap();
     let listed = devices
         .iter()
         .find(|device| device.id == phone.device.id)
         .expect("the phone is in the account's device list");
-    assert_eq!(listed.platform, Platform::Iphone);
+    assert_eq!(listed.platform, Platform::Ios);
     // 手机第一期不开事件流：在名单里是离线的。
     assert!(!listed.online);
 }
@@ -40,7 +40,7 @@ async fn the_authorize_page_names_the_platform_that_is_asking_to_sign_in() {
     let fixture = fixture().await;
     log_in(&fixture.browser).await;
 
-    let (request, _verifier) = desktop_request('h', "我的 iPhone", Platform::Iphone);
+    let (request, _verifier) = desktop_request('h', "我的 iPhone", Platform::Ios);
     let page = send(
         fixture
             .browser
@@ -67,7 +67,7 @@ async fn the_authorize_page_names_the_platform_that_is_asking_to_sign_in() {
 async fn a_file_cannot_be_sent_to_a_phone() {
     let fixture = fixture().await;
     let pc = register(&fixture, 'p', "工作电脑", Platform::Windows).await;
-    let phone = register(&fixture, 'h', "我的 iPhone", Platform::Iphone).await;
+    let phone = register(&fixture, 'h', "我的 iPhone", Platform::Ios).await;
     let path = fixture.dir.path().join("合同.pdf");
     tokio::fs::write(&path, b"a contract").await.unwrap();
     let file = OutgoingFile::open(&path, &CancellationToken::new())

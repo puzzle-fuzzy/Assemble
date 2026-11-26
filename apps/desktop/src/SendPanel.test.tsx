@@ -132,7 +132,7 @@ describe("发送面板", () => {
           {
             id: "device-4",
             name: "我的 iPhone",
-            platform: "iphone",
+            platform: "ios",
             online: false,
           },
           {

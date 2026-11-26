@@ -43,7 +43,7 @@ pub fn is_text(value: &str, max_units: usize) -> bool {
     !value.trim().is_empty() && value.encode_utf16().count() <= max_units
 }
 
-/// 一台设备运行的平台。桌面端是前三种，手机应用是 `Iphone`。
+/// 一台设备运行的平台。桌面端是前三种，手机应用是 `Ios`：按操作系统命名，线上的值是 `ios`，和 `apps/ios`、将来的 `apps/android` 对齐。
 ///
 /// `Other` 是读的时候的兜底：库里或请求里出现这一版代码还不认识的平台，落进它，
 /// 设备名单照常读得出来。没有这一条，一个新平台会让所有旧版应用读不了设备名单。
@@ -53,7 +53,7 @@ pub enum Platform {
     Windows,
     Macos,
     Linux,
-    Iphone,
+    Ios,
     #[serde(other)]
     Other,
 }
@@ -64,7 +64,7 @@ impl Platform {
             Self::Windows => "windows",
             Self::Macos => "macos",
             Self::Linux => "linux",
-            Self::Iphone => "iphone",
+            Self::Ios => "ios",
             Self::Other => "other",
         }
     }
@@ -201,7 +201,7 @@ mod tests {
             (Platform::Windows, "\"windows\""),
             (Platform::Macos, "\"macos\""),
             (Platform::Linux, "\"linux\""),
-            (Platform::Iphone, "\"iphone\""),
+            (Platform::Ios, "\"ios\""),
             (Platform::Other, "\"other\""),
         ] {
             assert_eq!(serde_json::to_string(&platform).unwrap(), spelling);
@@ -233,7 +233,7 @@ mod tests {
         assert!(Platform::Windows.can_receive_files());
         assert!(Platform::Macos.can_receive_files());
         assert!(Platform::Linux.can_receive_files());
-        assert!(!Platform::Iphone.can_receive_files());
+        assert!(!Platform::Ios.can_receive_files());
         assert!(!Platform::Other.can_receive_files());
     }
 

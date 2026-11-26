@@ -42,7 +42,7 @@ export function isPlatform(value: unknown): value is Platform {
     value === "windows" ||
     value === "macos" ||
     value === "linux" ||
-    value === "iphone" ||
+    value === "ios" ||
     value === "other"
   );
 }

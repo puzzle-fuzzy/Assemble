@@ -237,7 +237,7 @@ mod tests {
             device: Some(Device {
                 id: "d".to_owned(),
                 name: "我的 iPhone".to_owned(),
-                platform: Platform::Iphone,
+                platform: Platform::Ios,
                 online: false,
                 last_seen_at: None,
                 created_at: Timestamp::from_millis(0).unwrap(),
