@@ -19,7 +19,8 @@
     "**/.biome-verification.local.json": true,
     "**/scripts": true,
     "**/deploy": true,
-    "**/data": true
+    "**/data": true,
+    "**/.artifacts": true
   },
   "editor.cursorSmoothCaretAnimation": "on",
   "workbench.tree.indent": 10,
