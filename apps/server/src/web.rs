@@ -148,6 +148,7 @@ impl Default for LoginThrottle {
 
 pub fn routes() -> axum::Router<Shared> {
     axum::Router::new()
+        .merge(crate::web_ui::routes())
         .route(LOGIN_PATH, get(login_form).post(login_submit))
         .route(LOGOUT_PATH, post(logout))
 }

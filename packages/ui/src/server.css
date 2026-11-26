@@ -1,0 +1,10 @@
+@import "./styles.css";
+@source "../../../apps/server/src/templates.rs";
+@source "../../../apps/server/src/identity_templates.rs";
+
+/* 原生服务端页面也能保持链接可辨识，不依赖脚本给表单绑定行为。 */
+@layer base {
+  a:not([data-slot="button"]) {
+    @apply underline-offset-4 hover:underline;
+  }
+}

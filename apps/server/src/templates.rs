@@ -1,37 +1,23 @@
 //! 服务端渲染的页面：登录、注册、授权确认、账户、一句话的结果。
 //!
 //! 没有模板引擎，也没有前端框架：都是 Rust 里的字符串，动态内容一律经过 [`escape`]。
-//! 样式只有一段固定的 CSS，用它的内容哈希放进内容安全策略，不开 `unsafe-inline`；
-//! 页面里没有脚本。
+//! 共享组件在 Bun 构建时导出静态属性与样式；动态内容仍只在 Rust 侧转义、提交。
+//! 样式的内容哈希进入 CSP，不开 `unsafe-inline`；仅邮箱验证页保留既有的本站脚本。
 
 use std::borrow::Cow;
 use std::sync::LazyLock;
 
+use crate::web_ui::{STYLE, attrs};
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD as BASE64;
 use sha2::{Digest, Sha256};
-
-const STYLE: &str = r#":root{color-scheme:light dark;font:16px/1.6 system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif}
-body{margin:0;min-height:100vh;display:grid;place-items:center;background:light-dark(#f6f6f7,#141416);color:light-dark(#1b1b1f,#ededf0)}
-main{box-sizing:border-box;width:min(26rem,calc(100vw - 2rem));padding:1.75rem;border:1px solid light-dark(#dcdce1,#2c2c33);border-radius:14px;background:light-dark(#fff,#1c1c21)}
-h1{margin:0 0 .5rem;font-size:1.25rem;line-height:1.3}
-p{margin:.5rem 0}
-.error{color:light-dark(#a51f24,#ff8a8f)}
-.hint{color:light-dark(#66666f,#a0a0aa);font-size:.875rem}
-label{display:block;margin:.9rem 0 0;font-size:.875rem}
-input:not([type=hidden]){display:block;box-sizing:border-box;width:100%;margin-top:.3rem;padding:.55rem .7rem;border:1px solid light-dark(#b9b9c2,#46464f);border-radius:8px;background:light-dark(#fff,#141416);color:inherit;font:inherit}
-button{margin:1.25rem .6rem 0 0;padding:.55rem 1.1rem;border:0;border-radius:8px;background:light-dark(#1f5fd0,#5b8ff5);color:#fff;font:inherit;cursor:pointer}
-button.secondary{background:light-dark(#e8e8ec,#2c2c33);color:inherit}
-.avatar{display:inline-grid;place-items:center;width:48px;height:48px;border-radius:50%;object-fit:cover;background:light-dark(#e8e8ec,#2c2c33);font-size:1.25rem}
-h2{font-size:1rem;margin:1.5rem 0 .5rem}
-a{color:light-dark(#1f5fd0,#5b8ff5)}"#;
 
 /// 一份内容安全策略：什么都不加载，样式只认上面那一段的哈希，不许嵌进别的页面；
 /// 表单能去哪里由 `form_action` 决定。
 fn policy(form_action: &str) -> String {
     let digest = BASE64.encode(Sha256::digest(STYLE.as_bytes()));
     format!(
-        "default-src 'none'; style-src 'sha256-{digest}'; {form_action}; base-uri 'none'; frame-ancestors 'none'; img-src https://avatars.githubusercontent.com"
+        "default-src 'none'; style-src 'sha256-{digest}'; {form_action}; base-uri 'none'; frame-ancestors 'none'; img-src https://avatars.githubusercontent.com; font-src 'self'"
     )
 }
 
@@ -91,14 +77,23 @@ pub fn escape(value: &str) -> Cow<'_, str> {
     }
 }
 
-pub(crate) fn page(title: &str, body: &str) -> String {
+pub(crate) fn page(title: &str, heading: &str, body: &str) -> String {
     format!(
         "<!doctype html><html lang=\"zh-CN\"><head><meta charset=\"utf-8\">\
 <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\
 <meta name=\"referrer\" content=\"{}\">\
-<title>{}</title><style>{STYLE}</style></head><body><main>{}</main></body></html>",
+<meta name=\"color-scheme\" content=\"light dark\">\
+<title>{}</title><style>{STYLE}</style></head><body class=\"min-h-svh bg-muted/40\">\
+<div class=\"mx-auto flex min-h-svh w-full max-w-md flex-col justify-center gap-6 p-4 sm:py-12\">\
+<header class=\"flex items-center justify-center gap-2 font-medium\"><span aria-hidden=\"true\" class=\"flex size-8 items-center justify-center rounded-lg bg-primary text-sm text-primary-foreground\">A</span>Assemble</header>\
+<main {}><div {}><div {}><h1>{}</h1></div></div><div {}>{}</div></main></div></body></html>",
         REFERRER_POLICY,
         escape(title),
+        attrs("card"),
+        attrs("header"),
+        attrs("title"),
+        escape(heading),
+        attrs("content"),
         body
     )
 }
@@ -107,7 +102,11 @@ pub(crate) fn page(title: &str, body: &str) -> String {
 pub fn message_page(title: &str, body: &str) -> String {
     page(
         title,
-        &format!("<h1>{}</h1><p>{}</p>", escape(title), escape(body)),
+        title,
+        &format!(
+            "<p class=\"text-sm text-muted-foreground\">{}</p>",
+            escape(body)
+        ),
     )
 }
 
@@ -115,7 +114,16 @@ pub fn message_page(title: &str, body: &str) -> String {
 pub fn signed_out_page() -> String {
     page(
         "已退出 · Assemble",
-        "<h1>已退出</h1><p>你已退出当前网页账户。</p><p><a href=\"/web/login?next=%2Fweb%2Faccount\">重新登录账户</a></p><p><a href=\"/web/login?next=%2Fadmin%2F\">登录管理控制台</a></p>",
+        "已退出",
+        &format!(
+            "<p class=\"text-sm text-muted-foreground\">你已退出当前网页账户。</p>{}{}",
+            link_button("重新登录账户", "/web/login?next=%2Fweb%2Faccount", "submit"),
+            link_button(
+                "登录管理控制台",
+                "/web/login?next=%2Fadmin%2F",
+                "outline_full"
+            )
+        ),
     )
 }
 
@@ -133,9 +141,56 @@ pub(crate) fn carry_next(link: &str, next: &str) -> String {
 
 pub(crate) fn alert(error: Option<&str>) -> String {
     match error {
-        Some(error) => format!("<p class=\"error\" role=\"alert\">{}</p>", escape(error)),
+        Some(error) => format!(
+            "<div {}><div {}>{}</div></div>",
+            attrs("alert"),
+            attrs("alert_description"),
+            escape(error)
+        ),
         None => String::new(),
     }
+}
+
+pub(crate) fn field(id: &str, label: &str, attributes: &str) -> String {
+    format!(
+        "<div {}><label for=\"{}\" {}>{}</label><input id=\"{}\" {} {attributes}></div>",
+        attrs("field"),
+        escape(id),
+        attrs("label"),
+        escape(label),
+        escape(id),
+        attrs("input")
+    )
+}
+
+pub(crate) fn button(label: &str, variant: &str, attributes: &str) -> String {
+    format!(
+        "<button {} {attributes}>{}</button>",
+        attrs(variant),
+        escape(label)
+    )
+}
+
+pub(crate) fn link_button(label: &str, href: &str, variant: &str) -> String {
+    format!(
+        "<a href=\"{}\" {}>{}</a>",
+        escape(href),
+        attrs(variant),
+        escape(label)
+    )
+}
+
+pub(crate) fn fields(content: &str) -> String {
+    format!("<div {}>{content}</div>", attrs("group"))
+}
+
+pub(crate) fn status(message: &str) -> String {
+    format!(
+        "<div {}><div {}>{}</div></div>",
+        attrs("status"),
+        attrs("alert_description"),
+        escape(message)
+    )
 }
 
 /// 邮箱登录始终提供公开注册；GitHub 入口只在凭据配置完整后显示。
@@ -145,26 +200,46 @@ pub fn login_page(error: Option<&str>, next: &str, csrf: &str, github_enabled: b
         (
             "登录管理控制台 · Assemble",
             "登录管理控制台",
-            "<p class=\"hint\">请使用已获授权的超级管理员账户。登录后会直接进入网页管理控制台。</p>",
+            "<p class=\"text-sm text-muted-foreground\">请使用已获授权的超级管理员账户。登录后会直接进入网页管理控制台。</p>",
         )
     } else {
-        ("登录 · Assemble", "登录 Assemble", "")
+        ("登录 · Assemble", "登录", "")
     };
     let github = if github_enabled {
         format!(
-            "<p><a href=\"{}\">使用 GitHub 登录</a></p>",
-            escape(&carry_next("/web/github/start", next))
+            "<div {}></div>{}",
+            attrs("separator"),
+            link_button(
+                "使用 GitHub 登录",
+                &carry_next("/web/github/start", next),
+                "outline_full"
+            )
         )
     } else {
         String::new()
     };
     page(
         title,
+        heading,
         &format!(
-            "<h1>{heading}</h1>{hint}{}<form method=\"post\" action=\"/web/login\"><input type=\"hidden\" name=\"csrf\" value=\"{}\"><input type=\"hidden\" name=\"next\" value=\"{}\"><label for=\"email\">邮箱</label><input id=\"email\" type=\"email\" name=\"email\" autocomplete=\"username\" spellcheck=\"false\" maxlength=\"254\" required><label for=\"password\">密码</label><input id=\"password\" type=\"password\" name=\"password\" autocomplete=\"current-password\" maxlength=\"1024\" required><button type=\"submit\">登录</button></form>{}<p><a href=\"{}\">注册账户</a> · <a href=\"{}\">忘记密码</a></p><p class=\"hint\">原来使用用户名登录？<a href=\"{}\">为旧账户绑定邮箱</a></p>",
+            "{hint}{}<form method=\"post\" action=\"/web/login\" class=\"flex flex-col gap-6\"><input type=\"hidden\" name=\"csrf\" value=\"{}\"><input type=\"hidden\" name=\"next\" value=\"{}\">{}{}</form>{}<p class=\"flex flex-wrap justify-center gap-x-4 gap-y-2 text-sm\"><a href=\"{}\">注册账户</a><a href=\"{}\">忘记密码</a></p><p class=\"text-center text-xs text-muted-foreground\"><a href=\"{}\">为旧账户绑定邮箱</a></p>",
             alert(error),
             escape(csrf),
             escape(next),
+            fields(&format!(
+                "{}{}",
+                field(
+                    "email",
+                    "邮箱",
+                    "type=\"email\" name=\"email\" autocomplete=\"username\" autocapitalize=\"none\" spellcheck=\"false\" maxlength=\"254\" required"
+                ),
+                field(
+                    "password",
+                    "密码",
+                    "type=\"password\" name=\"password\" autocomplete=\"current-password\" maxlength=\"1024\" required"
+                )
+            )),
+            button("登录", "submit", "type=\"submit\""),
             github,
             escape(&carry_next("/web/register", next)),
             escape(&carry_next("/web/forgot", next)),
@@ -183,21 +258,33 @@ pub fn authorize_page(
 ) -> String {
     page(
         "确认登录 · Assemble",
+        "确认登录",
         &format!(
-            "<h1>登录 Assemble</h1>\
-<p>当前登录：<strong>{}</strong></p>\
-<p><strong>{}</strong>（{}）想以你账户里一台设备的身份登录：收发文件、使用云盘、管理日程与提醒。</p>\
-<form method=\"post\" action=\"/desktop/authorize\">\
+            "<dl class=\"flex flex-col gap-3 rounded-lg border bg-muted/30 p-4 text-sm\">\
+<div class=\"flex flex-col gap-1\"><dt class=\"text-muted-foreground\">当前登录</dt><dd class=\"break-words font-medium\">{}</dd></div>\
+<div class=\"flex flex-col gap-1\"><dt class=\"text-muted-foreground\">设备</dt><dd class=\"break-words font-medium\">{}</dd></div>\
+<div class=\"flex items-center justify-between gap-3\"><dt class=\"text-muted-foreground\">系统</dt><dd>{}</dd></div></dl>\
+<p class=\"text-sm text-muted-foreground\">这台设备将能收发文件、使用云盘、管理日程与提醒。</p>\
+<form method=\"post\" action=\"/desktop/authorize\" class=\"flex gap-2\">\
 <input type=\"hidden\" name=\"csrf\" value=\"{}\">\
 <input type=\"hidden\" name=\"request\" value=\"{}\">\
-<button type=\"submit\" name=\"choice\" value=\"allow\">确认登录</button>\
-<button type=\"submit\" name=\"choice\" value=\"deny\" class=\"secondary\">取消</button></form>\
-<p class=\"hint\">不是你本人在操作的话，请点\"取消\"。</p>",
+<div class=\"min-w-0 flex-1\">{}</div><div class=\"min-w-0 flex-1\">{}</div></form>\
+<p class=\"text-sm text-muted-foreground\">不是你本人在操作的话，请点\"取消\"。</p>",
             escape(account),
             escape(device_name),
             escape(platform_label),
             escape(csrf),
-            escape(request)
+            escape(request),
+            button(
+                "确认登录",
+                "submit",
+                "type=\"submit\" name=\"choice\" value=\"allow\""
+            ),
+            button(
+                "取消",
+                "outline_full",
+                "type=\"submit\" name=\"choice\" value=\"deny\""
+            )
         ),
     )
 }
@@ -307,7 +394,9 @@ mod tests {
     #[test]
     fn message_pages_and_platform_labels_read_well() {
         let html = message_page("已退出", "可以关闭此页面。");
-        assert!(html.contains("<h1>已退出</h1><p>可以关闭此页面。</p>"));
+        assert!(html.contains("<h1>已退出</h1>"));
+        assert!(html.contains(">可以关闭此页面。</p>"));
+        assert!(html.contains("data-slot=\"card\""));
         assert_eq!(platform_label(Platform::Windows), "Windows");
         assert_eq!(platform_label(Platform::Macos), "Mac");
         assert_eq!(platform_label(Platform::Linux), "Linux");

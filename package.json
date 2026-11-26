@@ -33,6 +33,8 @@
     "rust:clippy:windows": "cargo clippy -p assemble-protocol -p assemble-transfer -p assemble-store -p assemble-device -p assemble-schedule --target x86_64-pc-windows-msvc --all-targets -- -D warnings",
     "verify": "bun scripts/verify/run.ts",
     "admin:dev": "bun run --filter @assemble/admin dev",
+    "ui:server": "bun run --filter @assemble/ui build:server",
+    "ui:server:check": "bun run --filter @assemble/ui check:server",
     "admin:build": "bun run --filter @assemble/admin build",
     "media:dev": "bun run --filter @assemble/media-web dev",
     "media:build": "bun run --filter @assemble/media-web build",

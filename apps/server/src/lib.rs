@@ -37,6 +37,7 @@ pub mod sends;
 pub mod source;
 pub mod templates;
 pub mod web;
+mod web_ui;
 
 use std::io::BufRead;
 use std::sync::Arc;

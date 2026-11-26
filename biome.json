@@ -11,7 +11,8 @@
       "!.artifacts",
       "!data/local",
       "!data/runtime",
-      "!apps/desktop/src-tauri"
+      "!apps/desktop/src-tauri",
+      "!apps/server/src/web_ui/generated"
     ]
   },
   "formatter": { "enabled": true, "indentStyle": "space", "indentWidth": 2 },

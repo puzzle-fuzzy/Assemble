@@ -19,5 +19,5 @@
       "@assemble/ui/hooks/*": ["./src/hooks/*"]
     }
   },
-  "include": ["src"]
+  "include": ["src", "scripts"]
 }

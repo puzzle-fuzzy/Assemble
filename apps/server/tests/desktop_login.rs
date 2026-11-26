@@ -406,11 +406,8 @@ async fn the_authorize_page_needs_a_login_and_names_the_device() {
     log_in(&fixture.browser).await;
     let page = send(fixture.browser.get(&path)).await;
     assert_eq!(page.status, StatusCode::OK);
-    assert!(
-        page.html.contains("<strong>工作电脑</strong>"),
-        "the device name"
-    );
-    assert!(page.html.contains("（Windows）"));
+    assert!(page.html.contains(">工作电脑</dd>"), "the device name");
+    assert!(page.html.contains(">Windows</dd>"));
     assert!(page.html.contains("Alex Wang（alex@example.test）"));
     assert!(page.html.contains("name=\"choice\" value=\"allow\""));
     assert!(page.html.contains("name=\"choice\" value=\"deny\""));

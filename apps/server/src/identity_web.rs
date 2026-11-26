@@ -513,9 +513,10 @@ async fn verify_submit(
             StatusCode::OK,
             templates::page(
                 "密码已更新",
+                "密码已更新",
                 &format!(
-                    "<h1>密码已更新</h1><p>其他网页登录状态已退出，请使用新密码重新登录。</p><p><a href=\"{}\">重新登录</a></p>",
-                    templates::escape(&login)
+                    "<p class=\"text-sm text-muted-foreground\">其他网页登录状态已退出，请使用新密码重新登录。</p>{}",
+                    templates::link_button("重新登录", &login, "submit")
                 ),
             ),
         );
