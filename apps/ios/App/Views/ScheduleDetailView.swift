@@ -4,8 +4,17 @@ import SwiftUI
 /// 一条日程：什么时候、重复不重复、提前多久提醒、地点、备注；能完成、能取消。
 struct ScheduleDetailView: View {
     @Environment(AppModel.self) private var model
-    let schedule: Schedule
+    /// 打开时的那一条。之后以名单里最新的为准：别处改过、状态变了，版本号都会变，按钮要拿最新的去交。
+    private let opened: Schedule
     @State private var confirmingCancel = false
+
+    init(schedule: Schedule) {
+        opened = schedule
+    }
+
+    private var schedule: Schedule {
+        model.planner?.schedules.first { $0.id == opened.id } ?? opened
+    }
 
     private var now: Int64 {
         Int64(Date().timeIntervalSince1970 * 1000)
@@ -80,6 +89,14 @@ struct ScheduleDetailView: View {
                     .accessibilityIdentifier("detail.cancel")
                 }
             }
+
+            if let problem = model.problem {
+                Section {
+                    Label(problem, systemImage: "exclamationmark.circle")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+            }
         }
         .listStyle(.insetGrouped)
         .navigationTitle(schedule.title)
@@ -102,44 +119,64 @@ struct ScheduleDetailView: View {
 /// 一条提醒：什么时候到点、备注；能标成看过了，能不办了。
 struct ReminderDetailView: View {
     @Environment(AppModel.self) private var model
-    let reminder: Reminder
+    /// 打开时的那一条。之后以名单里最新的为准（理由同日程详情）。
+    private let opened: Reminder
+
+    init(reminder: Reminder) {
+        opened = reminder
+    }
+
+    private var reminder: Reminder {
+        model.planner?.reminders.first { $0.id == opened.id } ?? opened
+    }
 
     var body: some View {
+        let item = reminder
         List {
             Section {
-                Text(reminder.title)
+                Text(item.title)
                     .font(.title2.weight(.semibold))
                 LabeledContent("到点") {
-                    Text(Words.on(reminder.dueAt))
+                    Text(Words.on(item.dueAt))
                 }
             }
-            if let notes = reminder.notes {
+            if let notes = item.notes {
                 Section("备注") {
                     Text(notes)
                 }
             }
             Section {
-                Text("\(Words.createdBy) \(reminder.createdBy)")
+                Text("\(Words.createdBy) \(item.createdBy)")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             }
-            if reminder.status == .scheduled {
+            // 刚到了点的也在里面：用户点开的就是它到点的通知，"看过了"要等他点了才走。
+            if DetailPolicy.staysOpen(reminder: item) {
                 Section {
                     Button {
-                        Task { await model.dismiss(reminder) }
+                        Task { await model.dismiss(item) }
                     } label: {
                         Label(Words.dismiss, systemImage: "checkmark.circle")
                     }
+                    .accessibilityIdentifier("detail.dismiss")
                     Button(role: .destructive) {
-                        Task { await model.cancel(reminder) }
+                        Task { await model.cancel(item) }
                     } label: {
                         Label(Words.cancelReminder, systemImage: "xmark.circle")
                     }
                 }
             }
+            // 出错的说法在这一页也要有：详情盖在名单上面，名单顶上那一行用户看不见。
+            if let problem = model.problem {
+                Section {
+                    Label(problem, systemImage: "exclamationmark.circle")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+            }
         }
         .listStyle(.insetGrouped)
-        .navigationTitle(reminder.title)
+        .navigationTitle(item.title)
         .navigationBarTitleDisplayMode(.inline)
     }
 }

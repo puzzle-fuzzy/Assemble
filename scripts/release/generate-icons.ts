@@ -4,7 +4,7 @@
 // `apps/desktop/src-tauri/icons/` 里的文件、换掉手机那一份，并删除本脚本即可。
 //
 //   bun run icons          生成 source.png 与 tray-icon.png，再交给 Tauri CLI 产出各平台尺寸；
-//                          顺带生成手机上那一份（`apps/iphone/App/Assets.xcassets`）
+//                          顺带生成手机上那一份（`apps/ios/App/Assets.xcassets`）
 //
 // 仅依赖 Bun 与 Node 内置模块，不需要图像库。
 
@@ -17,7 +17,7 @@ const here = dirname(fileURLToPath(import.meta.url));
 const iconDir = join(here, "../../apps/desktop/src-tauri/icons");
 const phoneIcon = join(
   here,
-  "../../apps/iphone/App/Assets.xcassets/AppIcon.appiconset/icon.png",
+  "../../apps/ios/App/Assets.xcassets/AppIcon.appiconset/icon.png",
 );
 
 const GLYPH = [

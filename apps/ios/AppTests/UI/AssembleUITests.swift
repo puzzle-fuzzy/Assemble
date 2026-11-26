@@ -24,7 +24,7 @@ final class PairingFlowUITests: XCTestCase {
         let origin = setting("ASSEMBLE_ORIGIN") ?? "http://127.0.0.1:8792"
         web = WebSide(
             origin: URL(string: origin)!,
-            email: setting("ASSEMBLE_EMAIL") ?? "iphonetest@example.test",
+            email: setting("ASSEMBLE_EMAIL") ?? "iostest@example.test",
             password: try XCTUnwrap(setting("ASSEMBLE_PASSWORD"), "ASSEMBLE_PASSWORD must reach the test process")
         )
         app.launchEnvironment["ASSEMBLE_SERVER_ORIGIN"] = origin
@@ -41,6 +41,8 @@ final class PairingFlowUITests: XCTestCase {
         let stamp = Int64(Date().timeIntervalSince1970 * 1000)
         let desktop = try await web.registerDesktop()
         try await web.createSchedule(token: desktop, title: "iOS 验收日程", startAt: stamp + 2 * 86_400_000)
+        // 服务端每十秒查一次到点的提醒。先放一条马上到点的，看它什么时候被标成通知，就知道这个节拍。
+        let tick = try await web.tickMoment(token: desktop)
 
         // ---- "手机"：粘贴配对地址，认领，显示六位数字 ----
         app.launch()
@@ -66,8 +68,10 @@ final class PairingFlowUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["iOS 验收日程"].waitForExistence(timeout: 30), "登录之后名单里要有那条日程")
         keepScreenshot("02-登录之后的名单")
 
-        // 登录之后再放一条一分半之后到点的提醒：它得在"打开到点提醒"之后才到点。
-        let dueAt = Int64(Date().timeIntervalSince1970 * 1000) + 100_000
+        // 登录之后再放一条到点的提醒：它得在"打开到点提醒"之后才到点，并且安排在服务端刚查完之后——
+        // 这样等测试点开横幅时，名单里它已经被标成"已到点"了。真人多是通知响了一会儿才点，走的就是这条路
+        // （提醒一到点、详情就自己关上的毛病，就是这样撞出来的）。
+        let dueAt = Self.justBeforeTheNextTick(tick: tick, noEarlierThan: Int64(Date().timeIntervalSince1970 * 1000) + 95_000)
         try await web.createReminder(token: desktop, title: "iOS 验收提醒", dueAt: dueAt)
         XCTAssertTrue(app.staticTexts["iOS 验收提醒"].waitForExistence(timeout: 40), "名单里要有那条提醒")
 
@@ -164,6 +168,18 @@ final class PairingFlowUITests: XCTestCase {
         attachment.name = name
         attachment.lifetime = .keepAlways
         add(attachment)
+    }
+
+    /// 服务端下一次查到点提醒的时刻再往前八百毫秒：到点之后不到一秒，服务端就把它标成"已到点"。
+    /// `tick` 是刚量到的一次巡检的时刻；两者都是毫秒。
+    static func justBeforeTheNextTick(tick: Int64, noEarlierThan: Int64) -> Int64 {
+        let period: Int64 = 10_000
+        let phase = tick % period
+        var next = noEarlierThan - (noEarlierThan - phase) % period
+        if next < noEarlierThan {
+            next += period
+        }
+        return next - 800
     }
 
     /// 开关的读数。开的时候是 1，可它是数字还是文字随系统版本变过，所以按它的描述认。
@@ -328,6 +344,27 @@ final class WebSide: @unchecked Sendable {
         try await call("GET", "/v1/planner", token: token)
     }
 
+    /// 放一条马上到点的"探针"，等服务端把它标成通知，回那一次巡检的时刻（毫秒）。
+    /// 服务端每十秒查一次到点的提醒，起点在启动时就定下了；知道这个节拍，别的提醒就能安排在"刚查完"到点。
+    /// 探针的通知马上标成已读，名单里不留它。
+    func tickMoment(token: String) async throws -> Int64 {
+        try await createReminder(token: token, title: "探针", dueAt: Int64(Date().timeIntervalSince1970 * 1000) + 1_000)
+        let by = Date().addingTimeInterval(15)
+        while Date() < by {
+            let current = try await planner(token: token)
+            let notifications = current["notifications"] as? [[String: Any]] ?? []
+            if let note = notifications.first(where: { ($0["title"] as? String) == "探针" }),
+               let id = note["id"] as? String,
+               let raised = (note["raisedAt"] as? String).flatMap(Self.instant),
+               id.isEmpty == false {
+                _ = try await call("POST", "/v1/notifications/read", token: token, body: ["ids": [id]])
+                return raised
+            }
+            try await Task.sleep(for: .milliseconds(250))
+        }
+        throw Failure(description: "the server did not raise the probe reminder within 15 seconds")
+    }
+
     private static func random() -> String {
         base64url(Data((0..<32).map { _ in UInt8.random(in: 0...255) }))
     }
@@ -337,6 +374,13 @@ final class WebSide: @unchecked Sendable {
             .replacingOccurrences(of: "+", with: "-")
             .replacingOccurrences(of: "/", with: "_")
             .replacingOccurrences(of: "=", with: "")
+    }
+
+    private static func instant(_ spelling: String) -> Int64? {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        guard let date = formatter.date(from: spelling) else { return nil }
+        return Int64(date.timeIntervalSince1970 * 1000)
     }
 
     private static func iso(_ millis: Int64) -> String {

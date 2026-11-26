@@ -566,6 +566,22 @@ struct AppModelTests {
         #expect(model.problem == nil, "办成了就不留那句被别处改过")
     }
 
+    /// 到点的那一瞬服务端把提醒标成"已到点"：详情不能跟着关上，用户点开的就是它到点的通知，
+    /// 关上了就永远点不到"看过了"（2026-11-27 在模拟器里撞到过）。
+    @Test
+    func aReminderThatJustFiredKeepsItsDetailsOpen() throws {
+        let reminders = Sample.planner.reminders
+        #expect(DetailPolicy.staysOpen(reminder: try #require(reminders.first { $0.id == "r-soon" })))
+        #expect(DetailPolicy.staysOpen(reminder: try #require(reminders.first { $0.id == "r-fired" })), "刚到了点不算办完")
+        #expect(!DetailPolicy.staysOpen(reminder: try #require(reminders.first { $0.id == "r-dismissed" })))
+        #expect(!DetailPolicy.staysOpen(reminder: try #require(reminders.first { $0.id == "r-cancelled" })))
+
+        let schedules = Sample.planner.schedules
+        #expect(DetailPolicy.staysOpen(schedule: schedules[0]))
+        #expect(!DetailPolicy.staysOpen(schedule: try #require(schedules.first { $0.id == "s-done" })))
+        #expect(!DetailPolicy.staysOpen(schedule: try #require(schedules.first { $0.id == "s-cancelled" })))
+    }
+
     /// 用户抢在服务端生成通知之前就点了"看过了"：那条通知晚一步才到名单里，来了也要跟着算看过。
     @Test
     func aNotificationThatArrivesAfterItsReminderWasHandledIsReadToo() async throws {

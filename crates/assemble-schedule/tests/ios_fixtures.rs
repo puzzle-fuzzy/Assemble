@@ -11,7 +11,7 @@ use chrono::{DateTime, FixedOffset, TimeZone};
 use serde_json::{Value, json};
 
 fn fixture_path() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../apps/iphone/Fixtures/recurrence.json")
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../apps/ios/Fixtures/recurrence.json")
 }
 
 /// 北京时间某年某月某日某时某分对应的毫秒时间戳。

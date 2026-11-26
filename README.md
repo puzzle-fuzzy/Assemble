@@ -126,7 +126,7 @@ apps/desktop/           桌面端（Tauri 2）
   src-tauri/            应用壳：窗口、托盘、生命周期与具名命令
 apps/mcp/               给助手用的入口 assemble-mcp：标准输入输出上的 MCP 服务端，日程、提醒与私人备忘录工具
 apps/admin/             同源网页管理端：概览、用户、设备、登录记录与共享影视维护
-apps/iphone/             iPhone 应用第一期（SwiftUI）：日程与提醒、本地通知、扫码登录；核心包 AssembleCore 不依赖界面
+apps/ios/               iOS 应用第一期（SwiftUI）：日程与提醒、本地通知、扫码登录；核心包 AssembleCore 不依赖界面
 apps/media-web/         同源 /movies/ 影视展示站：海报墙与详情，只读
 packages/media/         影视共享类型、校验、浏览器适配、业务组件与中英字典
 packages/ui/            各界面共用的 shadcn 基础组件、主题与字体
@@ -166,7 +166,7 @@ docs/                   架构、决策、路线图、运行手册
 - [架构说明](docs/architecture.md)：结构、各部分职责、安全边界、已知的限制
 - [决策 0002](docs/decisions/0002-own-server-replaces-jarvis.md)：自带服务端、取代 jarvis，以及"从真实启动中学到的"；[决策 0001](docs/decisions/0001-rust-tauri-desktop.md)是转向之前的记录；[决策 0003](docs/decisions/0003-schedule-first-batch-and-conversational-entry.md)：日程规划第一批的范围、对话式入口与助手怎么登录；[决策 0004](docs/decisions/0004-invite-code-registration-and-password-change.md)：旧的邀请码实现记录；[决策 0005](docs/decisions/0005-public-email-accounts-and-github.md)：当前开放邮箱注册、GitHub、网页密码找回与头像
 - [路线图](docs/plans/2026-11-23-roadmap.md)：接下来做什么、每一步的完成标准、需要你决定的事
-- [日程规划：方案](docs/plans/2026-11-24-schedule-planning.md)：对 jarvis 的调研，与 Assemble 打算怎么做；服务端、桌面端与对话入口的第一批已写完，手机上怎么提醒已定为原生的 iPhone 应用
+- [日程规划：方案](docs/plans/2026-11-24-schedule-planning.md)：对 jarvis 的调研，与 Assemble 打算怎么做；服务端、桌面端与对话入口的第一批已写完，手机上怎么提醒已定为原生的 iOS 应用
 - [运行手册](docs/runbooks/verify-macos-launch.md)：在 macOS 上真实启动并检查；Windows 真机验收清单；安装包从哪来
 - [部署手册](docs/runbooks/deploy.md)：正式服务怎么部署、升级、备份；做过的与还没有验证过的
 - [协作约定](AGENTS.md)

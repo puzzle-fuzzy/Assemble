@@ -168,15 +168,16 @@ struct HomeView: View {
         }
         .onChange(of: model.planner) { _, planner in
             // 这一条办完了（这一页上的按钮，或者别的设备）：详情跟着收起来，名单里它已经不在了。
+            // 提醒只是刚到了点不算办完，详情要留着（见 `DetailPolicy`）。
             guard let opened else { return }
-            let stillListed: Bool
+            let staysOpen: Bool
             switch opened {
             case let .schedule(schedule):
-                stillListed = planner?.schedules.contains { $0.id == schedule.id && $0.status == .upcoming } ?? true
+                staysOpen = DetailPolicy.staysOpen(schedule: planner?.schedules.first { $0.id == schedule.id } ?? schedule)
             case let .reminder(reminder):
-                stillListed = planner?.reminders.contains { $0.id == reminder.id && $0.status == .scheduled } ?? true
+                staysOpen = DetailPolicy.staysOpen(reminder: planner?.reminders.first { $0.id == reminder.id } ?? reminder)
             }
-            if !stillListed {
+            if !staysOpen {
                 self.opened = nil
             }
         }

@@ -20,7 +20,7 @@ use serde_json::{Value, json};
 const CREATED: i64 = 1_794_400_000_000;
 
 fn fixture_path() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../apps/iphone/Fixtures/protocol.json")
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../apps/ios/Fixtures/protocol.json")
 }
 
 fn at(millis: i64) -> Timestamp {

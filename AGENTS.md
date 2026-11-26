@@ -29,7 +29,8 @@ Assemble 是一个全新的、自带服务端的项目，用来完全替换 jarv
 ## 怎么写
 
 - 规则放在 `crates/` 里，脱离窗口与网络就能测试；`apps/desktop/src-tauri` 只做编排。应用壳里唯一的例外是传输记录表（`registry.rs`）：它只记状态、挑下一件事，同样不碰网络、文件与窗口，也有自己的单元测试。
-- iPhone 应用（`apps/iphone`）照同一条规矩分：规则放在不依赖界面的 `AssembleCore` 里，`AppModel` 只做编排。线上的类型和重复规则由 Rust 侧导出的样本钉住（`apps/iphone/Fixtures/`，不手改）：协议或规则一改，Rust 那边的样本测试先红，刷新样本之后 Swift 的测试再守一道。做法见 [apps/iphone/README.md](apps/iphone/README.md)。
+- 应用目录按操作系统命名：手机是 `apps/ios`，将来的安卓版是 `apps/android`，不按机型叫（用户 2026-11-27 纠正过，原来叫 `apps/iphone`）。
+- iOS 应用（`apps/ios`）照同一条规矩分：规则放在不依赖界面的 `AssembleCore` 里，`AppModel` 只做编排。线上的类型和重复规则由 Rust 侧导出的样本钉住（`apps/ios/Fixtures/`，不手改）：协议或规则一改，Rust 那边的样本测试先红，刷新样本之后 Swift 的测试再守一道。做法见 [apps/ios/README.md](apps/ios/README.md)。
 - 服务端的逻辑都在 `apps/server/src` 的库部分，处理器只做薄薄一层适配；`main.rs` 只解析命令、初始化日志。
 - 每个基础库的入口固定写 `#![cfg_attr(test, allow(clippy::pedantic))]`：库代码从严，测试代码以可读为先。
 - Rust 工作区禁止 `unsafe`；clippy 的 `all` 与 `pedantic`（除 `must_use_candidate`）按警告即错误执行。
@@ -39,7 +40,7 @@ Assemble 是一个全新的、自带服务端的项目，用来完全替换 jarv
 ## 验证
 
 - 提交前运行 `bun run verify`。它覆盖 Biome、类型检查、界面与工具脚本的测试、前端构建、Rust 格式、静态检查与全部 Rust 测试（含服务端）。装了 Windows 的 Rust 目标时（`rust-toolchain.toml` 里列了它），它还会给能在本机上检查的五个基础库做一次针对 Windows 目标的静态检查。
-- **iPhone 应用**的核心包用 `bun run iphone:test` 测（Swift，只在装了 Xcode 的 Mac 上）。`bun run iphone:simulate` 在模拟器里对着一次性的本机服务端把配对登录、名单、到点通知、点开定位整条路走一遍，也只在 Mac 上；它驱动的是模拟器里的界面，不动人的鼠标键盘。
+- **iOS 应用**的核心包用 `bun run ios:test` 测（Swift，只在装了 Xcode 的 Mac 上）。`bun run ios:simulate` 在模拟器里对着一次性的本机服务端把配对登录、名单、到点通知、点开定位整条路走一遍，也只在 Mac 上；它驱动的是模拟器里的界面，不动人的鼠标键盘。
 - **工具链钉在 `rust-toolchain.toml`**，工作区的 `rust-version` 与 `deploy/Dockerfile` 里的基础镜像和它一致；升级时三处一起改。稳定版每六周更新一次，新版本会带来新的检查，钉住之后验证只会在有人主动升级时才可能变红。不要在流程里另外安装"最新的稳定版"。
 - **仓库是公开的**：<https://github.com/puzzle-fuzzy/Assemble>。每次推送，持续集成在 macOS 与 Windows 上各跑一遍 `bun run verify`，并构建服务端镜像；打标签或手动触发时产出安装包。推完去看结果：<https://github.com/puzzle-fuzzy/Assemble/actions>。
 - Windows 专用的代码放在不依赖 Tauri 的 crate 里，这样在本机上就能对它做类型检查。但客户端与服务端带着 TLS 与 SQLite 的本机依赖，从 macOS 上检查不了 Windows 目标，桌面应用壳更是一次都没在这台 Mac 上为 Windows 编译过：**持续集成的 Windows 那一栏是它们唯一的 Windows 环境**。本机那一步抓到过五处，那一栏又抓到过一批只在 Windows 上才有的（没有 await 的异步函数、不必要的返回值、不需要的可变标记、和定时器赛跑的测试）。真正在 Windows 桌面上跑起来对不对，只有真机回答得了。
@@ -65,7 +66,7 @@ Assemble 是一个全新的、自带服务端的项目，用来完全替换 jarv
 ## 依赖
 
 - TypeScript 侧只使用 Bun：根目录唯一的 `bun.lock`，不引入其它包管理器。
-- 格式与 lint 只使用 Biome；Biome 也会格式化 Markdown 表格。由程序生成、要逐字比对的文件不交给它格式化（`apps/iphone/Fixtures`：Rust 侧的测试按自己写出来的样子比对，重排一次就会红）。
+- 格式与 lint 只使用 Biome；Biome 也会格式化 Markdown 表格。由程序生成、要逐字比对的文件不交给它格式化（`apps/ios/Fixtures`：Rust 侧的测试按自己写出来的样子比对，重排一次就会红）。
 - 前端基础组件使用 shadcn 生成的 `packages/ui`，桌面端与管理端共享实现、主题与字体；桌面旧路径只转发导出。图标使用 Lucide。缺少的组件通过 CLI 添加，应用内只做组合。
 - 管理端同源发布于 `/admin/`；所有管理 API 逐次检查已验证邮箱、超级管理员权限与同源请求。设备令牌不能访问管理 API，首个注册者不能自动提权。真实管理员邮箱只写受保护部署配置，见[管理端手册](docs/runbooks/admin.md)。
 - Rust 依赖只用稳定版。本机 `cargo info` 会把预发布版本排在最前，选版本前用 crates.io 的接口核对。

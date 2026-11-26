@@ -1,9 +1,9 @@
-// 在模拟器里把 iPhone 应用真的跑一遍：起一个一次性的本机服务端，建一个测试账户，
+// 在模拟器里把 iOS 应用真的跑一遍：起一个一次性的本机服务端，建一个测试账户，
 // 用 Xcode 的界面测试走完"扫码配对登录 → 名单 → 打开到点提醒 → 系统通知 → 点开定位"，
 // 最后收摊。只在装了 Xcode 的 Mac 上能用：
 //
-//   bun run iphone:simulate                 模拟器默认用 iPhone 17 Pro
-//   ASSEMBLE_IOS_SIMULATOR="iPhone Air" bun run iphone:simulate
+//   bun run ios:simulate                 模拟器默认用 iPhone 17 Pro
+//   ASSEMBLE_IOS_SIMULATOR="iPhone Air" bun run ios:simulate
 //
 // 它不打开模拟器的窗口，不碰这台 Mac 的系统钥匙串（模拟器里的钥匙串是它自己的），
 // 也不动"应用程序"里装着的桌面端。测试账户只存在于一次性的数据目录里，跑完就删；
@@ -33,11 +33,11 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = fileURLToPath(new URL("../..", import.meta.url));
-const phone = join(root, "apps/iphone");
-const artifacts = join(root, ".artifacts/iphone");
+const ios = join(root, "apps/ios");
+const artifacts = join(root, ".artifacts/ios");
 const simulator = process.env.ASSEMBLE_IOS_SIMULATOR ?? "iPhone 17 Pro";
-const account = "iphonetest";
-const email = "iphonetest@example.test";
+const account = "iostest";
+const email = "iostest@example.test";
 
 function run(
   command: string,
@@ -156,7 +156,7 @@ if (process.env.ASSEMBLE_IOS_KEEP_APP !== "1") {
 }
 
 run("cargo", ["build", "-p", "assemble-server"]);
-run("xcodegen", ["generate"], { cwd: phone });
+run("xcodegen", ["generate"], { cwd: ios });
 
 // 先把应用和测试构建好，再去起服务端：构建失败时还没建测试账户，也没有东西要收摊。
 // 构建的输出写进文件，失败时只把报错的几行打出来。
@@ -175,10 +175,10 @@ runLogged(
     destination,
   ],
   join(report, "build.log"),
-  { cwd: phone },
+  { cwd: ios },
 );
 
-const data = mkdtempSync(join(tmpdir(), "assemble-iphone-"));
+const data = mkdtempSync(join(tmpdir(), "assemble-ios-"));
 // 端口从一个随机的位置往后找（原因见上面卸应用的那一段）。
 const port = freePort(8792 + Math.floor(Math.random() * 400));
 const origin = `http://127.0.0.1:${port}`;
@@ -234,7 +234,7 @@ try {
     throw new Error("the local server did not answer its health check");
 
   const xcodebuild = openSync(join(report, "xcodebuild.log"), "w", 0o600);
-  const products = join(phone, ".build/DerivedData/Build/Products");
+  const products = join(ios, ".build/DerivedData/Build/Products");
   // 测试要的几样东西写进测试配置。xcodebuild 在命令行上收下 `TEST_RUNNER_` 开头的变量，
   // 却没有把它们交给测试进程（2026-11-26 试过）；测试配置文件里的环境变量是它认的。
   const generated = readdirSync(products).find((name) =>
@@ -298,7 +298,7 @@ try {
         ? ["-only-testing", process.env.ASSEMBLE_IOS_ONLY]
         : []),
     ],
-    { cwd: phone, stdio: ["ignore", xcodebuild, xcodebuild] },
+    { cwd: ios, stdio: ["ignore", xcodebuild, xcodebuild] },
   );
   closeSync(xcodebuild);
   streaming.kill("SIGTERM");
