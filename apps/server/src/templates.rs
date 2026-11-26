@@ -110,12 +110,17 @@ pub(crate) fn form_page(title: &str, heading: &str, description: &str, body: &st
 }
 
 fn document(title: &str, body: &str) -> String {
+    document_with_head(title, body, "")
+}
+
+/// `head` 是只能放在 `<head>` 里的额外标记，由这里的调用方拼出来，不来自请求。
+fn document_with_head(title: &str, body: &str, head: &str) -> String {
     format!(
         "<!doctype html><html lang=\"zh-CN\"><head><meta charset=\"utf-8\">\
 <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\
 <meta name=\"referrer\" content=\"{}\">\
 <meta name=\"color-scheme\" content=\"light dark\">\
-<title>{}</title><style>{STYLE}</style></head><body>{body}</body></html>",
+<title>{}</title>{head}<style>{STYLE}</style></head><body>{body}</body></html>",
         REFERRER_POLICY,
         escape(title)
     )
@@ -129,12 +134,32 @@ pub fn message_page(title: &str, body: &str) -> String {
 /// 没有可填写字段时使用 Empty，不把结果和确认操作再包进一张表单卡片。
 /// `body` 与 `actions` 仅由服务端组合；调用方须先转义动态文字。
 pub(crate) fn message_with_actions(title: &str, body: &str, actions: &str, icon: &str) -> String {
+    message_document(title, body, actions, icon, None)
+}
+
+/// 同 [`message_with_actions`]，只是页面每 `refresh` 秒自己重新载入一次：给"等一件事发生、
+/// 又不方便用脚本"的页面用。等到了那一件事，调用方就改给一个不刷新的页面。
+fn message_refreshing(title: &str, body: &str, actions: &str, icon: &str, refresh: u64) -> String {
+    message_document(title, body, actions, icon, Some(refresh))
+}
+
+fn message_document(
+    title: &str,
+    body: &str,
+    actions: &str,
+    icon: &str,
+    refresh: Option<u64>,
+) -> String {
     let actions = if actions.is_empty() {
         String::new()
     } else {
         format!("<div {}>{actions}</div>", attrs("empty_content"))
     };
-    document(
+    // 让页面自己刷新，只能用 `<meta>`：页面不载入脚本，也不放行内联脚本。
+    let head = refresh.map_or_else(String::new, |seconds| {
+        format!("<meta http-equiv=\"refresh\" content=\"{seconds}\">")
+    });
+    document_with_head(
         title,
         &format!(
             "<main class=\"flex min-h-svh items-center justify-center bg-background p-6 md:p-10\"><div class=\"w-full max-w-md\"><div {}><div {}><div {}>{}</div><div {}><h1>{}</h1></div><div {}>{body}</div></div>{actions}</div></div></main>",
@@ -146,6 +171,7 @@ pub(crate) fn message_with_actions(title: &str, body: &str, actions: &str, icon:
             escape(title),
             attrs("empty_description")
         ),
+        &head,
     )
 }
 
@@ -327,6 +353,102 @@ pub fn authorize_page(
     )
 }
 
+/// 手机扫码登录的第一页。`path` 是配对页自己的路径；`notice` 是上一件事留下的说明。
+pub fn pairing_start_page(path: &str, csrf: &str, notice: Option<&str>) -> String {
+    let notice = notice.map_or_default(status);
+    message_with_actions(
+        "添加手机",
+        &format!(
+            "{notice}<p>打开手机上的 Assemble，点\"扫码登录\"，对着接下来显示的二维码扫一下；再回到这里核对一个六位数字。</p><p class=\"text-sm text-muted-foreground\">手机会成为这个账户里的一台设备，能看日程与提醒；第一期不能收文件。</p>"
+        ),
+        &format!(
+            "<form method=\"post\" action=\"{}\" aria-label=\"生成配对二维码\" class=\"flex flex-wrap justify-center gap-2\"><input type=\"hidden\" name=\"csrf\" value=\"{}\">{}</form>{}",
+            escape(path),
+            escape(csrf),
+            button("显示二维码", "button", "type=\"submit\""),
+            link_button("回到账户页", "/web/account", "outline")
+        ),
+        "login",
+    )
+}
+
+/// 手机扫码登录：等手机来扫。`qr` 是服务端自己画的内联二维码，`address` 是它编码的那一串：
+/// 扫不了码的时候可以把这一串粘贴到手机上。页面每 `refresh` 秒自己重新载入。
+pub fn pairing_wait_page(
+    path: &str,
+    id: &str,
+    csrf: &str,
+    qr: &str,
+    address: &str,
+    refresh: u64,
+) -> String {
+    message_refreshing(
+        "添加手机",
+        &format!(
+            "<p>用手机上的 Assemble 扫这个码。扫过之后这里会显示一个六位数字，等你核对。</p><div class=\"mx-auto mt-4 w-72 max-w-full rounded-md bg-white p-3\">{qr}</div><p class=\"mt-4 text-sm text-muted-foreground\">扫不了码？把下面这一串粘贴到手机上的 Assemble 里：</p><p class=\"mx-auto mt-1 w-72 max-w-full break-all text-sm select-all\">{}</p>",
+            escape(address)
+        ),
+        &format!(
+            "<form method=\"post\" action=\"{}/{}\" aria-label=\"取消配对\" class=\"flex flex-wrap justify-center gap-2\"><input type=\"hidden\" name=\"csrf\" value=\"{}\"><input type=\"hidden\" name=\"choice\" value=\"cancel\">{}</form>",
+            escape(path),
+            escape(id),
+            escape(csrf),
+            button("取消", "outline", "type=\"submit\"")
+        ),
+        "login",
+        refresh,
+    )
+}
+
+/// 手机扫码登录：手机认领之后，请本人核对六位数字。
+pub fn pairing_confirm_page(
+    path: &str,
+    id: &str,
+    csrf: &str,
+    device_name: &str,
+    code: &str,
+) -> String {
+    message_with_actions(
+        "核对数字",
+        &format!(
+            "<p><strong>{}</strong> 扫了二维码，想要登录这个账户。</p><p class=\"text-sm text-muted-foreground\">手机上显示的六位数字和下面这一串一样吗？一样才点\"允许\"。</p><p class=\"mt-4 text-center font-mono text-2xl tracking-widest select-all\" aria-label=\"确认码\">{}</p>",
+            escape(device_name),
+            escape(code)
+        ),
+        &format!(
+            "<form method=\"post\" action=\"{}/{}\" aria-label=\"决定这次配对\" class=\"flex flex-wrap justify-center gap-2\"><input type=\"hidden\" name=\"csrf\" value=\"{}\">{}{}</form><p class=\"text-xs text-muted-foreground\">不一样的话，可能是别人扫了你的码：请点\"拒绝\"。</p>",
+            escape(path),
+            escape(id),
+            escape(csrf),
+            button(
+                "允许",
+                "button",
+                "type=\"submit\" name=\"choice\" value=\"allow\""
+            ),
+            button(
+                "拒绝",
+                "outline",
+                "type=\"submit\" name=\"choice\" value=\"deny\""
+            )
+        ),
+        "login",
+    )
+}
+
+/// 手机扫码登录：这一次配对结束之后的一页。
+pub fn pairing_over_page(path: &str, title: &str, body: &str, success: bool) -> String {
+    message_with_actions(
+        title,
+        &format!("<p>{}</p>", escape(body)),
+        &format!(
+            "{}{}",
+            link_button("再添加一台手机", path, "button"),
+            link_button("回到账户页", "/web/account", "outline")
+        ),
+        if success { "success" } else { "info" },
+    )
+}
+
 /// 平台的显示名。
 pub fn platform_label(platform: assemble_protocol::primitives::Platform) -> &'static str {
     use assemble_protocol::primitives::Platform;
@@ -429,6 +551,40 @@ mod tests {
         }
         assert!(!policy.contains("unsafe-inline"), "{policy}");
         assert!(!policy.contains("script-src"), "{policy}");
+    }
+
+    #[test]
+    fn the_waiting_page_reloads_itself_and_the_others_do_not() {
+        let waiting = pairing_wait_page(
+            "/web/pairing",
+            "id1",
+            "csrf",
+            "<svg/>",
+            "assemble://pair?ticket=t",
+            2,
+        );
+        assert!(waiting.contains("<meta http-equiv=\"refresh\" content=\"2\">"));
+        assert!(waiting.contains("<svg/>"));
+        // 地址原样给出，扫不了码的人可以照着粘贴；表单只提交到本站。
+        assert!(waiting.contains("assemble://pair?ticket=t"));
+        assert!(waiting.contains("action=\"/web/pairing/id1\""));
+        let confirm = pairing_confirm_page("/web/pairing", "id1", "csrf", "我的 iPhone", "012345");
+        assert!(!confirm.contains("http-equiv=\"refresh\""));
+        assert!(confirm.contains("我的 iPhone"));
+        assert!(confirm.contains("012345"));
+        assert!(confirm.contains("value=\"allow\""));
+        assert!(confirm.contains("value=\"deny\""));
+        // 设备名来自请求，要转义。
+        let odd = pairing_confirm_page("/web/pairing", "id1", "csrf", "<b>手机</b>", "000000");
+        assert!(odd.contains("&lt;b&gt;手机&lt;/b&gt;"));
+        assert!(!odd.contains("<b>手机</b>"));
+        let start = pairing_start_page("/web/pairing", "csrf", Some("太多次了。"));
+        assert!(start.contains("太多次了。"));
+        assert!(start.contains("action=\"/web/pairing\""));
+        assert!(
+            pairing_over_page("/web/pairing", "添加好了", "已经登录。", true)
+                .contains("已经登录。")
+        );
     }
 
     #[test]

@@ -73,8 +73,8 @@ pub fn authorize_path(request: &AuthorizationRequest) -> String {
     )
 }
 
-/// S256：挑战必须是校验器的 SHA-256。
-fn pkce_matches(challenge: &str, verifier: &str) -> bool {
+/// S256：挑战必须是校验器的 SHA-256。手机扫码配对（[`crate::pairing`]）用的也是它。
+pub(crate) fn pkce_matches(challenge: &str, verifier: &str) -> bool {
     let computed = URL_SAFE_NO_PAD.encode(Sha256::digest(verifier.as_bytes()));
     challenge.len() == computed.len() && bool::from(challenge.as_bytes().ct_eq(computed.as_bytes()))
 }
@@ -326,7 +326,8 @@ pub async fn exchange(
 }
 
 /// 在同一个事务里登记设备：授权码被消耗与设备注册，要么都发生，要么都不。
-async fn register(
+/// 手机扫码配对拿到令牌的那一步也走这里。
+pub(crate) async fn register(
     tx: &mut sqlx::SqliteConnection,
     account_id: &str,
     device: &NewDevice,

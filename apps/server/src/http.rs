@@ -46,6 +46,8 @@ pub struct AppState {
     pub media: Arc<crate::media::jobs::Runtime>,
     pub storage_monitor: crate::storage::Monitor,
     pub dht: Arc<crate::dht::runtime::Runtime>,
+    /// 手机扫码配对的现场：还没被认领的票据和限速记录，都只在内存里。
+    pub pairings: crate::pairing::Pairings,
 }
 
 impl AppState {
@@ -54,6 +56,7 @@ impl AppState {
             media: Arc::new(crate::media::jobs::Runtime::new(config.media.clone())),
             storage_monitor: crate::storage::Monitor::default(),
             dht: Arc::new(crate::dht::runtime::Runtime::default()),
+            pairings: crate::pairing::Pairings::default(),
             mailer: Arc::new(crate::mail::SmtpMailer(config.smtp.clone())),
             github_flows: crate::github::Flows::default(),
             github_provider: Arc::new(crate::github::GithubProvider(config.github.clone())),
@@ -95,6 +98,7 @@ pub fn router(state: Shared) -> Router {
         .merge(crate::identity_web::routes())
         .merge(crate::github::routes())
         .merge(crate::desktop_login::routes())
+        .merge(crate::pairing::routes())
         .layer(DefaultBodyLimit::max(16 * 1024));
     Router::new()
         .route(HEALTH_PATH, get(health))
@@ -109,6 +113,8 @@ pub fn router(state: Shared) -> Router {
         ))
         // 桌面端的接口
         .route(EXCHANGE_PATH, post(crate::desktop_login::exchange))
+        // 手机扫码登录的两个接口：不带 Cookie，也不带令牌
+        .merge(crate::pairing::device_routes())
         .route("/v1/me", get(crate::devices::me))
         .route("/v1/auth/logout", post(crate::devices::logout))
         .route("/v1/devices", get(crate::devices::list_devices))

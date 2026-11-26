@@ -36,6 +36,9 @@ getrandom.workspace = true
 image.workspace = true
 email_address = "0.2.10"
 lettre = { version = "0.11.24", default-features = false, features = ["builder", "smtp-transport", "tokio1-rustls-tls"] }
+# 手机扫码登录的二维码。只有编码算法，没有别的依赖；画成 SVG 由服务端自己做，
+# 这样二维码是页面里的一段内联标记，不用放宽页面的内容安全策略。
+qrcodegen = "1.8.0"
 reqwest = { workspace = true, features = ["form"] }
 rpassword.workspace = true
 serde.workspace = true

@@ -29,6 +29,7 @@ pub mod login;
 pub mod media;
 pub mod memo;
 pub mod origin;
+pub mod pairing;
 pub mod primitives;
 pub mod schedule;
 pub mod sends;

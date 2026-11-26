@@ -31,6 +31,7 @@ pub mod maintenance;
 pub mod media;
 pub mod media_web_assets;
 pub mod memos;
+pub mod pairing;
 pub mod planner;
 pub mod presence;
 pub mod register;

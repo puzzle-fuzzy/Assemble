@@ -95,6 +95,7 @@ mod tests {
                 "audit_log",
                 "blobs",
                 "desktop_auth_codes",
+                "device_pairings",
                 "devices",
                 "dht_control",
                 "dht_observations",
@@ -139,7 +140,7 @@ mod tests {
             .fetch_one(&again)
             .await
             .unwrap();
-        assert_eq!(applied, 10);
+        assert_eq!(applied, 11);
     }
 
     #[tokio::test]

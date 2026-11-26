@@ -31,6 +31,8 @@ pub struct Report {
     pub pruned_sends: u64,
     pub expired_codes: u64,
     pub expired_sessions: u64,
+    /// 作废的配对（手机扫码登录）。
+    pub expired_pairings: u64,
     /// 超过保留期、被删掉的通知。
     pub pruned_notifications: u64,
     pub blobs: Sweep,
@@ -98,6 +100,7 @@ pub async fn run_once(state: &Shared) -> Result<Report, sqlx::Error> {
         .execute(pool)
         .await?
         .rows_affected();
+    report.expired_pairings = crate::pairing::sweep(pool, now).await?;
 
     sqlx::query("DELETE FROM email_actions WHERE expires_at <= ?")
         .bind(now)

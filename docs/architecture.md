@@ -107,6 +107,7 @@
 | 公开       | `GET /healthz`、`GET /readyz`                                                                                                                  | 探活                                                                                                                                                                                                       |
 | 网页       | `GET`、`POST /web/login`、`GET`、`POST /web/register`、`GET /web/account`、`POST /web/account/password`、`POST /web/logout`                    | 系统浏览器里的登录页、注册页、账户页。服务端渲染；验证页仅用本站脚本把 URL 片段中的凭据填进 POST 表单并清除片段。公开注册，无邀请码；规则见[决策 0005](decisions/0005-public-email-accounts-and-github.md) |
 | 桌面登录   | `GET /desktop/authorize`、`POST /v1/auth/desktop/exchange`                                                                                     | 确认页把单次授权码经回环地址交回桌面端或助手入口；换码时完成设备注册                                                                                                                                       |
+| 手机登录   | `/web/pairing`、`POST /v1/pairing/claim`、`POST /v1/pairing/finish`                                                                            | 扫码配对：网页生成二维码，手机认领，本人核对六位数字后才放行。令牌只发给拿对 PKCE 校验器的手机；两个接口谁都能调，按来源限速。见[决策 0014](decisions/0014-iphone-client.md)                               |
 | 账户与设备 | `GET /v1/me`、`POST /v1/auth/logout`、`GET /v1/devices`、`PATCH /v1/devices/{id}`、`DELETE /v1/devices/{id}`                                   | 设备令牌只存摘要，可以在任意设备上远程撤销                                                                                                                                                                 |
 | 事件流     | `GET /v1/events`                                                                                                                               | SSE。持有这条连接就是"在线"                                                                                                                                                                                |
 | 发送到设备 | `POST /v1/sends`、`GET /v1/sends`、`GET /v1/sends/{id}/content`、`POST /v1/sends/{id}/accept`、`…/decline`、`…/cancel`、`…/failed`             | 正文是文件的字节。只能发给同账户的在线设备，而且对面得是能收文件的应用（电脑）；手机应用第一期收不了，发给它会被拒绝                                                                                       |
@@ -119,9 +120,10 @@
 ### 几条规则怎么落地
 
 - **设备的平台是一份会变长的清单，读的时候留了兜底。** 桌面端是 Windows、macOS、Linux，手机应用是 iPhone；这一版代码不认识的值归成"其他"，设备名单照常读得出来，不再有哪个平台能让一个账户的接口一起失败。只有电脑上的应用能收文件。加一个新平台的顺序是：服务端先升级，两台电脑再更新应用，然后才有新平台的设备登录。
+- **手机扫码配对只能往前走。** `pending → claimed → approved → consumed`，或者在任意一步变成 `denied`。一张票据只能被认领一次；网页上的人点"允许"之后，令牌只发给拿对 PKCE 校验器的手机；拿错的校验器试过一次，这张票据就作废。三分钟内没走完也算作废，由定时清理删掉。
 - **内容按摘要存放、按引用计数。** 云盘文件与待接收的发送都只是指向 `blobs` 的一行引用，磁盘上同一个内容只有一个文件；最后一个引用放掉时才删。上传时边收边核对长度与摘要，不一致就丢。
 - **发送只能往前走。** `offered → delivered | declined | cancelled | failed | expired`。到达终态就释放内容；重复的回执是幂等的。
-- **定时清理**每分钟一轮：过期的发送被标记并通知两边、太久的发送记录与过期的授权码和登录状态被删除、没人引用的内容与中断的暂存文件被清扫。服务端只有一个实例，这里不需要跨进程协调。
+- **定时清理**每分钟一轮：过期的发送被标记并通知两边、太久的发送记录与过期的授权码、配对和登录状态被删除、没人引用的内容与中断的暂存文件被清扫。服务端只有一个实例，这里不需要跨进程协调。
 - **正式服务与测试服务走同一段启停代码。** 退出信号先让事件流自行结束，再等在途连接，最多等十秒——计时从收到信号开始，不给服务定寿命。
 - **被提前拒绝的上传要先读完再拒绝。** 不然连接会在发送方还在上传时被关掉，它只看到"连不上服务"。
 - **日程与提醒只有一份名单。** 没有逐条的推送：`GET /v1/planner` 给出"还用得上的那一些"，任何一处改动都把整份重新算一遍，经事件流推给这个账户的每一台在线设备。
@@ -380,6 +382,7 @@ target/release/assemble-mcp print-config zcode --name "ZCode 的助手"
 | 收到的文件           | "下载/Assemble"，或用户选的文件夹                                                                                                                             | 只在 Rust 里记着完整位置                                                          |
 | 服务端的数据         | 数据目录下的 `assemble.sqlite3` 与 `blobs/`                                                                                                                   | 结构只经迁移脚本改动；影视图片原图/衍生图为 SQLite BLOB，不在 `blobs/`            |
 | 设备令牌（服务端）   | 数据库里只存摘要                                                                                                                                              | 密码只以 argon2id 散列保存                                                        |
+| 配对的票据（服务端） | 库里只有摘要（`device_pairings`）；还没被认领的那张另在服务进程的内存里留三分钟                                                                               | 留着是为了页面刷新时重画二维码；服务端重启它就没了，重新生成一张即可              |
 | Windows 右键菜单     | `HKCU\Software\Classes\*\shell\AssembleSend`                                                                                                                  | 指向这个可执行文件，不需要管理员权限                                              |
 
 传输记录只在内存里：应用重启后名单清空，已经落盘的文件留在接收位置。

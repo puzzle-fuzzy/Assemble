@@ -271,11 +271,16 @@ pub fn account_page(
     } else {
         "<p>尚未设置密码。<a href=\"/web/forgot\">通过邮箱设置密码</a></p>".to_owned()
     };
+    let phone = account_section(
+        "phone-title",
+        "手机",
+        "<p class=\"text-sm text-muted-foreground\">在手机上的 Assemble 里扫一次码，它就成为这个账户里的一台设备，能看到日程与提醒。</p><a href=\"/web/pairing\">添加手机</a>",
+    );
     page(
         "账户 · Assemble",
         "账户",
         &format!(
-            "<div class=\"flex min-w-0 items-center gap-3\">{}<div class=\"flex min-w-0 flex-col gap-1\"><p class=\"break-words font-medium\">{}</p><p class=\"break-words text-sm text-muted-foreground\">主邮箱：{}</p></div></div>{}{}{}{}{}<div {}></div><p class=\"text-sm text-muted-foreground\">修改密码只在网页进行。电脑与助手使用各自的设备凭据。</p><form method=\"post\" action=\"/web/logout\" aria-label=\"退出登录\">{}</form>",
+            "<div class=\"flex min-w-0 items-center gap-3\">{}<div class=\"flex min-w-0 flex-col gap-1\"><p class=\"break-words font-medium\">{}</p><p class=\"break-words text-sm text-muted-foreground\">主邮箱：{}</p></div></div>{}{}{}{}{}{}<div {}></div><p class=\"text-sm text-muted-foreground\">修改密码只在网页进行。电脑与助手使用各自的设备凭据。</p><form method=\"post\" action=\"/web/logout\" aria-label=\"退出登录\">{}</form>",
             avatar(account),
             escape(&account.display_name),
             escape(email),
@@ -288,6 +293,7 @@ pub fn account_page(
             github_form,
             password,
             email_form,
+            phone,
             attrs("separator"),
             button("退出登录", "outline_full", "type=\"submit\"")
         ),

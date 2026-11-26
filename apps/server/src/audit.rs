@@ -40,6 +40,8 @@ pub mod actions {
     pub const WEB_LOGOUT: &str = "web.logout";
     pub const DESKTOP_AUTHORIZED: &str = "desktop.authorized";
     pub const DESKTOP_DENIED: &str = "desktop.denied";
+    pub const PAIRING_ALLOWED: &str = "pairing.allowed";
+    pub const PAIRING_DENIED: &str = "pairing.denied";
     pub const DEVICE_REGISTERED: &str = "device.registered";
     pub const DEVICE_RENAMED: &str = "device.renamed";
     pub const DEVICE_REMOVED: &str = "device.removed";
