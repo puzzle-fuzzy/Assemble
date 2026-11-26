@@ -13,7 +13,10 @@
       "!data/local",
       "!data/runtime",
       "!apps/desktop/src-tauri",
-      "!apps/server/src/web_ui/generated"
+      "!apps/server/src/web_ui/generated",
+      "!apps/iphone/.build",
+      "!apps/iphone/Assemble.xcodeproj",
+      "!apps/iphone/Fixtures"
     ]
   },
   "formatter": { "enabled": true, "indentStyle": "space", "indentWidth": 2 },

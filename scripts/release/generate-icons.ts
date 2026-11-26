@@ -1,9 +1,10 @@
 // 生成应用图标的占位图：一个 7×7 的字母点阵。
 //
 // 这是占位用的中性图形，不是品牌设计。换成正式图标时，直接覆盖
-// `apps/desktop/src-tauri/icons/` 里的文件并删除本脚本即可。
+// `apps/desktop/src-tauri/icons/` 里的文件、换掉手机那一份，并删除本脚本即可。
 //
-//   bun run icons          生成 source.png 与 tray-icon.png，再交给 Tauri CLI 产出各平台尺寸
+//   bun run icons          生成 source.png 与 tray-icon.png，再交给 Tauri CLI 产出各平台尺寸；
+//                          顺带生成手机上那一份（`apps/iphone/App/Assets.xcassets`）
 //
 // 仅依赖 Bun 与 Node 内置模块，不需要图像库。
 
@@ -14,6 +15,10 @@ import { deflateSync } from "node:zlib";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const iconDir = join(here, "../../apps/desktop/src-tauri/icons");
+const phoneIcon = join(
+  here,
+  "../../apps/iphone/App/Assets.xcassets/AppIcon.appiconset/icon.png",
+);
 
 const GLYPH = [
   "..###..",
@@ -55,25 +60,27 @@ function chunk(type: string, data: Uint8Array): Buffer {
   return Buffer.concat([length, body, checksum]);
 }
 
-function encodePng(size: number, pixel: Pixel): Buffer {
-  const stride = size * 4 + 1;
+// `opaque` 为真时只写三个通道：手机上的图标不许带透明通道。
+function encodePng(size: number, pixel: Pixel, opaque = false): Buffer {
+  const channels = opaque ? 3 : 4;
+  const stride = size * channels + 1;
   const raw = Buffer.alloc(stride * size);
   for (let y = 0; y < size; y += 1) {
     raw[y * stride] = 0;
     for (let x = 0; x < size; x += 1) {
       const [red, green, blue, alpha] = pixel(x, y);
-      const offset = y * stride + 1 + x * 4;
+      const offset = y * stride + 1 + x * channels;
       raw[offset] = red;
       raw[offset + 1] = green;
       raw[offset + 2] = blue;
-      raw[offset + 3] = alpha;
+      if (!opaque) raw[offset + 3] = alpha;
     }
   }
   const header = Buffer.alloc(13);
   header.writeUInt32BE(size, 0);
   header.writeUInt32BE(size, 4);
   header[8] = 8;
-  header[9] = 6;
+  header[9] = opaque ? 2 : 6;
   return Buffer.concat([
     Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
     chunk("IHDR", header),
@@ -162,6 +169,30 @@ function sourceIcon(): Buffer {
   });
 }
 
+// 手机上的那一份：同一条字母点阵，铺满整个正方形。iOS 自己给图标切圆角，
+// 所以这里不做圆角，也不留透明通道（App Store 的要求）。
+function phoneIconImage(): Buffer {
+  const size = SOURCE_SIZE;
+  const cell = Math.round((size * 0.56) / GLYPH.length);
+  const origin = Math.round((size - cell * GLYPH.length) / 2);
+  return encodePng(
+    size,
+    (x, y) => {
+      const mark = coverage(x, y, (px, py) => inGlyph(px, py, origin, cell));
+      const blend = FOREGROUND.map(
+        (channel, index) => channel * mark + BACKGROUND[index] * (1 - mark),
+      );
+      return [
+        Math.round(blend[0] ?? 0),
+        Math.round(blend[1] ?? 0),
+        Math.round(blend[2] ?? 0),
+        255,
+      ];
+    },
+    true,
+  );
+}
+
 // 菜单栏模板图：纯黑加透明度，由系统按深浅外观着色。
 function trayIcon(): Buffer {
   const cell = 6;
@@ -178,7 +209,11 @@ function main(): void {
   mkdirSync(iconDir, { recursive: true });
   writeFileSync(join(iconDir, "source.png"), sourceIcon());
   writeFileSync(join(iconDir, "tray-icon.png"), trayIcon());
-  console.log(`已生成 ${join(iconDir, "source.png")} 与 tray-icon.png`);
+  mkdirSync(dirname(phoneIcon), { recursive: true });
+  writeFileSync(phoneIcon, phoneIconImage());
+  console.log(
+    `已生成 ${join(iconDir, "source.png")}、tray-icon.png 与手机上的图标`,
+  );
 }
 
 if (import.meta.main) {

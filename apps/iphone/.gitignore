@@ -1,0 +1,9 @@
+# SwiftPM 的编译产物
+.build/
+# XcodeGen 生成的工程文件，从 project.yml 现生成
+Assemble.xcodeproj/
+# Xcode 的本机状态
+DerivedData/
+*.xcuserstate
+xcuserdata/
+App/Info.plist

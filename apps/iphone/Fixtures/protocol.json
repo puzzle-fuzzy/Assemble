@@ -1,0 +1,323 @@
+{
+  "account": {
+    "avatarUrl": "https://avatars.githubusercontent.com/u/1?s=96",
+    "createdAt": "2026-11-11T12:26:40.000Z",
+    "displayName": "烟熏三文鱼",
+    "email": "someone@example.test",
+    "id": "u_8654646cf7d77493d56688e6",
+    "username": "烟熏三文鱼"
+  },
+  "devices": [
+    {
+      "createdAt": "2026-11-11T12:26:40.000Z",
+      "id": "device-Windows",
+      "lastSeenAt": "2026-11-11T09:40:00.000Z",
+      "name": "工作电脑",
+      "online": true,
+      "platform": "windows"
+    },
+    {
+      "createdAt": "2026-11-11T12:26:40.000Z",
+      "id": "device-Macos",
+      "lastSeenAt": "2026-11-11T11:03:20.000Z",
+      "name": "工作电脑",
+      "online": false,
+      "platform": "macos"
+    },
+    {
+      "createdAt": "2026-11-11T12:26:40.000Z",
+      "id": "device-Linux",
+      "name": "工作电脑",
+      "online": false,
+      "platform": "linux"
+    },
+    {
+      "createdAt": "2026-11-11T12:26:40.000Z",
+      "id": "device-Iphone",
+      "name": "我的 iPhone",
+      "online": false,
+      "platform": "iphone"
+    },
+    {
+      "createdAt": "2026-11-11T12:26:40.000Z",
+      "id": "device-Other",
+      "name": "将来的设备",
+      "online": false,
+      "platform": "other"
+    }
+  ],
+  "errors": [
+    {
+      "body": {
+        "error": {
+          "code": "INVALID_AUTH_CODE",
+          "message": "the pairing ticket is invalid, already used or expired"
+        }
+      },
+      "status": 400
+    },
+    {
+      "body": {
+        "error": {
+          "code": "TOO_MANY_ATTEMPTS",
+          "message": "too many pairing attempts from this address"
+        }
+      },
+      "status": 429
+    },
+    {
+      "body": {
+        "error": {
+          "code": "UNAUTHORIZED",
+          "message": "the device token is missing or invalid"
+        }
+      },
+      "status": 401
+    },
+    {
+      "body": {
+        "error": {
+          "code": "VERSION_CONFLICT",
+          "message": "the record changed since it was read"
+        }
+      },
+      "status": 409
+    },
+    {
+      "body": {
+        "error": {
+          "code": "INVALID_STATE",
+          "message": "the record is not in a state where this is allowed"
+        }
+      },
+      "status": 409
+    }
+  ],
+  "me": {
+    "account": {
+      "avatarUrl": "https://avatars.githubusercontent.com/u/1?s=96",
+      "createdAt": "2026-11-11T12:26:40.000Z",
+      "displayName": "烟熏三文鱼",
+      "email": "someone@example.test",
+      "id": "u_8654646cf7d77493d56688e6",
+      "username": "烟熏三文鱼"
+    },
+    "device": {
+      "createdAt": "2026-11-11T12:26:40.000Z",
+      "id": "device-Iphone",
+      "name": "我的 iPhone",
+      "online": false,
+      "platform": "iphone"
+    }
+  },
+  "pairingClaim": {
+    "codeChallenge": "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_",
+    "deviceName": "我的 iPhone",
+    "ticket": "abcdefghijklmnopqrstuvwxyz0123456789-_ABCDE"
+  },
+  "pairingClaimed": {
+    "confirmationCode": "004757",
+    "expiresAt": "2026-11-11T12:29:40.000Z"
+  },
+  "pairingFinish": {
+    "codeVerifier": "vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv",
+    "ticket": "abcdefghijklmnopqrstuvwxyz0123456789-_ABCDE"
+  },
+  "pairingOutcomes": {
+    "complete": {
+      "account": {
+        "avatarUrl": "https://avatars.githubusercontent.com/u/1?s=96",
+        "createdAt": "2026-11-11T12:26:40.000Z",
+        "displayName": "烟熏三文鱼",
+        "email": "someone@example.test",
+        "id": "u_8654646cf7d77493d56688e6",
+        "username": "烟熏三文鱼"
+      },
+      "device": {
+        "createdAt": "2026-11-11T12:26:40.000Z",
+        "id": "device-Iphone",
+        "name": "我的 iPhone",
+        "online": false,
+        "platform": "iphone"
+      },
+      "state": "complete",
+      "token": "ttttttttttttttttttttttttttttttttttttttttttt"
+    },
+    "denied": {
+      "state": "denied"
+    },
+    "pending": {
+      "state": "pending"
+    }
+  },
+  "planner": {
+    "notifications": [
+      {
+        "body": "带身份证\n杭州东站 浙江省杭州市上城区全福桥路2号",
+        "id": "c4cf4220b94fddee4f2fe490124b3fa9-1795741200000",
+        "kind": "schedule",
+        "occurrenceAt": "2026-11-27T01:00:00.000Z",
+        "raisedAt": "2026-11-27T00:20:00.000Z",
+        "scheduleId": "c4cf4220b94fddee4f2fe490124b3fa9",
+        "title": "火车"
+      },
+      {
+        "body": "驿站 8 点关门\n带上取件码",
+        "id": "n-r-soon",
+        "kind": "reminder",
+        "raisedAt": "2026-11-11T14:06:40.000Z",
+        "reminderId": "r-soon",
+        "title": "取快递"
+      },
+      {
+        "id": "s-daily-1794391200000",
+        "kind": "schedule",
+        "occurrenceAt": "2026-11-11T10:00:00.000Z",
+        "raisedAt": "2026-11-11T10:00:00.000Z",
+        "scheduleId": "s-daily",
+        "title": "站会"
+      }
+    ],
+    "reminders": [
+      {
+        "createdAt": "2026-11-11T11:53:20.000Z",
+        "createdBy": "测试的手机",
+        "dueAt": "2026-11-11T14:06:40.000Z",
+        "id": "r-soon",
+        "notes": "驿站 8 点关门\n带上取件码",
+        "status": "scheduled",
+        "title": "取快递",
+        "updatedAt": "2026-11-11T14:06:40.000Z",
+        "version": 1
+      },
+      {
+        "createdAt": "2026-11-11T11:53:20.000Z",
+        "createdBy": "测试的手机",
+        "dueAt": "2026-11-10T22:33:20.000Z",
+        "id": "r-overdue",
+        "status": "scheduled",
+        "title": "已经过了点还没人处理的",
+        "updatedAt": "2026-11-10T22:33:20.000Z",
+        "version": 1
+      },
+      {
+        "createdAt": "2026-11-11T11:53:20.000Z",
+        "createdBy": "测试的手机",
+        "dueAt": "2026-11-09T21:33:20.000Z",
+        "id": "r-fired",
+        "status": "fired",
+        "title": "到过点的",
+        "updatedAt": "2026-11-09T21:33:20.000Z",
+        "version": 2
+      },
+      {
+        "createdAt": "2026-11-11T11:53:20.000Z",
+        "createdBy": "测试的手机",
+        "dueAt": "2026-11-08T15:00:00.000Z",
+        "id": "r-dismissed",
+        "status": "dismissed",
+        "title": "看过了的",
+        "updatedAt": "2026-11-08T15:00:00.000Z",
+        "version": 3
+      },
+      {
+        "createdAt": "2026-11-11T11:53:20.000Z",
+        "createdBy": "测试的手机",
+        "dueAt": "2026-11-08T06:40:00.000Z",
+        "id": "r-cancelled",
+        "status": "cancelled",
+        "title": "不办了的",
+        "updatedAt": "2026-11-08T06:40:00.000Z",
+        "version": 2
+      }
+    ],
+    "schedules": [
+      {
+        "createdAt": "2026-11-11T12:26:40.000Z",
+        "createdBy": "ZCode 的助手",
+        "id": "c4cf4220b94fddee4f2fe490124b3fa9",
+        "location": {
+          "address": "浙江省杭州市上城区全福桥路2号",
+          "label": "杭州东站"
+        },
+        "notes": "带身份证",
+        "remindBefore": 90,
+        "repeat": "none",
+        "startAt": "2026-11-27T01:00:00.000Z",
+        "status": "upcoming",
+        "title": "火车",
+        "updatedAt": "2026-11-11T12:28:20.000Z",
+        "version": 1
+      },
+      {
+        "createdAt": "2026-11-11T12:26:40.000Z",
+        "createdBy": "ZCode 的助手",
+        "id": "s-emoji",
+        "repeat": "none",
+        "startAt": "2026-11-16T03:33:20.000Z",
+        "status": "upcoming",
+        "title": "与 🐟 的会面：季度回顾",
+        "updatedAt": "2026-11-11T12:28:20.000Z",
+        "version": 7
+      },
+      {
+        "createdAt": "2026-11-11T12:26:40.000Z",
+        "createdBy": "ZCode 的助手",
+        "endAt": "2026-11-10T09:10:00.000Z",
+        "id": "s-daily",
+        "repeat": "daily",
+        "repeatUntil": "2026-12-09T18:13:20.000Z",
+        "startAt": "2026-11-10T08:40:00.000Z",
+        "status": "upcoming",
+        "title": "站会",
+        "updatedAt": "2026-11-11T12:28:20.000Z",
+        "version": 2
+      },
+      {
+        "createdAt": "2026-11-11T12:26:40.000Z",
+        "createdBy": "ZCode 的助手",
+        "id": "s-weekly",
+        "remindBefore": 15,
+        "repeat": "weekly",
+        "startAt": "2026-11-11T12:26:40.000Z",
+        "status": "upcoming",
+        "title": "周会",
+        "updatedAt": "2026-11-11T12:28:20.000Z",
+        "version": 1
+      },
+      {
+        "createdAt": "2026-11-11T12:26:40.000Z",
+        "createdBy": "ZCode 的助手",
+        "id": "s-monthly",
+        "repeat": "monthly",
+        "startAt": "2026-01-11T14:56:40.000Z",
+        "status": "upcoming",
+        "title": "还信用卡",
+        "updatedAt": "2026-11-11T12:28:20.000Z",
+        "version": 3
+      },
+      {
+        "createdAt": "2026-11-11T12:26:40.000Z",
+        "createdBy": "ZCode 的助手",
+        "id": "s-done",
+        "repeat": "none",
+        "startAt": "2026-11-06T21:20:00.000Z",
+        "status": "done",
+        "title": "已经结束的",
+        "updatedAt": "2026-11-11T12:28:20.000Z",
+        "version": 2
+      },
+      {
+        "createdAt": "2026-11-11T12:26:40.000Z",
+        "createdBy": "ZCode 的助手",
+        "id": "s-cancelled",
+        "repeat": "none",
+        "startAt": "2026-11-06T21:20:00.000Z",
+        "status": "cancelled",
+        "title": "已经结束的",
+        "updatedAt": "2026-11-11T12:28:20.000Z",
+        "version": 2
+      }
+    ]
+  }
+}

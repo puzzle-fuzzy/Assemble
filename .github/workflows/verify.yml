@@ -41,3 +41,7 @@ jobs:
       - uses: oven-sh/setup-bun@v2
       - run: bun install --frozen-lockfile
       - run: bun run verify
+      # iPhone 应用的核心包是 Swift，要 Xcode 的工具链：只在 macOS 那一栏测。
+      # 样本由 Rust 侧的测试生成并比对，所以协议一改这里也先红。
+      - run: bun run iphone:test
+        if: runner.os == 'macOS'

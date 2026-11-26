@@ -21,7 +21,7 @@ import {
 const LISTING = `
 Policy: Code Signing
   Matching identities
-  1) 264AA190BEC38AC4E29133D5DEED56A6A6D3C854 "Apple Development: someone@example.com (CB66NPS4UB)"
+  1) 0000000000000000000000000000000000000000 "Apple Development: someone@example.com (ABCDE12345)"
   2) 9756FFD1D4E31C3F3A1B2C9D0E5F7A8B9C0D1E "${LOCAL_IDENTITY}" (CSSMERR_TP_NOT_TRUSTED)
      2 identities found
 `;

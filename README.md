@@ -126,6 +126,7 @@ apps/desktop/           桌面端（Tauri 2）
   src-tauri/            应用壳：窗口、托盘、生命周期与具名命令
 apps/mcp/               给助手用的入口 assemble-mcp：标准输入输出上的 MCP 服务端，日程、提醒与私人备忘录工具
 apps/admin/             同源网页管理端：概览、用户、设备、登录记录与共享影视维护
+apps/iphone/             iPhone 应用第一期（SwiftUI）：日程与提醒、本地通知、扫码登录；核心包 AssembleCore 不依赖界面
 apps/media-web/         同源 /movies/ 影视展示站：海报墙与详情，只读
 packages/media/         影视共享类型、校验、浏览器适配、业务组件与中英字典
 packages/ui/            各界面共用的 shadcn 基础组件、主题与字体

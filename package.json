@@ -41,7 +41,9 @@
     "media:build": "bun run --filter @assemble/media-web build",
     "browser:build": "bun run --filter @assemble/browser-extension build",
     "browser:host": "cargo build -p assemble-desktop --bin assemble-browser-host --release && bun run sign:mac",
-    "browser:install": "bun scripts/browser-extension/install-native.ts"
+    "browser:install": "bun scripts/browser-extension/install-native.ts",
+    "iphone:test": "swift test --package-path apps/iphone",
+    "iphone:simulate": "bun scripts/iphone/simulate.ts"
   },
   "devDependencies": {
     "@biomejs/biome": "2.6.8",
