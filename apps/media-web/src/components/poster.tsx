@@ -1,15 +1,17 @@
-import type {
-  ImageLoader,
-  MediaCandidate,
-  MediaEntry,
-  MediaImage,
-  MediaImageVariant,
+import {
+  browserImageLoader,
+  type ImageLoader,
+  type MediaCandidate,
+  type MediaEntry,
+  type MediaImage,
+  type MediaImageVariant,
 } from "@assemble/media";
 import { Button } from "@assemble/ui/button";
 import { cn } from "@assemble/ui/lib/utils";
 import { LoadingState } from "@assemble/ui/loading-state";
 import { FilmIcon, RotateCwIcon } from "lucide-react";
 import { useEffect, useState } from "react";
+import { browserImageSource, posterImageSources } from "../lib/browser-image";
 import { useSiteTranslation } from "../lib/i18n";
 import { catalogPath, entryPath } from "../lib/navigation";
 import { SiteLink } from "./common";
@@ -22,6 +24,7 @@ export function MediaImageView({
   className = "",
   priority = false,
   allowRetry = true,
+  responsivePoster = false,
 }: {
   image: MediaImage | null;
   imageLoader: ImageLoader;
@@ -30,24 +33,36 @@ export function MediaImageView({
   className?: string;
   priority?: boolean;
   allowRetry?: boolean;
+  responsivePoster?: boolean;
 }) {
   const { t } = useSiteTranslation();
   const [revision, setRevision] = useState(0);
   const [result, setResult] = useState<{
     key: string;
     source: string | null;
+    loader: ImageLoader;
   } | null>(null);
   const key = `${image?.assetId}:${variant}:${revision}`;
-  const source = result?.key === key ? result.source : undefined;
+  const loaded =
+    result?.key === key && result.loader === imageLoader ? result : null;
+  // 浏览器资产只有固定同源路径，直接让 HTML 图片元素启动请求。
+  const source =
+    loaded?.source === null
+      ? null
+      : imageLoader === browserImageLoader && image
+        ? browserImageSource(image, variant)
+        : loaded?.source;
   useEffect(() => {
-    if (!image) return;
+    if (!image || imageLoader === browserImageLoader) return;
     const controller = new AbortController();
     void imageLoader(image, variant, controller.signal).then(
       (source) => {
-        if (!controller.signal.aborted) setResult({ key, source });
+        if (!controller.signal.aborted)
+          setResult({ key, source, loader: imageLoader });
       },
       () => {
-        if (!controller.signal.aborted) setResult({ key, source: null });
+        if (!controller.signal.aborted)
+          setResult({ key, source: null, loader: imageLoader });
       },
     );
     return () => controller.abort();
@@ -91,7 +106,7 @@ export function MediaImageView({
         )}
       </div>
     );
-  return (
+  const imageElement = (
     <img
       className={cn("media-image", className)}
       src={source}
@@ -100,10 +115,24 @@ export function MediaImageView({
       alt={alt}
       loading={priority ? "eager" : "lazy"}
       decoding="async"
-      fetchPriority={priority ? "high" : "auto"}
-      onError={() => setResult({ key, source: null })}
+      fetchPriority={priority ? "high" : "low"}
+      onError={() => setResult({ key, source: null, loader: imageLoader })}
     />
   );
+  if (responsivePoster && imageLoader === browserImageLoader)
+    return (
+      <picture>
+        {posterImageSources.map(({ media, variant: candidate }) => (
+          <source
+            key={media}
+            media={media}
+            srcSet={browserImageSource(image, candidate) ?? undefined}
+          />
+        ))}
+        {imageElement}
+      </picture>
+    );
+  return imageElement;
 }
 
 export function PosterCard({
@@ -131,6 +160,7 @@ export function PosterCard({
         imageLoader={imageLoader}
         alt=""
         priority={priority}
+        responsivePoster
         className="poster-art"
       />
       <div className="poster-caption">

@@ -3,6 +3,7 @@ import { setLanguage } from "@assemble/display";
 import type { MediaEntry, MediaSession } from "@assemble/media";
 import { act } from "react";
 import { App } from "./App";
+import { discardHomePreload, preloadAnonymousHome } from "./lib/home-preload";
 import { mediaSiteResources } from "./lib/i18n";
 import { navigate, readRoute, wallPath } from "./lib/navigation";
 import { button, cleanup, click, render, settle } from "./test-support/dom";
@@ -154,6 +155,7 @@ beforeEach(() => {
 });
 
 afterEach(async () => {
+  discardHomePreload();
   await cleanup();
   globalThis.fetch = originalFetch;
   setLanguage("zh-CN");
@@ -163,6 +165,60 @@ afterEach(async () => {
 });
 
 describe("影视展示端", () => {
+  test.each([false, true])(
+    "首屏只向确认匿名的会话提供公开预取，登录状态 %s",
+    async (signedIn) => {
+      session = { account: signedIn ? account : null };
+      const previousFetch = window.fetch;
+      window.fetch = globalThis.fetch;
+      try {
+        preloadAnonymousHome();
+        const host = await render(<App />);
+        expect(host.textContent).toContain(entry.title);
+        const lists = requests.filter(
+          ({ path }) =>
+            new URL(path, "http://localhost").pathname ===
+            "/v1/media/shared/entries",
+        );
+        expect(lists).toHaveLength(signedIn ? 6 : 3);
+        expect(
+          lists.filter(({ init }) => init?.credentials === "omit"),
+        ).toHaveLength(3);
+        if (signedIn) expect(window.assembleMediaHomePreload).toBeUndefined();
+      } finally {
+        window.fetch = previousFetch;
+      }
+    },
+  );
+
+  test("首屏预取中重新核验会话会取消旧请求，并恢复当前会话的加载", async () => {
+    handle = (path, init) =>
+      new URL(path, "http://localhost").pathname ===
+        "/v1/media/shared/entries" && init?.credentials === "omit"
+        ? new Promise<Response>(() => {})
+        : response(path);
+    const previousFetch = window.fetch;
+    window.fetch = globalThis.fetch;
+    try {
+      preloadAnonymousHome();
+      const host = await render(<App />);
+      expect(host.textContent).not.toContain(entry.title);
+      await act(async () => window.dispatchEvent(new Event("focus")));
+      await settle();
+      expect(host.textContent).toContain(entry.title);
+      expect(host.textContent).not.toContain("暂时无法载入");
+      const preloadRequests = requests.filter(
+        ({ init }) => init?.credentials === "omit",
+      );
+      expect(preloadRequests).toHaveLength(3);
+      expect(preloadRequests.every(({ init }) => init?.signal?.aborted)).toBe(
+        true,
+      );
+    } finally {
+      window.fetch = previousFetch;
+    }
+  });
+
   test("匿名首页只有类型切换和三种状态海报分区，没有header和管理筛选", async () => {
     const host = await render(<App />);
     expect(host.textContent).toContain(entry.title);
@@ -241,6 +297,86 @@ describe("影视展示端", () => {
     if (!back) throw new Error("BACK_LINK_MISSING");
     await click(back);
     expect(window.location.search).toBe("?mediaType=tv&plannedPage=2");
+  });
+
+  test("慢速翻页保留当前海报、分页焦点和其他分区，只请求目标页", async () => {
+    let finish: ((value: Response) => void) | undefined;
+    handle = (path) => {
+      const url = new URL(path, "http://localhost");
+      if (url.pathname !== "/v1/media/shared/entries") return response(path);
+      const page = Number(url.searchParams.get("page") ?? 1);
+      if (page === 2)
+        return new Promise<Response>((resolve) => {
+          finish = resolve;
+        });
+      return json(
+        list(
+          [{ ...entry, title: `第一页-${url.searchParams.get("status")}` }],
+          page,
+          48,
+        ),
+      );
+    };
+    const host = await render(<App />);
+    const shelf = host.querySelector<HTMLElement>(
+      '[aria-labelledby="shelf-planned"]',
+    );
+    if (!shelf) throw new Error("SHELF_MISSING");
+    const grid = shelf.querySelector(".poster-grid");
+    const next = button(shelf, "下一页");
+    await act(async () => next.focus());
+    const count = requests.length;
+    await click(next);
+    expect(window.location.search).toBe("?plannedPage=2");
+    expect(shelf.getAttribute("aria-busy")).toBe("true");
+    expect(shelf.querySelector(".poster-grid")).toBe(grid);
+    expect(grid?.hasAttribute("inert")).toBe(true);
+    expect(shelf.textContent).toContain("第一页-planned");
+    expect(document.activeElement).toBe(next);
+    expect(next.getAttribute("aria-disabled")).toBe("true");
+    expect(requests.slice(count)).toHaveLength(1);
+    await click(next);
+    expect(requests.slice(count)).toHaveLength(1);
+    await act(async () =>
+      finish?.(json(list([{ ...entry, title: "第二页" }], 2, 48))),
+    );
+    await settle();
+    expect(shelf.getAttribute("aria-busy")).toBe("false");
+    expect(grid?.hasAttribute("inert")).toBe(false);
+    expect(shelf.textContent).toContain("第二页");
+    expect(document.activeElement).toBe(next);
+    expect(host.textContent).toContain("第一页-completed");
+  });
+
+  test("切换类型立即隐藏旧页，迟到的翻页响应不能覆盖新类型", async () => {
+    let finish: ((value: Response) => void) | undefined;
+    handle = (path) => {
+      const url = new URL(path, "http://localhost");
+      if (url.pathname !== "/v1/media/shared/entries") return response(path);
+      if (url.searchParams.get("mediaType") === "tv")
+        return json(list([{ ...entry, title: "新类型剧集" }], 1, 48));
+      if (url.searchParams.get("page") === "2")
+        return new Promise<Response>((resolve) => {
+          finish = resolve;
+        });
+      return json(list([{ ...entry, title: "旧类型电影" }], 1, 48));
+    };
+    const host = await render(<App />);
+    const shelf = host.querySelector<HTMLElement>(
+      '[aria-labelledby="shelf-planned"]',
+    );
+    if (!shelf) throw new Error("SHELF_MISSING");
+    await click(button(shelf, "下一页"));
+    const signal = requests.at(-1)?.init?.signal;
+    await click(button(host, "剧集"));
+    expect(signal?.aborted).toBe(true);
+    expect(host.textContent).not.toContain("旧类型电影");
+    await act(async () =>
+      finish?.(json(list([{ ...entry, title: "迟到电影" }], 2, 48))),
+    );
+    await settle();
+    expect(host.textContent).toContain("新类型剧集");
+    expect(host.textContent).not.toContain("迟到电影");
   });
 
   test("匿名访问私人地址只显示登录入口，不发私人请求", async () => {

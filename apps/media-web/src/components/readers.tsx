@@ -1,12 +1,9 @@
-import {
-  type ImageLoader,
-  type MediaClient,
-  type MediaCollectionsClient,
-  MediaDetails,
-  type MediaEntry,
+import type {
+  ImageLoader,
+  MediaClient,
+  MediaCollectionsClient,
 } from "@assemble/media";
 import { Badge } from "@assemble/ui/badge";
-import { Button } from "@assemble/ui/button";
 import {
   Card,
   CardContent,
@@ -14,15 +11,6 @@ import {
   CardHeader,
   CardTitle,
 } from "@assemble/ui/card";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@assemble/ui/dialog";
-import { Separator } from "@assemble/ui/separator";
 import { ToggleGroup, ToggleGroupItem } from "@assemble/ui/toggle-group";
 import { useEffect, useRef, useState } from "react";
 import { useSiteTranslation } from "../lib/i18n";
@@ -42,7 +30,9 @@ import {
   RequestError,
   SiteLink,
 } from "./common";
+import { DetailViewer, PosterViewer } from "./detail-viewer";
 import { MediaImageView, PosterCard } from "./poster";
+import "./detail-viewer.css";
 
 type ReaderProps = { client: MediaClient; imageLoader: ImageLoader };
 
@@ -72,8 +62,10 @@ export function EntryReader({
         <RequestError status={resource.status} retry={retry} />
       ) : (
         <>
-          <MediaDetails
-            presentation="reader"
+          <DetailViewer
+            key={`${client.scope}:${resource.value.id}`}
+            client={client}
+            sessionSignal={sessionSignal}
             entry={resource.value}
             imageLoader={imageLoader}
             onActor={(identity) =>
@@ -109,82 +101,10 @@ export function EntryReader({
               !signedIn ? () => window.location.assign(loginPath) : undefined
             }
           />
-          <Gallery
-            client={client}
-            entry={resource.value}
-            imageLoader={imageLoader}
-          />
           <Title title={`${resource.value.title} · ${t("brand")}`} />
         </>
       )}
     </div>
-  );
-}
-
-function Gallery({
-  client,
-  entry,
-  imageLoader,
-}: ReaderProps & { entry: MediaEntry }) {
-  const { t } = useSiteTranslation();
-  const { resource, retry } = useResource(
-    `${client.scope}:${entry.id}:gallery`,
-    (signal) => client.gallery(entry.id, signal),
-  );
-  if (resource.phase === "ready" && resource.value.items.length === 0)
-    return null;
-  return (
-    <section className="flex flex-col gap-4">
-      <Separator />
-      <h2 className="text-lg font-semibold">{t("gallery")}</h2>
-      {resource.phase === "loading" ? (
-        <LoadingContent />
-      ) : resource.phase === "failed" ? (
-        <RequestError status={resource.status} retry={retry} />
-      ) : (
-        <div className="gallery-grid">
-          {resource.value.items.map((image, index) => {
-            const description = t("galleryImage", {
-              title: entry.title,
-              number: index + 1,
-            });
-            return (
-              <Dialog key={image.assetId}>
-                <DialogTrigger asChild>
-                  <Button
-                    variant="ghost"
-                    className="gallery-trigger"
-                    aria-label={description}
-                  >
-                    <MediaImageView
-                      image={image}
-                      imageLoader={imageLoader}
-                      alt=""
-                      variant="360"
-                      className="gallery-art"
-                      allowRetry={false}
-                    />
-                  </Button>
-                </DialogTrigger>
-                <DialogContent className="max-w-[min(94dvw,72rem)]">
-                  <DialogHeader>
-                    <DialogTitle>{entry.title}</DialogTitle>
-                    <DialogDescription>{description}</DialogDescription>
-                  </DialogHeader>
-                  <MediaImageView
-                    image={image}
-                    imageLoader={imageLoader}
-                    alt={description}
-                    variant="original"
-                    className="gallery-expanded"
-                  />
-                </DialogContent>
-              </Dialog>
-            );
-          })}
-        </div>
-      )}
-    </section>
   );
 }
 
@@ -207,13 +127,10 @@ export function CatalogReader({
       ) : (
         <article className="flex flex-col gap-6">
           <div className="catalog-intro">
-            <MediaImageView
+            <PosterViewer
               image={resource.value.poster}
               imageLoader={imageLoader}
-              alt={resource.value.title}
-              variant="480"
-              className="catalog-poster"
-              priority
+              title={resource.value.title}
             />
             <header className="flex min-w-0 flex-col items-start gap-3">
               <Badge variant="outline">{t("catalog")}</Badge>

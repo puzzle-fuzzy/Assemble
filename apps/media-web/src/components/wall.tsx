@@ -8,43 +8,46 @@ import { ToggleGroup, ToggleGroupItem } from "@assemble/ui/toggle-group";
 import { useEffect } from "react";
 import { useSiteTranslation } from "../lib/i18n";
 import { navigate, type ShelfPages, wallPath } from "../lib/navigation";
-import { useResource } from "../lib/use-resource";
-import { LoadingContent, Pagination, RequestError } from "./common";
+import { useShelf } from "../lib/use-shelf";
+import { Pagination, RequestError } from "./common";
 import { PosterCard } from "./poster";
-
-function useShelf(
-  client: MediaClient,
-  query: MediaQuery,
-  status: MediaStatus,
-  page: number,
-) {
-  const request: MediaQuery = {
-    mediaType: query.mediaType,
-    status,
-    page,
-    pageSize: 12,
-    sort: status === "completed" ? "watched" : "updated",
-  };
-  return useResource(`${client.scope}:${JSON.stringify(request)}`, (signal) =>
-    client.list(request, signal),
-  );
-}
+import { ShelfSkeleton } from "./shelf-skeleton";
 
 export function LibraryWall({
   client,
   query,
   pages,
   imageLoader,
+  sessionSignal,
 }: {
   client: MediaClient;
   query: MediaQuery;
   pages: ShelfPages;
   imageLoader: ImageLoader;
+  sessionSignal: AbortSignal;
 }) {
   const { t } = useSiteTranslation();
-  const planned = useShelf(client, query, "planned", pages.planned);
-  const watching = useShelf(client, query, "watching", pages.watching);
-  const completed = useShelf(client, query, "completed", pages.completed);
+  const planned = useShelf(
+    client,
+    query,
+    "planned",
+    pages.planned,
+    sessionSignal,
+  );
+  const watching = useShelf(
+    client,
+    query,
+    "watching",
+    pages.watching,
+    sessionSignal,
+  );
+  const completed = useShelf(
+    client,
+    query,
+    "completed",
+    pages.completed,
+    sessionSignal,
+  );
   const shelves = [
     { status: "planned", ...planned },
     { status: "watching", ...watching },
@@ -52,12 +55,12 @@ export function LibraryWall({
   ] as const;
   useEffect(() => {
     const next = { ...pages };
-    for (const { status, resource } of [
+    for (const { status, resource, pending } of [
       { status: "planned", ...planned },
       { status: "watching", ...watching },
       { status: "completed", ...completed },
     ] as const) {
-      if (resource.phase === "ready")
+      if (!pending && resource.phase === "ready")
         next[status] = Math.min(
           pages[status],
           Math.max(
@@ -115,7 +118,7 @@ export function LibraryWall({
           {t("noEntries")}
         </p>
       ) : (
-        shelves.map(({ status, resource, retry }) => {
+        shelves.map(({ status, resource, pending, retry }) => {
           if (resource.phase === "ready" && resource.value.total === 0)
             return null;
           const title = t(status === "completed" ? "recentlyWatched" : status);
@@ -124,7 +127,7 @@ export function LibraryWall({
               key={status}
               className="home-shelf"
               aria-labelledby={`shelf-${status}`}
-              aria-busy={resource.phase === "loading"}
+              aria-busy={pending}
             >
               <div className="shelf-heading">
                 <h2 id={`shelf-${status}`}>{title}</h2>
@@ -135,12 +138,15 @@ export function LibraryWall({
                 )}
               </div>
               {resource.phase === "loading" ? (
-                <LoadingContent wall />
+                <ShelfSkeleton />
               ) : resource.phase === "failed" ? (
                 <RequestError status={resource.status} retry={retry} />
               ) : (
                 <>
-                  <div className="poster-grid">
+                  <div
+                    className={`poster-grid${resource.value.total > resource.value.pageSize ? " shelf-grid" : ""}`}
+                    inert={pending}
+                  >
                     {resource.value.items.map((entry, index) => (
                       <PosterCard
                         key={entry.id}
@@ -153,6 +159,7 @@ export function LibraryWall({
                   </div>
                   <Pagination
                     compact
+                    pending={pending}
                     label={t("shelfPagination", { title })}
                     page={resource.value.page}
                     total={resource.value.total}

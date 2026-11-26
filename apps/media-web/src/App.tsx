@@ -8,20 +8,24 @@ import {
 import { Alert, AlertDescription, AlertTitle } from "@assemble/ui/alert";
 import { Button } from "@assemble/ui/button";
 import { DisplayPreferencesMenu } from "@assemble/ui/display-preferences";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  lazy,
+  Suspense,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import {
   EmptyContentView,
   LoadingContent,
   SiteLink,
 } from "./components/common";
-import {
-  ActorReader,
-  CatalogReader,
-  CollectionReader,
-  CollectionsReader,
-  EntryReader,
-} from "./components/readers";
+import { ReaderBoundary } from "./components/reader-boundary";
+import { WallSkeleton } from "./components/shelf-skeleton";
 import { LibraryWall } from "./components/wall";
+import { createHomePreloadFetch, discardHomePreload } from "./lib/home-preload";
 import { useSiteTranslation } from "./lib/i18n";
 import {
   loginPath,
@@ -29,6 +33,32 @@ import {
   type SiteRoute,
   useSiteLocation,
 } from "./lib/navigation";
+
+const EntryReader = lazy(() =>
+  import("./components/readers").then((module) => ({
+    default: module.EntryReader,
+  })),
+);
+const CatalogReader = lazy(() =>
+  import("./components/readers").then((module) => ({
+    default: module.CatalogReader,
+  })),
+);
+const ActorReader = lazy(() =>
+  import("./components/readers").then((module) => ({
+    default: module.ActorReader,
+  })),
+);
+const CollectionsReader = lazy(() =>
+  import("./components/readers").then((module) => ({
+    default: module.CollectionsReader,
+  })),
+);
+const CollectionReader = lazy(() =>
+  import("./components/readers").then((module) => ({
+    default: module.CollectionReader,
+  })),
+);
 
 type SessionState =
   | { phase: "checking" }
@@ -52,6 +82,7 @@ function useSession() {
   const prepareCheck = useCallback(() => {
     const snapshot = current.current;
     if (snapshot.phase !== "ready") return;
+    discardHomePreload();
     if (!snapshot.checking && document.activeElement instanceof HTMLElement) {
       previousFocus.current = {
         element: document.activeElement,
@@ -70,7 +101,8 @@ function useSession() {
     prepareCheck();
     void getMediaSession(next.signal).then(
       (session) => {
-        if (!next.signal.aborted)
+        if (!next.signal.aborted) {
+          if (session.account !== null) discardHomePreload();
           setState({
             phase: "ready",
             session,
@@ -78,9 +110,11 @@ function useSession() {
             checking: false,
             signal: next.signal,
           });
+        }
       },
       () => {
-        if (!next.signal.aborted)
+        if (!next.signal.aborted) {
+          discardHomePreload();
           setState({
             phase: "ready",
             session: { account: null },
@@ -88,6 +122,7 @@ function useSession() {
             checking: false,
             signal: next.signal,
           });
+        }
       },
     );
   }, [prepareCheck]);
@@ -108,6 +143,7 @@ function useSession() {
     refresh();
     const visibility = () => {
       if (document.visibilityState === "hidden") {
+        discardHomePreload();
         controller.current?.abort();
         prepareCheck();
       } else refresh();
@@ -148,7 +184,11 @@ export function App() {
       </a>
       <main id="main-content" className="site-main" tabIndex={-1}>
         {state.phase === "checking" ? (
-          <LoadingContent />
+          route.kind === "wall" ? (
+            <WallSkeleton />
+          ) : (
+            <LoadingContent />
+          )
         ) : (
           <>
             {state.checking && <LoadingContent />}
@@ -184,12 +224,21 @@ export function App() {
                   )}
                 </EmptyContentView>
               ) : (
-                <SiteContent
+                <ReaderBoundary
                   key={`${account?.id ?? "anonymous"}:${location.split("?")[0]}`}
-                  route={route}
-                  signedIn={account !== null}
-                  sessionSignal={state.signal}
-                />
+                  retry={() => window.location.reload()}
+                >
+                  <Suspense fallback={<LoadingContent />}>
+                    <SiteContent
+                      route={route}
+                      signedIn={account !== null}
+                      confirmedAnonymous={
+                        !state.failed && state.session.account === null
+                      }
+                      sessionSignal={state.signal}
+                    />
+                  </Suspense>
+                </ReaderBoundary>
               )}
             </div>
           </>
@@ -243,14 +292,25 @@ export function App() {
 function SiteContent({
   route,
   signedIn,
+  confirmedAnonymous,
   sessionSignal,
 }: {
   route: SiteRoute;
   signedIn: boolean;
+  confirmedAnonymous: boolean;
   sessionSignal: AbortSignal;
 }) {
   const { t } = useSiteTranslation();
-  const shared = useMemo(() => createBrowserMediaClient("shared"), []);
+  const shared = useMemo(
+    () =>
+      createBrowserMediaClient(
+        "shared",
+        confirmedAnonymous
+          ? { fetch: createHomePreloadFetch({ account: null }) }
+          : undefined,
+      ),
+    [confirmedAnonymous],
+  );
   const privateClient = useMemo(() => createBrowserMediaClient("private"), []);
   const collections = useMemo(() => createBrowserMediaCollectionsClient(), []);
   const props = { imageLoader: browserImageLoader };
@@ -261,6 +321,7 @@ function SiteContent({
           client={route.scope === "private" ? privateClient : shared}
           query={route.query}
           pages={route.pages}
+          sessionSignal={sessionSignal}
           {...props}
         />
       );

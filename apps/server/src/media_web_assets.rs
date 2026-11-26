@@ -46,9 +46,21 @@ fn spa_route(path: &str) -> bool {
     }
 }
 async fn headers(request: Request, next: Next) -> Response {
+    let fingerprinted = fingerprinted_asset(request.uri().path());
     let mut response = next.run(request).await;
+    // 只有构建器按内容命名的静态资源能跨版本复用；HTML 和错误不能长留。
+    let cache_control = if fingerprinted
+        && (response.status().is_success() || response.status() == StatusCode::NOT_MODIFIED)
+    {
+        "public, max-age=31536000, immutable"
+    } else {
+        "no-store"
+    };
     let headers = response.headers_mut();
-    headers.insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    headers.insert(
+        header::CACHE_CONTROL,
+        HeaderValue::from_static(cache_control),
+    );
     headers.insert(
         header::X_CONTENT_TYPE_OPTIONS,
         HeaderValue::from_static("nosniff"),
@@ -63,4 +75,41 @@ async fn headers(request: Request, next: Next) -> Response {
     );
     headers.insert(header::CONTENT_SECURITY_POLICY,HeaderValue::from_static("default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data: https://avatars.githubusercontent.com; connect-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; form-action 'self'"));
     response
+}
+
+fn fingerprinted_asset(path: &str) -> bool {
+    let Some(filename) = path.strip_prefix("/movies/assets/") else {
+        return false;
+    };
+    if filename.contains('/') {
+        return false;
+    }
+    let Some((stem, extension)) = filename.rsplit_once('.') else {
+        return false;
+    };
+    if !matches!(
+        extension,
+        "js" | "css"
+            | "woff2"
+            | "woff"
+            | "ttf"
+            | "otf"
+            | "png"
+            | "jpg"
+            | "jpeg"
+            | "webp"
+            | "avif"
+            | "svg"
+            | "ico"
+    ) || stem.len() <= 9
+    {
+        return false;
+    }
+    // Vite 默认的八位摘要包含连字符，不能按最后一个连字符拆文件名。
+    stem.get(stem.len() - 9..).is_some_and(|suffix| {
+        suffix.starts_with('-')
+            && suffix.as_bytes()[1..]
+                .iter()
+                .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
+    })
 }

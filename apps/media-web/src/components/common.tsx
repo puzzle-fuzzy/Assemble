@@ -122,6 +122,7 @@ export function Pagination({
   pageSize,
   onPage,
   compact = false,
+  pending = false,
   label,
 }: {
   page: number;
@@ -129,6 +130,7 @@ export function Pagination({
   pageSize: number;
   onPage: (page: number) => void;
   compact?: boolean;
+  pending?: boolean;
   label?: string;
 }) {
   const { t } = useSiteTranslation();
@@ -143,7 +145,10 @@ export function Pagination({
         <Button
           variant="outline"
           disabled={page <= 1}
-          onClick={() => onPage(page - 1)}
+          aria-disabled={pending || page <= 1}
+          onClick={() => {
+            if (!pending) onPage(page - 1);
+          }}
         >
           <ArrowLeftIcon data-icon="inline-start" />
           {t("previous")}
@@ -151,7 +156,10 @@ export function Pagination({
         <Button
           variant="outline"
           disabled={page >= pages}
-          onClick={() => onPage(page + 1)}
+          aria-disabled={pending || page >= pages}
+          onClick={() => {
+            if (!pending) onPage(page + 1);
+          }}
         >
           {t("next")}
           <ArrowRightIcon data-icon="inline-end" />

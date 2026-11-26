@@ -1260,6 +1260,115 @@ async fn collections_cannot_contain_private_entries_and_nested_projections_remov
     h.stop().await;
 }
 
+#[tokio::test]
+async fn movies_only_cache_successful_fingerprinted_static_assets() {
+    let h = Harness::start(None).await;
+    let directory = &h.state.config.media_web_assets_dir;
+    std::fs::create_dir(directory.join("assets")).unwrap();
+    for path in [
+        "assets/index-A1b2_C-d.js",
+        "assets/index-AbCd1234.css",
+        "assets/geist-latin-DC-KSUi6.woff2",
+        "assets/poster-aBc123_-.webp",
+        "assets/index.js",
+        "assets/index-short.js",
+        "assets/index-A1b2_C-d.html",
+        "display-preferences.js",
+    ] {
+        std::fs::write(directory.join(path), "fixture").unwrap();
+    }
+    for path in [
+        "/movies/assets/index-A1b2_C-d.js?v=1",
+        "/movies/assets/index-AbCd1234.css",
+        "/movies/assets/geist-latin-DC-KSUi6.woff2",
+        "/movies/assets/poster-aBc123_-.webp",
+    ] {
+        let response = h.get(path).send().await.unwrap();
+        assert_eq!(response.status(), 200, "{path}");
+        assert_eq!(
+            response.headers()["cache-control"],
+            "public, max-age=31536000, immutable",
+            "{path}"
+        );
+        assert!(response.headers().contains_key("content-security-policy"));
+    }
+    let path = "/movies/assets/index-A1b2_C-d.js";
+    let head = h
+        .client
+        .head(format!("{}{path}", h.origin))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(head.status(), 200);
+    assert_eq!(
+        head.headers()["cache-control"],
+        "public, max-age=31536000, immutable"
+    );
+    let modified = head.headers()["last-modified"].clone();
+    assert!(head.bytes().await.unwrap().is_empty());
+    let unchanged = h
+        .get(path)
+        .header("if-modified-since", modified)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(unchanged.status(), 304);
+    assert_eq!(
+        unchanged.headers()["cache-control"],
+        "public, max-age=31536000, immutable"
+    );
+    let range = h
+        .get(path)
+        .header("range", "bytes=0-2")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(range.status(), 206);
+    assert_eq!(
+        range.headers()["cache-control"],
+        "public, max-age=31536000, immutable"
+    );
+    for (path, status) in [
+        ("/movies/", 200),
+        ("/movies/private", 200),
+        ("/movies/display-preferences.js", 200),
+        ("/movies/assets/index.js", 200),
+        ("/movies/assets/index-short.js", 200),
+        ("/movies/assets/index-A1b2_C-d.html", 200),
+        ("/movies/assets/missing-AbCd1234.js", 404),
+        ("/movies/assets/index-A1b2_C-d.js/unknown", 404),
+    ] {
+        let response = h.get(path).send().await.unwrap();
+        assert_eq!(response.status(), status, "{path}");
+        assert_eq!(response.headers()["cache-control"], "no-store", "{path}");
+    }
+    let invalid_range = h
+        .get(path)
+        .header("range", "bytes=999-1000")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(invalid_range.status(), 416);
+    assert_eq!(invalid_range.headers()["cache-control"], "no-store");
+    // 静态缓存层不应延伸到带会话投影的 API 或私人资产。
+    for path in [
+        "/v1/media/shared/entries",
+        "/v1/media/private/entries",
+        "/v1/media/assets/missing/content",
+    ] {
+        let response = h.cookie(path, "alice").send().await.unwrap();
+        assert_ne!(
+            response
+                .headers()
+                .get("cache-control")
+                .and_then(|value| value.to_str().ok()),
+            Some("public, max-age=31536000, immutable"),
+            "{path}"
+        );
+    }
+    h.stop().await;
+}
+
 #[test]
 fn source_ids_and_image_hosts_are_bounded() {
     assert!(providers::validate_external_id("42").is_ok());
