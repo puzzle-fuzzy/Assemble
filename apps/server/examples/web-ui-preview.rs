@@ -98,7 +98,10 @@ fn preview_page(Path(kind): Path<String>) -> Response {
             "preview-only",
             None,
         ),
-        "success" => templates::message_page("密码已更新", "其他网页登录已退出。"),
+        "success" => templates::message_page(
+            "密码已更新",
+            "其他网页登录状态已退出，请使用新密码重新登录。",
+        ),
         _ => return StatusCode::NOT_FOUND.into_response(),
     };
     web::page(StatusCode::OK, body)

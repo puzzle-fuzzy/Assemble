@@ -19,7 +19,7 @@ use crate::source::Source;
 use crate::templates;
 use crate::web::{self, page, refused, unavailable, with_cookies};
 
-const SENT: &str = "验证码 15 分钟内有效。";
+const SENT: &str = "如果资料符合要求，验证邮件会发送到你的邮箱。请在 15 分钟内完成验证；如未收到，请检查垃圾邮件，1 分钟后可以重试。";
 const PROOF_COOKIE: &str = "assemble_identity_proof";
 
 fn browser_proof(jar: &CookieJar) -> Option<String> {
@@ -146,19 +146,25 @@ fn sent() -> Response {
 pub(crate) fn problem(error: &Error) -> Response {
     let (status, words) = match error {
         Error::Email => (StatusCode::BAD_REQUEST, "请填写有效的邮箱地址。"),
-        Error::Invalid => (StatusCode::BAD_REQUEST, "验证码已失效，请重新获取。"),
+        Error::Invalid => (
+            StatusCode::BAD_REQUEST,
+            "验证码已过期、已使用或账户资料已变更，请重新申请邮件。",
+        ),
         Error::Browser => (
             StatusCode::BAD_REQUEST,
-            "请回到申请邮件的浏览器，粘贴验证码。",
+            "请在申请邮件的同一浏览器完成绑定。可以把邮件验证码复制回原浏览器的验证页。",
         ),
         Error::Conflict => (
             StatusCode::CONFLICT,
-            "邮箱或 GitHub 已关联账户，请先登录该账户再绑定。",
+            "邮箱或 GitHub 身份已有账户。请登录原账户后再绑定 GitHub，不会自动合并账户。",
         ),
-        Error::RateLimited => (StatusCode::TOO_MANY_REQUESTS, "发送过于频繁，请稍后重试。"),
+        Error::RateLimited => (
+            StatusCode::TOO_MANY_REQUESTS,
+            "发送过于频繁，请稍后重试。每个邮箱 1 分钟可申请一次，每小时最多 5 次；同一个网络每小时也最多 5 次。",
+        ),
         Error::Profile => (
             StatusCode::BAD_REQUEST,
-            "密码至少 8 个字符，显示名不超过 60 个字符。",
+            "请核对显示名与密码。密码至少 8 个字符，显示名不超过 60 个字符。",
         ),
         Error::Secret(_) | Error::Database(_) => return unavailable(),
     };
@@ -277,7 +283,10 @@ pub(crate) async fn send_bound(
 fn mail_unavailable() -> Response {
     page(
         StatusCode::SERVICE_UNAVAILABLE,
-        templates::message_page("邮件暂时无法发送", "请稍后重试。"),
+        templates::message_page(
+            "邮件暂时无法发送",
+            "请稍后重试，或联系服务维护者检查邮件配置。",
+        ),
     )
 }
 
@@ -515,7 +524,7 @@ async fn verify_submit(
             StatusCode::OK,
             templates::message_with_actions(
                 "密码已更新",
-                "其他网页登录已退出。",
+                "其他网页登录状态已退出，请使用新密码重新登录。",
                 &templates::link_button("重新登录", &login, "button"),
                 "success",
             ),

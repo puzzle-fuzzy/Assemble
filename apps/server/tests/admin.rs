@@ -33,6 +33,7 @@ async fn admin_login_and_logout_stay_in_the_browser_without_registering_a_device
         .unwrap();
     let form = send(f.browser.get("/web/login?next=%2Fadmin%2F")).await;
     assert!(form.html.contains("<h1>登录管理控制台</h1>"));
+    assert!(form.html.contains("登录后会直接进入网页管理控制台"));
     assert!(form.html.contains("/web/forgot?next=%2Fadmin%2F"));
     assert!(!form.html.contains("/desktop/authorize"));
     let csrf = hidden(&form.html, "csrf").unwrap();
@@ -102,8 +103,8 @@ async fn logout_never_redirects_to_a_supplied_external_or_device_return_address(
         let page = send(f.browser.post_form(&format!("/web/logout?{query}"), &[])).await;
         assert_eq!(page.status, StatusCode::OK);
         assert!(page.location().is_none());
-        assert!(page.html.contains("<h1>已退出</h1>"));
-        assert!(page.html.contains("/web/login?next=%2Fadmin%2F"));
+        assert!(page.html.contains("你已退出当前网页账户"));
+        assert!(page.html.contains("登录管理控制台"));
         assert!(!page.html.contains("可以关闭"));
     }
     f.server.stop().await;

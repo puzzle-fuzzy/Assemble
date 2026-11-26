@@ -605,7 +605,7 @@ async fn github_same_email_never_merges_accounts_and_alternate_email_requires_ma
     // 即使邮箱收件人误点别人发起的验证，也不能给发起者创建可登录的新账户。
     let refused = confirm(&unrelated_browser, &f.inbox.token(), "").await;
     assert_eq!(refused.status, StatusCode::BAD_REQUEST);
-    assert!(refused.html.contains("申请邮件的浏览器"));
+    assert!(refused.html.contains("同一浏览器"));
 
     assert_eq!(
         confirm(&browser, &f.inbox.token(), "").await.status,

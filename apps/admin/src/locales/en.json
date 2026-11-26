@@ -33,10 +33,10 @@
   },
   "access": {
     "signedOutTitle": "Sign in to Assemble Admin",
-    "signedOutDescription": "Super administrators only.",
+    "signedOutDescription": "Sign in with an authorized super administrator account to continue to the web admin console.",
     "signIn": "Go to sign in",
     "forbiddenTitle": "Admin access required",
-    "forbiddenDescription": "Switch to a super administrator account.",
+    "forbiddenDescription": "This account is not a super administrator. To switch accounts, sign out on the account page, then sign in with an authorized account.",
     "openAccount": "Open account page"
   },
   "error": {
