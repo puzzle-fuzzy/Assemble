@@ -9,6 +9,7 @@
       "!**/node_modules",
       "!**/target",
       "!.artifacts",
+      "!.zcode",
       "!data/local",
       "!data/runtime",
       "!apps/desktop/src-tauri"

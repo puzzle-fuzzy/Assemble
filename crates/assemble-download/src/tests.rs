@@ -406,3 +406,75 @@ async fn real_media_pipeline() {
     server.abort();
     let _ = server.await;
 }
+
+#[tokio::test]
+async fn staging_folders_left_by_an_interrupted_run_are_swept_and_nothing_else_is() {
+    let elsewhere = tempfile::tempdir().unwrap();
+    let folder = tempfile::tempdir().unwrap();
+    // 上次崩溃留下的两个暂存目录，里面各有一个分片。
+    for name in [".assemble-download-abc123", ".assemble-download-def456"] {
+        let staging = folder.path().join(name);
+        std::fs::create_dir_all(&staging).unwrap();
+        std::fs::write(staging.join("0.ts"), b"segment").unwrap();
+    }
+    // 不该动的：下载好的文件、别的目录、名字像暂存目录的一个文件、名字像暂存目录的一个链接。
+    std::fs::write(folder.path().join("我下的电影.mp4"), b"keep me").unwrap();
+    std::fs::create_dir_all(folder.path().join("别的目录")).unwrap();
+    std::fs::write(folder.path().join(".assemble-download-not-a-dir"), b"file").unwrap();
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(
+        elsewhere.path(),
+        folder.path().join(".assemble-download-link"),
+    )
+    .unwrap();
+
+    let history = folder.path().join("history.json");
+    let manager = DownloadManager::open(
+        history,
+        folder.path().to_owned(),
+        MediaTools::discover(),
+        |_| {},
+    )
+    .unwrap();
+    assert_eq!(manager.sweep_staging().await, 2);
+    assert!(!folder.path().join(".assemble-download-abc123").exists());
+    assert!(!folder.path().join(".assemble-download-def456").exists());
+    assert_eq!(
+        std::fs::read(folder.path().join("我下的电影.mp4")).unwrap(),
+        b"keep me"
+    );
+    assert!(folder.path().join("别的目录").is_dir());
+    assert_eq!(
+        std::fs::read(folder.path().join(".assemble-download-not-a-dir")).unwrap(),
+        b"file"
+    );
+    // 链接没有被当成目录跟着走：它指向的地方原样还在。
+    assert!(elsewhere.path().read_dir().unwrap().next().is_none());
+    #[cfg(unix)]
+    assert!(
+        folder
+            .path()
+            .join(".assemble-download-link")
+            .symlink_metadata()
+            .unwrap()
+            .file_type()
+            .is_symlink()
+    );
+    // 再清一次：没有什么可清的了。
+    assert_eq!(manager.sweep_staging().await, 0);
+}
+
+#[tokio::test]
+async fn sweeping_a_folder_that_does_not_exist_yet_is_not_an_error() {
+    let dir = tempfile::tempdir().unwrap();
+    let folder = dir.path().join("下载").join("网络下载");
+    let manager = DownloadManager::open(
+        dir.path().join("history.json"),
+        folder,
+        MediaTools::discover(),
+        |_| {},
+    )
+    .unwrap();
+    assert_eq!(manager.sweep_staging().await, 0);
+    manager.shutdown().await;
+}

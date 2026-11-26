@@ -24,13 +24,16 @@ mod state;
 mod transfers;
 mod tray;
 
-use std::sync::Arc;
+use std::io::{self, Write};
+use std::sync::{Arc, Mutex, PoisonError};
 
 use assemble_client::{Client, ServerOrigin};
 use assemble_protocol::origin::OriginError;
+use assemble_store::logfile::LogFile;
 use assemble_store::secret::SecretStore;
 use tauri::{Manager, RunEvent, WebviewUrl, WebviewWindowBuilder, WindowEvent};
 use tauri_plugin_autostart::MacosLauncher;
+use tracing_subscriber::fmt::MakeWriter;
 
 use crate::state::{AppState, BACKGROUND_ARG, MAIN_WINDOW};
 
@@ -47,7 +50,8 @@ pub enum StartupError {
 }
 
 pub fn run() -> Result<(), StartupError> {
-    init_logging();
+    let sink = Sink::default();
+    init_logging(sink.clone());
     let client = Client::new(deployment()?)?;
     // 由登录项启动时附带 `--background`：不弹窗口，只在托盘里运行。
     let background = std::env::args().skip(1).any(|arg| arg == BACKGROUND_ARG);
@@ -72,7 +76,7 @@ pub fn run() -> Result<(), StartupError> {
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_notification::init())
         .invoke_handler(handlers())
-        .setup(move |app| start(app, client, background, handed_over))
+        .setup(move |app| start(app, client, background, handed_over, sink))
         .on_window_event(|window, event| {
             // 把文件拖进主窗口：交给发送面板。位置由系统直接交给 Rust，不经过界面。
             if window.label() == MAIN_WINDOW
@@ -196,9 +200,20 @@ fn start(
     client: Client,
     background: bool,
     handed_over: Option<Vec<std::path::PathBuf>>,
+    sink: Sink,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let handle = app.handle().clone();
     std::fs::create_dir_all(handle.path().app_data_dir()?)?;
+    // 日志文件放在系统给应用留的日志目录里（macOS 是 ~/Library/Logs/<应用标识>，
+    // Windows 是 %LOCALAPPDATA%\<应用标识>\logs）。从启动台或托盘启动的进程没有可见的
+    // 错误输出，出了事全靠它。
+    sink.attach(
+        handle
+            .path()
+            .app_log_dir()
+            .map_err(|error| io::Error::other(error.to_string()))
+            .and_then(|directory| LogFile::open(&directory, "desktop.log")),
+    );
 
     let secrets: Option<Arc<dyn SecretStore>> = assemble_store::secret::system_secret_store()
         .map(|store| Arc::new(store) as Arc<dyn SecretStore>);
@@ -224,6 +239,9 @@ fn start(
     )?;
     handle.state::<AppState>().set_downloads(downloads.view());
     handle.manage(Arc::clone(&downloads));
+    // 上次崩溃留下的下载暂存目录趁现在清掉：窗口还没开出来，不可能有任务在跑。
+    // 平时这里什么都不用删；真留下来几个 G 的分片时，等它删完比留着占地方强。
+    tauri::async_runtime::block_on(downloads.sweep_staging());
 
     tray::build(&handle)?;
     // 点通知的处理要早于第一条通知登记好，否则点了也报不上来。
@@ -300,7 +318,60 @@ fn open_main_window(app: &tauri::AppHandle, visible: bool) -> tauri::Result<()> 
     Ok(())
 }
 
-fn init_logging() {
+/// 日志写到哪儿：标准错误，加上应用启动之后的一个本机文件。
+///
+/// 全局的日志分发只能装一次，所以写入口在 Tauri 起来之前就得交出去；那时还不知道
+/// 应用的目录在哪，文件要晚一步才接上。接上之前的那些只写标准错误。
+#[derive(Clone, Default)]
+struct Sink(Arc<Mutex<Option<LogFile>>>);
+
+impl Sink {
+    /// 把本机日志文件接上。打不开就只写标准错误，应用照常运行。
+    fn attach(&self, opened: io::Result<LogFile>) {
+        let mut slot = self.0.lock().unwrap_or_else(PoisonError::into_inner);
+        match opened {
+            Ok(log) => *slot = Some(log),
+            Err(error) => tracing::warn!(
+                %error,
+                "the local log file could not be opened; logs stay on stderr"
+            ),
+        }
+    }
+}
+
+impl<'a> MakeWriter<'a> for Sink {
+    type Writer = SinkWriter<'a>;
+
+    fn make_writer(&'a self) -> Self::Writer {
+        SinkWriter(self)
+    }
+}
+
+/// 一次写入的两头：标准错误，和接上之后的本机文件。
+struct SinkWriter<'a>(&'a Sink);
+
+impl Write for SinkWriter<'_> {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        std::io::stderr().write_all(buf)?;
+        if let Some(log) = self
+            .0
+            .0
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .as_mut()
+        {
+            // 文件写不进去不算日志失败：标准错误上那一份已经写过了。
+            let _ = log.write(buf);
+        }
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        std::io::stderr().flush()
+    }
+}
+
+fn init_logging(sink: Sink) {
     use tracing_subscriber::EnvFilter;
 
     let default_level = if cfg!(debug_assertions) {
@@ -310,16 +381,39 @@ fn init_logging() {
     };
     let filter =
         EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(default_level));
-    // 日志只写到标准错误；不写文件，也不记录任何凭据。
+    // 同时写标准错误和一个限大小的本机文件。两边都不记录任何凭据——这是各处写日志时
+    // 守的规矩。不带颜色：文件里留着那串转义码没法读。
     let _ = tracing_subscriber::fmt()
         .with_env_filter(filter)
-        .with_writer(std::io::stderr)
+        .with_ansi(false)
+        .with_writer(sink)
         .try_init();
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn what_reaches_stderr_also_reaches_the_file_once_it_is_attached() {
+        let dir = tempfile::tempdir().unwrap();
+        let sink = Sink::default();
+        // 还没接上文件：照常写，不出错。
+        writeln!(sink.make_writer(), "before").unwrap();
+        // 接上之后：每一行都进了文件。
+        sink.attach(LogFile::open(dir.path(), "desktop.log"));
+        let mut writer = sink.make_writer();
+        writer.write_all(b"first line\n").unwrap();
+        writer.write_all(b"second line\n").unwrap();
+        writer.flush().unwrap();
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join("desktop.log")).unwrap(),
+            "first line\nsecond line\n"
+        );
+        // 打不开文件也不碍事：只写标准错误。
+        sink.attach(Err(io::Error::other("no such directory")));
+        writeln!(sink.make_writer(), "still fine").unwrap();
+    }
 
     #[test]
     fn a_configured_origin_wins_over_both_fallbacks() {
