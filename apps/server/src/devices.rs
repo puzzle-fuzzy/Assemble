@@ -29,31 +29,33 @@ pub struct DeviceRow {
     pub last_seen_at: Option<i64>,
 }
 
-/// 库里的平台名只会由 [`Platform`] 写入。出现别的值说明数据被改过：
-/// 如实报错，而不是悄悄猜一个。
-pub(crate) fn platform_from(stored: &str) -> Result<Platform, ApiError> {
+/// 库里的平台名由 [`Platform::as_str`] 写入。这一版不认识的值不报错，落进 [`Platform::Other`]：
+/// 报错的话，一个新平台会让那个账户的设备名单、自检和管理端一起失败，事件流也被掐断。
+pub(crate) fn platform_from(stored: &str) -> Platform {
     match stored {
-        "windows" => Ok(Platform::Windows),
-        "macos" => Ok(Platform::Macos),
-        "linux" => Ok(Platform::Linux),
+        "windows" => Platform::Windows,
+        "macos" => Platform::Macos,
+        "linux" => Platform::Linux,
+        "iphone" => Platform::Iphone,
         other => {
-            tracing::error!(platform = other, "unknown platform stored for a device");
-            Err(ApiError::internal(
-                "a stored device has an unknown platform",
-            ))
+            tracing::warn!(
+                platform = other,
+                "a stored device has a platform this version does not know"
+            );
+            Platform::Other
         }
     }
 }
 
-pub fn to_device(row: DeviceRow, online: bool) -> Result<Device, ApiError> {
-    Ok(Device {
+pub fn to_device(row: DeviceRow, online: bool) -> Device {
+    Device {
         id: row.id,
         name: row.name,
-        platform: platform_from(&row.platform)?,
+        platform: platform_from(&row.platform),
         online,
         last_seen_at: row.last_seen_at.and_then(Timestamp::from_millis),
         created_at: Timestamp::from_millis(row.created_at).unwrap_or_else(Timestamp::now),
-    })
+    }
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -76,11 +78,7 @@ where
 {
     let id = secrets::random_id()?;
     let created_at = Timestamp::now().as_millis();
-    let platform = match device.platform {
-        Platform::Windows => "windows",
-        Platform::Macos => "macos",
-        Platform::Linux => "linux",
-    };
+    let platform = device.platform.as_str();
     sqlx::query(
         "INSERT INTO devices (id, account_id, name, platform, token_hash, created_at) VALUES (?, ?, ?, ?, ?, ?)",
     )
@@ -137,12 +135,14 @@ pub async fn list(
     .bind(account_id)
     .fetch_all(pool)
     .await?;
-    rows.into_iter()
+    let devices = rows
+        .into_iter()
         .map(|row| {
             let online = presence.is_online(account_id, &row.id);
             to_device(row, online)
         })
-        .collect()
+        .collect();
+    Ok(devices)
 }
 
 /// 改名。名字两端的空白会去掉。返回这台设备是否属于这个账户。
@@ -229,7 +229,7 @@ pub async fn me(
         .is_online(&identity.account_id, &identity.device_id);
     Ok(Json(MeResponse {
         account: account.public(),
-        device: to_device(device, online)?,
+        device: to_device(device, online),
     }))
 }
 
@@ -272,7 +272,7 @@ pub async fn rename_device(
     Ok(Json(to_device(
         row,
         state.presence.is_online(&identity.account_id, &device_id),
-    )?))
+    )))
 }
 
 /// `DELETE /v1/devices/{id}`
@@ -517,9 +517,12 @@ mod tests {
 
     #[test]
     fn stored_platforms_map_back_to_their_enum_values() {
-        assert_eq!(platform_from("windows").unwrap(), Platform::Windows);
-        assert_eq!(platform_from("macos").unwrap(), Platform::Macos);
-        assert_eq!(platform_from("linux").unwrap(), Platform::Linux);
-        assert!(platform_from("darwin").is_err());
+        assert_eq!(platform_from("windows"), Platform::Windows);
+        assert_eq!(platform_from("macos"), Platform::Macos);
+        assert_eq!(platform_from("linux"), Platform::Linux);
+        assert_eq!(platform_from("iphone"), Platform::Iphone);
+        // 这里的值可以是更新版本的服务端写进去的：读成兜底的那一个，不报错。
+        assert_eq!(platform_from("darwin"), Platform::Other);
+        assert_eq!(platform_from(""), Platform::Other);
     }
 }

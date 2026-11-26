@@ -224,6 +224,12 @@ fn target_offline() -> ApiError {
     conflict(codes::DEVICE_OFFLINE, "the target device is offline")
 }
 
+/// 目标设备上的应用收不了文件。手机应用第一期只有日程与提醒；它的设备不会上线，
+/// 不先说这一句的话，发送的一方看到的会是"对方不在线"，说法不准。
+fn target_cannot_receive() -> ApiError {
+    ApiError::invalid("the application on the target device cannot receive files")
+}
+
 /// 服务端的内容总量到了上限。和"云盘空间不够"回答同一个码：对发文件的一方来说下一步一样。
 fn storage_full() -> ApiError {
     ApiError::new(
@@ -255,8 +261,10 @@ pub async fn create(
         crate::devices::find(&state.pool, &identity.account_id, &input.to_device_id).await?,
     ) {
         (Ok(name), Some(target)) if target.id != identity.device_id => {
-            // 只能发给在线设备：离线的设备没人收，服务端也不替它保管。
-            if !is_online(&state, &identity.account_id, &target.id) {
+            if !crate::devices::platform_from(&target.platform).can_receive_files() {
+                Err(target_cannot_receive())
+            } else if !is_online(&state, &identity.account_id, &target.id) {
+                // 只能发给在线设备：离线的设备没人收，服务端也不替它保管。
                 Err(target_offline())
             } else if blobs::over_budget(
                 &state.pool,

@@ -38,7 +38,18 @@ function hasString(record: Record<string, unknown>, key: string): boolean {
 }
 
 export function isPlatform(value: unknown): value is Platform {
-  return value === "windows" || value === "macos" || value === "linux";
+  return (
+    value === "windows" ||
+    value === "macos" ||
+    value === "linux" ||
+    value === "iphone" ||
+    value === "other"
+  );
+}
+
+/** 这个平台上的应用能不能收文件。与服务端同一条规则：手机应用第一期只有日程与提醒。 */
+export function canReceiveFiles(platform: Platform): boolean {
+  return platform === "windows" || platform === "macos" || platform === "linux";
 }
 
 export function isDeviceView(value: unknown): value is DeviceView {

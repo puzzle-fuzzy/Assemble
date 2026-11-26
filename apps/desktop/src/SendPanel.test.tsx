@@ -118,6 +118,44 @@ describe("发送面板", () => {
     expect(page).not.toContain("MacBook-Pro");
   });
 
+  test("手机第一期收不了文件：不列成目标，并说一声为什么", async () => {
+    const source = new FakeBridge(
+      snapshot({
+        phase: "signedIn",
+        draft: {
+          id: "draft-1",
+          files: [{ name: "季度报表.xlsx", size: 524288 }],
+        },
+        devices: [
+          { ...DEVICE },
+          { ...OTHER, online: true },
+          {
+            id: "device-4",
+            name: "我的 iPhone",
+            platform: "iphone",
+            online: false,
+          },
+          {
+            id: "device-5",
+            name: "将来的设备",
+            platform: "other",
+            online: true,
+          },
+        ],
+      }),
+    );
+    const view = await render(<SendPanel bridge={source} />);
+    await settle();
+
+    // 云盘和能收文件的电脑照旧；手机和认不出平台的设备都不在名单里。
+    const choices = destinations(view.host);
+    expect(choices.map((choice) => choice.textContent)).toEqual([
+      "上传到云盘",
+      "发送到 工作电脑Windows · 在线",
+    ]);
+    expect(text(view.host)).toContain("手机第一期还不能收文件");
+  });
+
   test("点「云盘」就把文件存进云盘，存好后自动收起", async () => {
     const source = new FakeBridge(
       snapshot({

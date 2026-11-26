@@ -58,7 +58,12 @@ import {
   toBridgeError,
 } from "@/lib/bridge";
 import { formatBuildInfo } from "@/lib/build-info";
-import { formatStoredDate, uiText, useDesktopTranslation } from "@/lib/i18n";
+import {
+  formatStoredDate,
+  platformName,
+  uiText,
+  useDesktopTranslation,
+} from "@/lib/i18n";
 import { memoText } from "@/lib/memo-i18n";
 import type { MemoBridge } from "@/lib/memos";
 import { messageFor } from "@/lib/messages";
@@ -74,7 +79,6 @@ import type {
   DriveFileView,
   LaunchState,
   Notice,
-  Platform,
   ServiceView,
   Snapshot,
   TransferView,
@@ -753,13 +757,6 @@ function describe(
   }
 }
 
-/** 平台的显示名。 */
-const PLATFORM_NAMES: Record<Platform, string> = {
-  windows: "Windows",
-  macos: "Mac",
-  linux: "Linux",
-};
-
 /** 设备名最长多少个字，与 Rust 侧一致。超出就不必发出去。 */
 const DEVICE_NAME_MAX = 60;
 
@@ -875,7 +872,7 @@ function DeviceRow({
             </p>
           )}
           <p className="text-xs text-muted-foreground">
-            {PLATFORM_NAMES[device.platform]} ·{" "}
+            {platformName(device.platform)} ·{" "}
             {device.online ? uiText("online") : uiText("offline")}
           </p>
         </div>

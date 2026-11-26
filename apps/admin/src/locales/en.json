@@ -161,6 +161,7 @@
     "windows": "Windows",
     "macos": "macOS",
     "linux": "Linux",
+    "iphone": "iPhone",
     "other": "Other"
   },
   "loginMethod": {

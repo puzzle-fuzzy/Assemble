@@ -11,7 +11,8 @@ import { Progress } from "@/components/ui/progress";
 import { Separator } from "@/components/ui/separator";
 import { useSnapshot } from "@/hooks/use-snapshot";
 import { type Bridge, bridge, toBridgeError } from "@/lib/bridge";
-import { uiText, useDesktopTranslation } from "@/lib/i18n";
+import { canReceiveFiles } from "@/lib/guard";
+import { platformName, uiText, useDesktopTranslation } from "@/lib/i18n";
 import { messageFor } from "@/lib/messages";
 import { formatSize, transferStatus, verdict } from "@/lib/transfer-text";
 import type { TransferView } from "@/lib/types";
@@ -23,9 +24,6 @@ export interface SendPanelProps {
 
 /** 全部发完之后，让结果停留这么久再收起面板。 */
 const LINGER_MS = 1500;
-
-/** 平台的显示名。 */
-const PLATFORM_NAMES = { windows: "Windows", macos: "Mac", linux: "Linux" };
 
 export function SendPanel({ bridge: source = bridge }: SendPanelProps) {
   useDesktopTranslation();
@@ -43,9 +41,14 @@ export function SendPanel({ bridge: source = bridge }: SendPanelProps) {
       ? snapshot.session.device.id
       : null;
   const draft = snapshot?.draft ?? null;
-  const destinations = signedIn
+  const others = signedIn
     ? snapshot.devices.filter((device) => device.id !== thisDevice)
     : [];
+  // 手机第一期收不了文件：不列成目标，免得选了之后被服务端拒绝。
+  const destinations = others.filter((device) =>
+    canReceiveFiles(device.platform),
+  );
+  const hasPhone = others.some((device) => !canReceiveFiles(device.platform));
   const mine = useMemo(
     () =>
       sent
@@ -216,7 +219,7 @@ export function SendPanel({ bridge: source = bridge }: SendPanelProps) {
                     {uiText("sendToDeviceName", { name: device.name })}
                   </span>
                   <span className="shrink-0 text-xs font-normal text-muted-foreground">
-                    {PLATFORM_NAMES[device.platform]} ·{" "}
+                    {platformName(device.platform)} ·{" "}
                     {device.online ? uiText("online") : uiText("offline")}
                   </span>
                   <ArrowRight aria-hidden data-icon="inline-end" />
@@ -224,6 +227,11 @@ export function SendPanel({ bridge: source = bridge }: SendPanelProps) {
               </li>
             ))}
           </ul>
+          {hasPhone ? (
+            <p className="text-xs text-muted-foreground">
+              {uiText("phoneCannotReceiveYet")}
+            </p>
+          ) : null}
           {problem ? (
             <p role="alert" className="text-sm text-destructive">
               {messageFor(toBridgeError({ code: problem }))}

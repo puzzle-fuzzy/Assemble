@@ -43,13 +43,19 @@ pub fn is_text(value: &str, max_units: usize) -> bool {
     !value.trim().is_empty() && value.encode_utf16().count() <= max_units
 }
 
-/// 运行桌面端的平台。
+/// 一台设备运行的平台。桌面端是前三种，手机应用是 `Iphone`。
+///
+/// `Other` 是读的时候的兜底：库里或请求里出现这一版代码还不认识的平台，落进它，
+/// 设备名单照常读得出来。没有这一条，一个新平台会让所有旧版应用读不了设备名单。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Platform {
     Windows,
     Macos,
     Linux,
+    Iphone,
+    #[serde(other)]
+    Other,
 }
 
 impl Platform {
@@ -58,7 +64,15 @@ impl Platform {
             Self::Windows => "windows",
             Self::Macos => "macos",
             Self::Linux => "linux",
+            Self::Iphone => "iphone",
+            Self::Other => "other",
         }
+    }
+
+    /// 这个平台上的应用能不能收文件。手机应用第一期只有日程与提醒，发给它的文件
+    /// 没人收；服务端拒绝这种发送，桌面端也不把它列成目标。
+    pub fn can_receive_files(self) -> bool {
+        matches!(self, Self::Windows | Self::Macos | Self::Linux)
     }
 
     /// 当前编译目标对应的平台。
@@ -138,6 +152,12 @@ mod tests {
 
     use super::*;
 
+    /// 只带平台字段的一个外壳，用来看嵌在别的类型里的平台怎么读。
+    #[derive(Deserialize)]
+    struct WithPlatform {
+        platform: Platform,
+    }
+
     #[test]
     fn id_accepts_word_characters_dot_and_dash_only() {
         assert!(is_valid_id("a"));
@@ -181,6 +201,8 @@ mod tests {
             (Platform::Windows, "\"windows\""),
             (Platform::Macos, "\"macos\""),
             (Platform::Linux, "\"linux\""),
+            (Platform::Iphone, "\"iphone\""),
+            (Platform::Other, "\"other\""),
         ] {
             assert_eq!(serde_json::to_string(&platform).unwrap(), spelling);
             assert_eq!(platform.as_str(), spelling.trim_matches('"'));
@@ -189,6 +211,30 @@ mod tests {
                 platform
             );
         }
+    }
+
+    #[test]
+    fn a_platform_this_version_does_not_know_reads_as_other() {
+        // 以后再加平台时，这一版的应用读设备名单不会失败。
+        assert_eq!(
+            serde_json::from_str::<Platform>("\"visionos\"").unwrap(),
+            Platform::Other
+        );
+        assert_eq!(
+            serde_json::from_value::<WithPlatform>(json!({ "platform": "tvos" }))
+                .unwrap()
+                .platform,
+            Platform::Other
+        );
+    }
+
+    #[test]
+    fn only_desktop_platforms_receive_files() {
+        assert!(Platform::Windows.can_receive_files());
+        assert!(Platform::Macos.can_receive_files());
+        assert!(Platform::Linux.can_receive_files());
+        assert!(!Platform::Iphone.can_receive_files());
+        assert!(!Platform::Other.can_receive_files());
     }
 
     #[test]

@@ -320,7 +320,7 @@ pub async fn exchange(
 
     Ok(Json(ExchangeResponse {
         account: account.public(),
-        device: crate::devices::to_device(device, false)?,
+        device: crate::devices::to_device(device, false),
         token: token.expose().to_owned(),
     }))
 }

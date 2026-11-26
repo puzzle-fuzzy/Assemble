@@ -93,6 +93,8 @@
   "chooseAgain": "重新选择",
   "close": "关闭",
   "chooseADestination": "选择要发往哪里",
+  "phoneCannotReceiveYet": "手机第一期还不能收文件，所以没有列在这里。",
+  "platformOther": "其他设备",
   "someFilesWereNotSent": "没有全部传完",
   "sendingEllipsis": "正在传送…",
   "retryUnsentFiles": "重发没发出去的",

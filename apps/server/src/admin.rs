@@ -532,7 +532,7 @@ impl DeviceRow {
             account_display_name: self.account_display_name,
             account_email: self.account_email,
             name: self.name,
-            platform: crate::devices::platform_from(&self.platform)?,
+            platform: crate::devices::platform_from(&self.platform),
             created_at: timestamp(self.created_at)?,
             last_seen_at: optional_timestamp(self.last_seen_at)?,
         })

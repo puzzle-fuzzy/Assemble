@@ -93,6 +93,8 @@
   "chooseAgain": "Choose again",
   "close": "Close",
   "chooseADestination": "Choose a destination",
+  "phoneCannotReceiveYet": "Phones can't receive files yet, so they aren't listed.",
+  "platformOther": "Other device",
   "someFilesWereNotSent": "Some files were not sent",
   "sendingEllipsis": "Sending…",
   "retryUnsentFiles": "Retry unsent files",

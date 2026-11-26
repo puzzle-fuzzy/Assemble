@@ -1752,6 +1752,18 @@
         "name": "工作电脑",
         "platform": "windows",
         "online": true
+      },
+      {
+        "id": "a1b2c3d4e5f60718293a4b5c6d7e8f90",
+        "name": "我的 iPhone",
+        "platform": "iphone",
+        "online": false
+      },
+      {
+        "id": "b2c3d4e5f60718293a4b5c6d7e8f90a1",
+        "name": "将来的设备",
+        "platform": "other",
+        "online": false
       }
     ],
     "transfers": [],

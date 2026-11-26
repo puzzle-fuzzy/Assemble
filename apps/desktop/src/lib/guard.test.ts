@@ -2,7 +2,13 @@
 
 import { describe, expect, test } from "bun:test";
 
-import { isAccountView, isSnapshot } from "@/lib/guard";
+import {
+  canReceiveFiles,
+  isAccountView,
+  isDeviceView,
+  isPlatform,
+  isSnapshot,
+} from "@/lib/guard";
 import type { Snapshot, TransferView } from "@/lib/types";
 
 const ACCOUNT = {
@@ -29,6 +35,21 @@ test("头像只接受已知 GitHub 数字身份地址", () => {
   ]) {
     expect(isAccountView({ ...ACCOUNT, avatarUrl })).toBe(false);
   }
+});
+
+test("认得手机和兜底的平台；只有电脑上的应用能收文件", () => {
+  // 服务端把这一版不认识的平台归成 other；再往后加平台时，这里先于界面拦下。
+  for (const platform of ["windows", "macos", "linux", "iphone", "other"]) {
+    expect(isPlatform(platform)).toBe(true);
+    expect(isDeviceView({ ...DEVICE, platform })).toBe(true);
+  }
+  expect(isPlatform("visionos")).toBe(false);
+  expect(isDeviceView({ ...DEVICE, platform: "visionos" })).toBe(false);
+  for (const platform of ["windows", "macos", "linux"] as const) {
+    expect(canReceiveFiles(platform)).toBe(true);
+  }
+  expect(canReceiveFiles("iphone")).toBe(false);
+  expect(canReceiveFiles("other")).toBe(false);
 });
 
 const VALID: Snapshot = {

@@ -109,7 +109,7 @@
 | 桌面登录   | `GET /desktop/authorize`、`POST /v1/auth/desktop/exchange`                                                                                     | 确认页把单次授权码经回环地址交回桌面端或助手入口；换码时完成设备注册                                                                                                                                       |
 | 账户与设备 | `GET /v1/me`、`POST /v1/auth/logout`、`GET /v1/devices`、`PATCH /v1/devices/{id}`、`DELETE /v1/devices/{id}`                                   | 设备令牌只存摘要，可以在任意设备上远程撤销                                                                                                                                                                 |
 | 事件流     | `GET /v1/events`                                                                                                                               | SSE。持有这条连接就是"在线"                                                                                                                                                                                |
-| 发送到设备 | `POST /v1/sends`、`GET /v1/sends`、`GET /v1/sends/{id}/content`、`POST /v1/sends/{id}/accept`、`…/decline`、`…/cancel`、`…/failed`             | 正文是文件的字节。只能发给同账户的在线设备                                                                                                                                                                 |
+| 发送到设备 | `POST /v1/sends`、`GET /v1/sends`、`GET /v1/sends/{id}/content`、`POST /v1/sends/{id}/accept`、`…/decline`、`…/cancel`、`…/failed`             | 正文是文件的字节。只能发给同账户的在线设备，而且对面得是能收文件的应用（电脑）；手机应用第一期收不了，发给它会被拒绝                                                                                       |
 | 云盘       | `POST /v1/drive/files`、`GET /v1/drive/files`、`GET /v1/drive/files/{id}/content`、`PATCH /v1/drive/files/{id}`、`DELETE /v1/drive/files/{id}` | 取内容支持分段                                                                                                                                                                                             |
 | 日程       | `GET /v1/planner`                                                                                                                              | 整份名单：还在进行中的日程与提醒、还没读的通知。任何一处改动都经事件流再推一份                                                                                                                             |
 | 日程       | `POST /v1/schedules`、`PUT /v1/schedules/{id}`、`DELETE /v1/schedules/{id}`、`POST /v1/schedules/{id}/complete`、`…/cancel`、`…/reopen`        | 新建可以带 `Idempotency-Key`，同一个键重试拿回原来那一条。修改、删除、改状态都带版本号，对不上返回 409 `VERSION_CONFLICT`                                                                                  |
@@ -118,6 +118,7 @@
 
 ### 几条规则怎么落地
 
+- **设备的平台是一份会变长的清单，读的时候留了兜底。** 桌面端是 Windows、macOS、Linux，手机应用是 iPhone；这一版代码不认识的值归成"其他"，设备名单照常读得出来，不再有哪个平台能让一个账户的接口一起失败。只有电脑上的应用能收文件。加一个新平台的顺序是：服务端先升级，两台电脑再更新应用，然后才有新平台的设备登录。
 - **内容按摘要存放、按引用计数。** 云盘文件与待接收的发送都只是指向 `blobs` 的一行引用，磁盘上同一个内容只有一个文件；最后一个引用放掉时才删。上传时边收边核对长度与摘要，不一致就丢。
 - **发送只能往前走。** `offered → delivered | declined | cancelled | failed | expired`。到达终态就释放内容；重复的回执是幂等的。
 - **定时清理**每分钟一轮：过期的发送被标记并通知两边、太久的发送记录与过期的授权码和登录状态被删除、没人引用的内容与中断的暂存文件被清扫。服务端只有一个实例，这里不需要跨进程协调。
