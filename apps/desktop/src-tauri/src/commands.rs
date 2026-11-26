@@ -4,6 +4,7 @@
 //! 命令的错误只带稳定错误码，技术细节进日志，不回显给用户。
 
 use assemble_client::RequestOptions;
+use assemble_protocol::memo::{Memo, MemoCreate, MemoList, MemoQuery, MemoUpdate};
 use tauri::{AppHandle, Manager};
 use tauri_plugin_autostart::ManagerExt;
 use tauri_plugin_dialog::DialogExt;
@@ -854,6 +855,26 @@ pub fn dismiss_notice(app: AppHandle) -> crate::state::Snapshot {
     state.snapshot()
 }
 
+#[tauri::command]
+pub fn system_notifications_refresh(app: AppHandle) -> crate::state::Snapshot {
+    app.state::<AppState>().refresh_system_notifications()
+}
+
+#[tauri::command]
+pub fn system_notifications_read(
+    app: AppHandle,
+    items: Vec<assemble_protocol::system_notifications::SystemNotificationRead>,
+) -> Result<crate::state::Snapshot, CommandError> {
+    app.state::<AppState>()
+        .read_system_notifications(&items)
+        .map_err(|()| {
+            CommandError::local(
+                "notification_store_unavailable",
+                "system notifications could not be saved",
+            )
+        })
+}
+
 impl From<&assemble_client::ClientError> for CommandError {
     fn from(error: &assemble_client::ClientError) -> Self {
         use assemble_client::ClientError;
@@ -887,7 +908,7 @@ fn is_server_code(code: &str) -> bool {
             .all(|byte| byte.is_ascii_uppercase() || byte == b'_')
 }
 
-// 影视查询按会话分界：退出或切换账户后，旧请求不能把私人内容交给新页面。
+// 私人查询按会话分界：退出或切换账户后，旧请求不能把内容交给新页面。
 struct MediaCall {
     epoch: u64,
     cancel: tokio_util::sync::CancellationToken,
@@ -913,7 +934,7 @@ impl MediaCall {
         if self.cancel.is_cancelled() || *state.session_changes().borrow() != self.epoch {
             return Err(CommandError::local(
                 "CANCELLED",
-                "the media session changed",
+                "the account session changed",
             ));
         }
         result.map_err(|error| {
@@ -930,6 +951,97 @@ use assemble_protocol::media::{
     MediaIdentity, MediaImport, MediaJob, MediaList, MediaPersonIdentity, MediaPoster,
     MediaProvider, MediaQuery, MediaScope, MediaSync, MediaType, MediaUpdate,
 };
+
+fn memo_call<R: tauri::Runtime>(state: &AppState<R>) -> Result<MediaCall, CommandError> {
+    if state.device_id().is_none() {
+        return Err(CommandError::local(
+            "UNAUTHORIZED",
+            "memo access requires an account",
+        ));
+    }
+    Ok(MediaCall::new(state))
+}
+
+#[tauri::command]
+pub async fn memo_list(app: AppHandle, query: MemoQuery) -> Result<MemoList, CommandError> {
+    let state = app.state::<AppState>();
+    let call = memo_call(&state)?;
+    call.finish(
+        &state,
+        state
+            .client
+            .memo_list(&query, &RequestOptions::new(&call.cancel))
+            .await,
+    )
+}
+#[tauri::command]
+pub async fn memo_get(app: AppHandle, id: String) -> Result<Memo, CommandError> {
+    let state = app.state::<AppState>();
+    let call = memo_call(&state)?;
+    call.finish(
+        &state,
+        state
+            .client
+            .memo_get(&id, &RequestOptions::new(&call.cancel))
+            .await,
+    )
+}
+#[tauri::command]
+pub async fn memo_create(app: AppHandle, input: MemoCreate) -> Result<Memo, CommandError> {
+    let state = app.state::<AppState>();
+    let call = memo_call(&state)?;
+    call.finish(
+        &state,
+        state
+            .client
+            .memo_create(&input, &RequestOptions::new(&call.cancel))
+            .await,
+    )
+}
+#[tauri::command]
+pub async fn memo_update(
+    app: AppHandle,
+    id: String,
+    input: MemoUpdate,
+) -> Result<Memo, CommandError> {
+    let state = app.state::<AppState>();
+    let call = memo_call(&state)?;
+    call.finish(
+        &state,
+        state
+            .client
+            .memo_update(&id, &input, &RequestOptions::new(&call.cancel))
+            .await,
+    )
+}
+#[tauri::command]
+pub async fn memo_remove(app: AppHandle, id: String, version: i64) -> Result<(), CommandError> {
+    let state = app.state::<AppState>();
+    let call = memo_call(&state)?;
+    call.finish(
+        &state,
+        state
+            .client
+            .memo_remove(&id, version, &RequestOptions::new(&call.cancel))
+            .await,
+    )
+}
+#[tauri::command]
+pub async fn memo_copy(app: AppHandle, id: String) -> Result<(), CommandError> {
+    use tauri_plugin_clipboard_manager::ClipboardExt;
+    let state = app.state::<AppState>();
+    let call = memo_call(&state)?;
+    let memo = call.finish(
+        &state,
+        state
+            .client
+            .memo_get(&id, &RequestOptions::new(&call.cancel))
+            .await,
+    )?;
+    app.clipboard()
+        .write_text(memo.content.text)
+        .map_err(|_| CommandError::local("SYSTEM_REJECTED", "the clipboard could not be written"))
+}
 
 #[tauri::command]
 pub async fn media_capabilities(app: AppHandle) -> Result<MediaCapabilities, CommandError> {
@@ -1244,6 +1356,7 @@ mod tests {
             std::sync::Arc::new(SilentNotifications),
         ));
         let state = app.state::<AppState<tauri::test::MockRuntime>>();
+        assert_eq!(memo_call(&state).err().unwrap().code, "UNAUTHORIZED");
         let old = MediaCall::new(&state);
         assert_eq!(old.finish(&state, Ok(42)).unwrap(), 42);
         state.begin_session();

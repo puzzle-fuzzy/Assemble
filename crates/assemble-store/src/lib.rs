@@ -12,5 +12,6 @@
 
 pub mod json;
 pub mod logfile;
+pub mod notifications;
 pub mod scope;
 pub mod secret;

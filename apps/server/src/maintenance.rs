@@ -118,6 +118,13 @@ pub async fn run_once(state: &Shared) -> Result<Report, sqlx::Error> {
     // 5. 没人引用的内容与中断的暂存文件。
     report.blobs = state.blobs.sweep().await?;
     crate::media::assets::cleanup(pool).await?;
+    match crate::storage::report(&state.config, pool).await {
+        Ok(storage) => {
+            state.storage_monitor.observe(&storage);
+            crate::system_notifications::observe_storage(pool, &storage).await?;
+        }
+        Err(error) => tracing::error!(%error, "storage report could not be calculated"),
+    }
     Ok(report)
 }
 

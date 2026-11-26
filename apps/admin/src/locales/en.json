@@ -11,10 +11,22 @@
     "overview": "Overview",
     "users": "Users",
     "devices": "Devices",
+    "drive": "Cloud drive",
     "logins": "Login history",
     "media": "Media library",
+    "dht": "DHT observations",
     "userDetail": "User details",
+    "about": "About",
     "signOut": "Sign out"
+  },
+  "about": {
+    "version": "Version",
+    "website": "Website"
+  },
+  "publicPages": {
+    "library": "View media site",
+    "collections": "View collections",
+    "opensNewTab": "Opens in a new tab"
   },
   "common": {
     "loading": "Loading",
@@ -24,6 +36,7 @@
     "emailMissing": "No linked email",
     "unrecorded": "Not recorded",
     "actions": "Actions",
+    "id": "ID",
     "superAdmin": "Super administrator",
     "user": "User",
     "online": "Online",
@@ -89,6 +102,7 @@
     "loginsCaption": "Login history",
     "user": "User",
     "createdAt": "Registered at",
+    "email": "Email",
     "lastLoginAt": "Last sign-in",
     "devices": "Devices",
     "identity": "Role",
@@ -102,7 +116,7 @@
     "occurredAt": "Signed in at",
     "deviceSummary_one": "{{count, number}} device / {{online, number}} online",
     "deviceSummary_other": "{{count, number}} devices / {{online, number}} online",
-    "viewDetails": "View details",
+    "viewDetails": "Details",
     "viewUserDetails": "View details for {{name}}"
   },
   "userDetail": {
@@ -119,6 +133,30 @@
     "devices_other": "{{count, number}} devices",
     "ownedDevices": "Devices",
     "recentLogins": "Recent sign-ins"
+  },
+  "recordDetail": {
+    "device": "Device details",
+    "login": "Sign-in details"
+  },
+  "drive": {
+    "capacity": "Server storage",
+    "available": "Available file storage",
+    "diskAvailable": "Server disk available",
+    "contentUsage": "File content / budget (deduplicated)",
+    "database": "Database (including images and logs)",
+    "capacityHint": "Available file storage is the smaller of the remaining budget and free disk space. Each account still has its own drive quota.",
+    "unavailable": "Unavailable",
+    "filesRegion": "Cloud files from all accounts",
+    "name": "File name",
+    "owner": "Owner",
+    "size": "Size",
+    "mimeType": "File type",
+    "createdAt": "Stored at",
+    "searchLabel": "Search cloud files",
+    "searchPlaceholder": "File name, user name or email",
+    "emptyTitle": "No cloud files yet",
+    "emptyDescription": "Files stored in cloud drives by any account will appear here.",
+    "details": "File details"
   },
   "platform": {
     "windows": "Windows",

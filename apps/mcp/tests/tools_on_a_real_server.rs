@@ -489,3 +489,49 @@ async fn overlapping_schedules_are_saved_anyway_with_a_hint() {
     assert!(!train.contains("提示"), "{train}");
     assert_eq!(world.listing().await.schedules.len(), 3);
 }
+
+#[tokio::test]
+async fn private_memo_tools_preserve_text_and_use_versions_and_retry_keys() {
+    let world = world().await;
+    let call = world.call();
+    let input = tools::MemoCreateInput {
+        request_id: "memo-tool-request".into(),
+        title: "常用文字".into(),
+        text: " 空格\n\t纯文本🙂\n".into(),
+    };
+    let result = tools::memo_create(&call, &input).await.unwrap();
+    let memo: assemble_protocol::memo::Memo = serde_json::from_str(&result).unwrap();
+    assert_eq!(memo.content.text, input.text);
+    assert_eq!(tools::memo_create(&call, &input).await.unwrap(), result);
+    let listing = tools::memos(
+        &call,
+        &tools::MemoListInput {
+            q: "纯文本".into(),
+            page: 1,
+        },
+    )
+    .await
+    .unwrap();
+    assert!(listing.contains(&memo.id));
+    assert_eq!(tools::memo_get(&call, &memo.id).await.unwrap(), result);
+    let update = tools::MemoUpdateInput {
+        id: memo.id.clone(),
+        version: 1,
+        title: "新标题".into(),
+        text: "新内容".into(),
+    };
+    tools::memo_update(&call, &update).await.unwrap();
+    let failed = tools::memo_update(&call, &update)
+        .await
+        .unwrap_err()
+        .message();
+    assert!(failed.contains("assemble_memo_get"));
+    tools::memo_remove(&call, &memo.id, 2).await.unwrap();
+    assert!(
+        tools::memo_get(&call, &memo.id)
+            .await
+            .unwrap_err()
+            .message()
+            .contains("备忘录")
+    );
+}

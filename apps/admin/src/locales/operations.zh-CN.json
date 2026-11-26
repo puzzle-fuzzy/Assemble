@@ -1,0 +1,38 @@
+{
+  "account": {
+    "status": "账户状态",
+    "active": "正常",
+    "suspended": "已停用",
+    "suspend": "停用账户",
+    "resume": "恢复账户",
+    "suspendTitle": "停用“{{name}}”的账户？",
+    "resumeTitle": "恢复“{{name}}”的账户？",
+    "suspendDescription": "所有设备会断开连接，网页会话将失效，账户无法继续登录。已有数据会保留。",
+    "resumeDescription": "恢复后允许这个账户重新登录，已有数据保持原样。",
+    "cancel": "取消",
+    "applying": "正在处理",
+    "error": {
+      "invalid": "无法执行此操作，请刷新账户信息后重试。",
+      "notFound": "这个账户已不存在。",
+      "csrfRejected": "页面校验已失效，请刷新页面后重试。",
+      "unavailable": "暂时无法确认操作结果，请刷新账户信息后核对。"
+    }
+  },
+  "storage": {
+    "title": "存储",
+    "content": "文件内容",
+    "database": "数据库（含日志）",
+    "diskAvailable": "磁盘可用",
+    "accounts": "账户引用用量",
+    "user": "用户",
+    "email": "邮箱",
+    "emailMissing": "未绑定邮箱",
+    "used": "引用内容",
+    "noUsage": "暂无账户用量",
+    "unavailable": "暂不可用",
+    "usage": "{{used}} / {{budget}}",
+    "warningTitle": "存储空间需要关注",
+    "budgetWarning": "文件内容用量已达到预警线（{{percent}}%）。",
+    "diskWarning": "磁盘可用空间低于 2 GiB。"
+  }
+}

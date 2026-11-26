@@ -9,7 +9,7 @@ use std::process::ExitCode;
 use assemble_server::{
     CreateAccountError, PasswordError, SecretString, StartupError, piped_password, prompt_password,
 };
-use clap::{Parser, Subcommand};
+use clap::{Parser, Subcommand, ValueEnum};
 
 #[derive(Debug, Parser)]
 #[command(name = "assemble-server", version, about = "Assemble 服务端")]
@@ -24,6 +24,13 @@ enum Command {
     Serve,
     /// 只读取配置并连接数据库，报告结果后退出。部署前用它检查环境变量。
     CheckConfig,
+    /// 查看持久化的 DHT 状态与聚合计数，不返回节点、Peer 或凭据。
+    DhtStatus,
+    /// 请求采集、排空或停止；复用网页的配置约束与事务审计。
+    DhtMode {
+        #[arg(value_enum)]
+        mode: DhtModeArg,
+    },
     /// 创建待绑定邮箱的旧式账户；公开用户请在网页注册并验证邮箱。
     ///
     /// 密码从终端读两遍（不回显）；标准输入不是终端时（脚本、管道）只读一行。
@@ -47,6 +54,47 @@ enum Command {
     SuspendAccount { email: String },
     /// 恢复一个被停用的账户。电脑与助手上的 Assemble 照旧能用，网页要重新登录。
     ResumeAccount { email: String },
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum)]
+enum DhtModeArg {
+    Stopped,
+    Collecting,
+    Draining,
+}
+impl From<DhtModeArg> for assemble_protocol::dht::DhtMode {
+    fn from(value: DhtModeArg) -> Self {
+        match value {
+            DhtModeArg::Stopped => Self::Stopped,
+            DhtModeArg::Collecting => Self::Collecting,
+            DhtModeArg::Draining => Self::Draining,
+        }
+    }
+}
+
+fn dht_command(runtime: &tokio::runtime::Runtime, mode: Option<DhtModeArg>) -> ExitCode {
+    let outcome = runtime.block_on(async {
+        let (config, pool) = assemble_server::load().await.map_err(|error| error.to_string())?;
+        let result = async {
+            if let Some(mode) = mode { assemble_server::dht::set_mode(&pool, config.dht.enabled, mode.into(), None).await.map_err(|error| error.to_string())?; }
+            let mode = assemble_server::dht::store::mode(&pool).await.map_err(|error| error.to_string())?;
+            let counts: Vec<(String, i64)> = sqlx::query_as("SELECT status, count(*) FROM dht_observations GROUP BY status ORDER BY status").fetch_all(&pool).await.map_err(|error| error.to_string())?;
+            let (announces, samples): (i64, i64) = sqlx::query_as("SELECT coalesce(sum(announce_count),0), coalesce(sum(sample_count),0) FROM dht_observations").fetch_one(&pool).await.map_err(|error| error.to_string())?;
+            Ok::<_, String>(serde_json::json!({ "enabled": config.dht.enabled, "mode": mode, "statuses": counts.into_iter().collect::<std::collections::BTreeMap<_,_>>(), "announces": announces, "samples": samples }))
+        }.await;
+        pool.close().await;
+        result
+    });
+    match outcome {
+        Ok(report) => {
+            println!("{report}");
+            ExitCode::SUCCESS
+        }
+        Err(error) => {
+            eprintln!("DHT 操作未完成：{error}");
+            ExitCode::FAILURE
+        }
+    }
 }
 
 fn init_logging() {
@@ -208,6 +256,8 @@ fn main() -> ExitCode {
         }
     };
     match cli.command {
+        Command::DhtStatus => dht_command(&runtime, None),
+        Command::DhtMode { mode } => dht_command(&runtime, Some(mode)),
         Command::GrantSuperAdmin { email } => {
             match runtime.block_on(async {
                 let (_, pool) = assemble_server::load()

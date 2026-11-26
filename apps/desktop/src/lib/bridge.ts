@@ -17,6 +17,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 
 import { isSnapshot } from "@/lib/guard";
+import { isMemo, isMemoList, type MemoBridge } from "@/lib/memos";
 import type {
   LaunchState,
   ReminderContent,
@@ -46,6 +47,10 @@ export class BridgeError extends Error {
 }
 
 export interface Bridge {
+  systemNotificationsRefresh(): Promise<Snapshot>;
+  systemNotificationsRead(
+    items: import("@assemble/ui/lib/system-notifications").SystemNotificationRead[],
+  ): Promise<Snapshot>;
   downloadPrepare(input: DownloadInput): Promise<DownloadPreview>;
   downloadImportHls(
     baseUrl: string | null,
@@ -200,6 +205,10 @@ export const bridge: Bridge = {
   setSendMenu: (enabled) =>
     checked(() => invoke<unknown>("set_send_menu", { enabled })),
   dismissNotice: () => checked(() => invoke<unknown>("dismiss_notice")),
+  systemNotificationsRefresh: () =>
+    checked(() => invoke<unknown>("system_notifications_refresh")),
+  systemNotificationsRead: (items) =>
+    checked(() => invoke<unknown>("system_notifications_read", { items })),
   plannerRefresh: () => checked(() => invoke<unknown>("planner_refresh")),
   scheduleCreate: (content) =>
     checked(() => invoke<unknown>("schedule_create", { content })),
@@ -300,6 +309,37 @@ export interface MediaBridge {
   copyMagnet(scope: MediaScope, id: string): Promise<void>;
 }
 
+/** 复制只传标识，Rust 重新核验账户并读取原文后写系统剪贴板。 */
+export const memoBridge: MemoBridge = {
+  list: (query, signal) =>
+    mediaInvoke("memo_list", { query }, isMemoList, signal),
+  get: (id, signal) => mediaInvoke("memo_get", { id }, isMemo, signal),
+  create: (content, requestId, signal) =>
+    mediaInvoke(
+      "memo_create",
+      { input: { content, requestId } },
+      isMemo,
+      signal,
+    ),
+  update: (id, version, content, signal) =>
+    mediaInvoke(
+      "memo_update",
+      { id, input: { version, content } },
+      isMemo,
+      signal,
+    ),
+  remove: async (id, version, signal) => {
+    signal?.throwIfAborted();
+    await run(() => invoke<void>("memo_remove", { id, version }));
+    signal?.throwIfAborted();
+  },
+  copy: async (id, signal) => {
+    signal?.throwIfAborted();
+    await run(() => invoke<void>("memo_copy", { id }));
+    signal?.throwIfAborted();
+  },
+};
+
 async function mediaInvoke<T>(
   command: string,
   args: Record<string, unknown>,
@@ -312,7 +352,7 @@ async function mediaInvoke<T>(
   if (!guard(value))
     throw new BridgeError(
       "INVALID_STATE",
-      "the media response has an unknown shape",
+      "the command response has an unknown shape",
     );
   return value;
 }

@@ -17,6 +17,7 @@ pub mod config;
 pub mod db;
 pub mod desktop_login;
 pub mod devices;
+pub mod dht;
 pub mod drive;
 pub mod email_identity;
 pub mod error;
@@ -29,12 +30,15 @@ pub mod mail;
 pub mod maintenance;
 pub mod media;
 pub mod media_web_assets;
+pub mod memos;
 pub mod planner;
 pub mod presence;
 pub mod register;
 pub mod secrets;
 pub mod sends;
 pub mod source;
+pub mod storage;
+pub mod system_notifications;
 pub mod templates;
 pub mod web;
 mod web_ui;
@@ -169,15 +173,32 @@ pub async fn config_report(config: &Config, pool: &SqlitePool) -> Result<String,
         || "未配置，按来源的限额不生效".to_owned(),
         |header| format!("按来源的限额读 {} 头", header.as_str()),
     );
+    let storage = storage::report(config, pool)
+        .await
+        .map_err(db::DbError::from)?;
+    let measured = |value: Option<u64>| {
+        value.map_or_else(|| "暂不可用".to_owned(), |bytes| format!("{bytes} 字节"))
+    };
     Ok(format!(
-        "配置可用。\n  监听地址：{}\n  数据目录：{}\n  对外地址：{}\n  云盘上限：{} 字节\n  全站内容总量上限：{} 字节\n  账户数：{}（其中停用 {}）\n  网页注册：{registration}\n  SMTP：{smtp}\n  GitHub：{github}\n  请求来源：{source}",
+        "配置可用。\n  监听地址：{}\n  数据目录：{}\n  对外地址：{}\n  云盘上限：{} 字节\n  全站内容总量上限：{} 字节\n  账户数：{}（其中停用 {}）\n  网页注册：{registration}\n  SMTP：{smtp}\n  GitHub：{github}\n  请求来源：{source}\n  文件内容已用：{} 字节\n  数据库（含日志）：{}\n  磁盘可用：{}\n  存储预警线：{}%\n  存储预警：{}",
         config.addr,
         config.data_dir.display(),
         config.public_origin,
         config.drive_quota_bytes,
         config.storage_budget_bytes,
         accounts,
-        stopped
+        stopped,
+        storage.content_bytes,
+        measured(storage.database_bytes),
+        measured(storage.disk_available_bytes),
+        storage.warning_percent,
+        if storage.budget_warning || storage.disk_warning {
+            "是"
+        } else if storage.database_bytes.is_none() || storage.disk_available_bytes.is_none() {
+            "数据不完整"
+        } else {
+            "否"
+        }
     ))
 }
 
@@ -330,6 +351,10 @@ mod tests {
         let mut config = Config::development(dir.path());
         let report = config_report(&config, &pool).await.unwrap();
         assert!(report.contains("账户数：0（其中停用 0）"), "{report}");
+        assert!(report.contains("文件内容已用：0 字节"), "{report}");
+        assert!(report.contains("数据库（含日志）："), "{report}");
+        assert!(report.contains("磁盘可用："), "{report}");
+        assert!(report.contains("存储预警线：80%"), "{report}");
         assert!(
             report.contains(&format!(
                 "全站内容总量上限：{} 字节",
@@ -368,6 +393,12 @@ mod tests {
             .unwrap();
         let report = config_report(&config, &pool).await.unwrap();
         assert!(report.contains("账户数：1（其中停用 1）"), "{report}");
+        config.data_dir = dir.path().join("unavailable-directory");
+        let report = config_report(&config, &pool).await.unwrap();
+        assert!(report.contains("数据库（含日志）：暂不可用"), "{report}");
+        assert!(report.contains("磁盘可用：暂不可用"), "{report}");
+        assert!(report.contains("存储预警：数据不完整"), "{report}");
+        pool.close().await;
     }
 
     #[test]

@@ -96,6 +96,8 @@ mod tests {
                 "blobs",
                 "desktop_auth_codes",
                 "devices",
+                "dht_control",
+                "dht_observations",
                 "drive_files",
                 "email_actions",
                 "email_rate_limits",
@@ -111,11 +113,15 @@ mod tests {
                 "media_identities",
                 "media_jobs",
                 "media_mutations",
+                "memo_requests",
+                "memos",
                 "notifications",
                 "planner_mutations",
                 "reminders",
                 "schedules",
                 "sends",
+                "system_notification_reads",
+                "system_notification_state",
                 "web_sessions"
             ]
         );
@@ -128,7 +134,7 @@ mod tests {
             .fetch_one(&again)
             .await
             .unwrap();
-        assert_eq!(applied, 6);
+        assert_eq!(applied, 9);
     }
 
     #[tokio::test]

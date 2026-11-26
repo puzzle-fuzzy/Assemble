@@ -1,13 +1,7 @@
 import { Badge } from "@assemble/ui/badge";
 import { Button } from "@assemble/ui/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@assemble/ui/card";
-import { ArrowLeftIcon, RefreshCwIcon } from "lucide-react";
+import { Card, CardContent, CardHeader, CardTitle } from "@assemble/ui/card";
+import { RefreshCwIcon } from "lucide-react";
 import { type ReactNode, useEffect, useState } from "react";
 import {
   type AccessFailure,
@@ -15,6 +9,7 @@ import {
   type AdminLogin,
   type AdminOverview,
   type AdminPage,
+  type AdminSession,
   type AdminUser,
   type AdminUserDetail,
   listPath,
@@ -22,6 +17,7 @@ import {
 import { useAdminTranslation } from "../lib/i18n";
 import { RecordedTime } from "../lib/text";
 import { useResource } from "../lib/use-resource";
+import { AccountStatus, AccountSuspension } from "./account-suspension";
 import {
   AccountIdentity,
   DevicesTable,
@@ -29,19 +25,31 @@ import {
   type TableOptions,
   UsersTable,
 } from "./data-tables";
+import { DetailDialog } from "./detail-dialog";
 import { LoadingContent, NoResults, RequestError } from "./feedback";
 import { SearchForm, useListQuery } from "./list-controls";
+import { StorageOverview } from "./storage-overview";
 
 interface AccessProps {
   onAccessFailure: (failure: AccessFailure) => void;
 }
 
-export function OverviewPage({ onAccessFailure }: AccessProps) {
+export function OverviewPage({
+  onAccessFailure,
+  storageFocus = 0,
+}: AccessProps & { storageFocus?: number }) {
   const { t, i18n } = useAdminTranslation();
   const { resource, retry } = useResource<AdminOverview>(
     "/v1/admin/overview",
     onAccessFailure,
   );
+  useEffect(() => {
+    if (storageFocus > 0 && resource.phase === "ready") {
+      const target = document.getElementById("storage-overview");
+      target?.scrollIntoView?.({ block: "nearest" });
+      target?.focus({ preventScroll: true });
+    }
+  }, [storageFocus, resource.phase]);
   return (
     <>
       <div className="flex justify-end">
@@ -60,49 +68,52 @@ export function OverviewPage({ onAccessFailure }: AccessProps) {
       ) : resource.phase === "error" ? (
         <RequestError failure={resource.failure} retry={retry} />
       ) : (
-        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-          {[
-            {
-              key: "users",
-              value: resource.value.users,
-            },
-            {
-              key: "devices",
-              value: resource.value.devices,
-            },
-            {
-              key: "onlineDevices",
-              value: resource.value.onlineDevices,
-            },
-            {
-              key: "registrationsToday",
-              value: resource.value.registrationsToday,
-            },
-          ].map((item) => (
-            <Card key={item.key}>
-              <CardHeader>
-                <CardTitle>
-                  <h2
-                    title={
-                      item.key === "registrationsToday"
-                        ? t("common.beijingTime")
-                        : undefined
-                    }
-                  >
-                    {t(`overview.${item.key}`)}
-                  </h2>
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                <p className="text-3xl font-semibold tabular-nums">
-                  {item.value.toLocaleString(
-                    i18n.resolvedLanguage || i18n.language,
-                  )}
-                </p>
-              </CardContent>
-            </Card>
-          ))}
-        </div>
+        <>
+          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+            {[
+              {
+                key: "users",
+                value: resource.value.users,
+              },
+              {
+                key: "devices",
+                value: resource.value.devices,
+              },
+              {
+                key: "onlineDevices",
+                value: resource.value.onlineDevices,
+              },
+              {
+                key: "registrationsToday",
+                value: resource.value.registrationsToday,
+              },
+            ].map((item) => (
+              <Card key={item.key}>
+                <CardHeader>
+                  <CardTitle>
+                    <h2
+                      title={
+                        item.key === "registrationsToday"
+                          ? t("common.beijingTime")
+                          : undefined
+                      }
+                    >
+                      {t(`overview.${item.key}`)}
+                    </h2>
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <p className="text-3xl font-semibold tabular-nums">
+                    {item.value.toLocaleString(
+                      i18n.resolvedLanguage || i18n.language,
+                    )}
+                  </p>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+          <StorageOverview storage={resource.value.storage} />
+        </>
       )}
     </>
   );
@@ -115,7 +126,11 @@ interface CollectionProps<T> extends AccessProps {
   emptyTitle: string;
   emptyDescription: string;
   queryState: ReturnType<typeof useListQuery>;
-  renderItems: (items: T[], options: TableOptions) => ReactNode;
+  renderItems: (
+    items: T[],
+    options: TableOptions,
+    update: (change: (page: AdminPage<T>) => AdminPage<T>) => void,
+  ) => ReactNode;
 }
 
 const EMPTY_ROWS: never[] = [];
@@ -130,7 +145,7 @@ function Collection<T>({
   onAccessFailure,
 }: CollectionProps<T>) {
   const { t } = useAdminTranslation();
-  const { resource, retry } = useResource<AdminPage<T>>(
+  const { resource, retry, update } = useResource<AdminPage<T>>(
     listPath(name, queryState.query, queryState.page, queryState.pageSize),
     onAccessFailure,
   );
@@ -151,38 +166,40 @@ function Collection<T>({
         }
       />
     );
-  return renderItems(page?.items ?? EMPTY_ROWS, {
-    toolbar,
-    emptyState,
-    pagination: {
-      page: page?.page ?? queryState.page,
-      pageSize: page?.pageSize ?? queryState.pageSize,
-      total: page?.total ?? 0,
-      pending: resource.phase === "loading",
-      onChange: queryState.setPagination,
+  return renderItems(
+    page?.items ?? EMPTY_ROWS,
+    {
+      toolbar,
+      actions: (
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={retry}
+          disabled={resource.phase === "loading"}
+        >
+          {t("common.refresh")}
+        </Button>
+      ),
+      emptyState,
+      pagination: {
+        page: page?.page ?? queryState.page,
+        pageSize: page?.pageSize ?? queryState.pageSize,
+        total: page?.total ?? 0,
+        pending: resource.phase === "loading",
+        onChange: queryState.setPagination,
+      },
     },
-  });
+    update,
+  );
 }
 
 export function UsersPage({
+  session,
   onAccessFailure,
-  onDetailChange,
-}: AccessProps & { onDetailChange?: (showing: boolean) => void }) {
+}: AccessProps & { session: AdminSession }) {
   const { t } = useAdminTranslation();
   const queryState = useListQuery();
   const [selected, setSelected] = useState<string | null>(null);
-  useEffect(() => {
-    onDetailChange?.(selected !== null);
-  }, [selected, onDetailChange]);
-  if (selected !== null) {
-    return (
-      <UserDetail
-        id={selected}
-        onAccessFailure={onAccessFailure}
-        onBack={() => setSelected(null)}
-      />
-    );
-  }
   return (
     <div className="flex min-w-0 flex-col gap-4">
       <Collection<AdminUser>
@@ -193,8 +210,31 @@ export function UsersPage({
         emptyDescription={t("empty.usersDescription")}
         queryState={queryState}
         onAccessFailure={onAccessFailure}
-        renderItems={(items, options) => (
-          <UsersTable {...options} users={items} onSelect={setSelected} />
+        renderItems={(items, options, updateList) => (
+          <>
+            <UsersTable {...options} users={items} onSelect={setSelected} />
+            {selected !== null && (
+              <DetailDialog
+                title={t("navigation.userDetail")}
+                onClose={() => setSelected(null)}
+              >
+                <UserDetail
+                  key={selected}
+                  session={session}
+                  id={selected}
+                  onAccessFailure={onAccessFailure}
+                  onUpdated={(user) =>
+                    updateList((page) => ({
+                      ...page,
+                      items: page.items.map((item) =>
+                        item.id === user.id ? user : item,
+                      ),
+                    }))
+                  }
+                />
+              </DetailDialog>
+            )}
+          </>
         )}
       />
     </div>
@@ -240,43 +280,67 @@ export function LoginsPage({ onAccessFailure }: AccessProps) {
 }
 
 function UserDetail({
+  session,
   id,
-  onBack,
   onAccessFailure,
-}: AccessProps & { id: string; onBack: () => void }) {
+  onUpdated,
+}: AccessProps & {
+  session: AdminSession;
+  id: string;
+  onUpdated: (user: AdminUser) => void;
+}) {
   const { t } = useAdminTranslation();
-  const { resource, retry } = useResource<AdminUserDetail>(
+  const { resource, retry, update } = useResource<AdminUserDetail>(
     `/v1/admin/users/${encodeURIComponent(id)}`,
     onAccessFailure,
   );
   return (
     <>
-      <div className="flex flex-col items-start gap-3">
-        <Button variant="ghost" size="sm" onClick={onBack}>
-          <ArrowLeftIcon data-icon="inline-start" aria-hidden="true" />
-          {t("userDetail.back")}
-        </Button>
-      </div>
       {resource.phase === "loading" ? (
         <LoadingContent />
       ) : resource.phase === "error" ? (
         <RequestError failure={resource.failure} retry={retry} />
       ) : (
         <>
-          <Card>
-            <CardHeader>
-              <CardTitle>
-                <h2>{t("userDetail.accountInfo")}</h2>
-              </CardTitle>
-              <CardDescription>
+          <div className="flex flex-wrap justify-end gap-2">
+            <Button variant="outline" size="sm" onClick={retry}>
+              <RefreshCwIcon data-icon="inline-start" aria-hidden="true" />
+              {t("common.refresh")}
+            </Button>
+            <AccountSuspension
+              user={resource.value.user}
+              session={session}
+              onAccessFailure={onAccessFailure}
+              onUpdated={(user) => {
+                update((detail) => ({
+                  ...detail,
+                  user,
+                  devices: user.suspended
+                    ? detail.devices.map((device) => ({
+                        ...device,
+                        online: false,
+                      }))
+                    : detail.devices,
+                }));
+                onUpdated(user);
+              }}
+            />
+          </div>
+          <section className="flex flex-col gap-4">
+            <div className="flex flex-col gap-1">
+              <h3 className="text-sm font-medium">
+                {t("userDetail.accountInfo")}
+              </h3>
+              <p className="text-sm text-muted-foreground">
                 <span className="break-all">
                   {t("userDetail.accountId", { id: resource.value.user.id })}
                 </span>
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="flex flex-col gap-4">
+              </p>
+            </div>
+            <div className="flex flex-col gap-4">
               <AccountIdentity account={resource.value.user} />
               <div className="flex flex-wrap gap-2">
+                <AccountStatus suspended={resource.value.user.suspended} />
                 <Badge
                   variant={
                     resource.value.user.isSuperAdmin ? "default" : "secondary"
@@ -334,12 +398,12 @@ function UserDetail({
                   </dd>
                 </div>
               </dl>
-            </CardContent>
-          </Card>
+            </div>
+          </section>
           <div className="flex min-w-0 flex-col gap-2">
-            <h2 className="text-base font-semibold">
+            <h3 className="text-sm font-medium">
               {t("userDetail.ownedDevices")}
-            </h2>
+            </h3>
             {resource.value.devices.length ? (
               <DevicesTable devices={resource.value.devices} />
             ) : (
@@ -350,9 +414,9 @@ function UserDetail({
             )}
           </div>
           <div className="flex min-w-0 flex-col gap-2">
-            <h2 className="text-base font-semibold">
+            <h3 className="text-sm font-medium">
               {t("userDetail.recentLogins")}
-            </h2>
+            </h3>
             {resource.value.logins.length ? (
               <LoginsTable logins={resource.value.logins} />
             ) : (

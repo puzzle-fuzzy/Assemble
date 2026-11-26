@@ -49,5 +49,23 @@ export function useResource<T>(
     result.path === path && result.revision === revision
       ? result.resource
       : { phase: "loading" };
-  return { resource, retry };
+  const update = useCallback(
+    (change: (value: T) => T) => {
+      setResult((previous) =>
+        previous.path === path &&
+        previous.revision === revision &&
+        previous.resource.phase === "ready"
+          ? {
+              ...previous,
+              resource: {
+                phase: "ready",
+                value: change(previous.resource.value),
+              },
+            }
+          : previous,
+      );
+    },
+    [path, revision],
+  );
+  return { resource, retry, update };
 }

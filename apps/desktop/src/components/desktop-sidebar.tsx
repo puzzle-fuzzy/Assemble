@@ -30,12 +30,14 @@ import {
   InfoIcon,
   LogOutIcon,
   MenuIcon,
+  NotebookPen,
   Settings2,
   UserRound,
 } from "lucide-react";
 import { useRef } from "react";
 import { downloadText } from "@/lib/download-i18n";
 import { uiText, useDesktopTranslation } from "@/lib/i18n";
+import { memoText } from "@/lib/memo-i18n";
 import type { SessionView } from "@/lib/types";
 
 export function desktopModules() {
@@ -44,6 +46,7 @@ export function desktopModules() {
     { id: "drive", label: uiText("cloudDrive"), icon: Cloud },
     { id: "downloads", label: downloadText("title"), icon: Download },
     { id: "media", label: uiText("moviesAndTV"), icon: Film },
+    { id: "memos", label: memoText("title"), icon: NotebookPen },
     {
       id: "planner",
       label: uiText("schedulesAndReminders"),

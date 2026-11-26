@@ -13,6 +13,7 @@
     "completed": "Watched"
   },
   "common": {
+    "updatedAt": "Updated at",
     "search": "Search",
     "refresh": "Refresh",
     "retry": "Retry",
@@ -176,6 +177,7 @@
     "duplicate": "Already in collection"
   },
   "statistics": {
+    "countHeader": "Titles",
     "title": "Shared library statistics",
     "hint": "Only shared entries are included. Private libraries are excluded.",
     "total": "All works",

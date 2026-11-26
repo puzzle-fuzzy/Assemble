@@ -9,9 +9,29 @@ import { MediaStatisticsView } from "@assemble/media/components/statistics";
 import { MediaWorkspace } from "@assemble/media/components/workspace";
 import { useMediaTranslation } from "@assemble/media/i18n";
 import type { MediaEntry } from "@assemble/media/model";
+import { Button } from "@assemble/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@assemble/ui/tabs";
+import { ExternalLinkIcon } from "lucide-react";
 import { useEffect, useMemo, useRef } from "react";
 import type { AccessFailure, AdminSession } from "../lib/api";
+import { useAdminTranslation } from "../lib/i18n";
+
+function PublicPageLink({ href, label }: { href: string; label: string }) {
+  const { t } = useAdminTranslation();
+  return (
+    <Button asChild variant="outline" size="sm">
+      <a
+        href={href}
+        target="_blank"
+        rel="noopener noreferrer"
+        aria-description={t("publicPages.opensNewTab")}
+      >
+        {label}
+        <ExternalLinkIcon data-icon="inline-end" aria-hidden="true" />
+      </a>
+    </Button>
+  );
+}
 
 export function MediaPage({
   session,
@@ -21,6 +41,7 @@ export function MediaPage({
   onAccessFailure: (failure: AccessFailure) => void;
 }) {
   const { t } = useMediaTranslation();
+  const { t: adminT } = useAdminTranslation();
   const copyScope = useRef<{
     owner: string;
     csrf: string;
@@ -67,6 +88,13 @@ export function MediaPage({
       </TabsList>
       <TabsContent value="library">
         <MediaWorkspace
+          presentation="management"
+          toolbarActions={
+            <PublicPageLink
+              href="/movies/"
+              label={adminT("publicPages.library")}
+            />
+          }
           client={library}
           imageLoader={browserImageLoader}
           canEdit
@@ -77,6 +105,13 @@ export function MediaPage({
       </TabsContent>
       <TabsContent value="collections">
         <MediaCollectionsManager
+          presentation="management"
+          toolbarActions={
+            <PublicPageLink
+              href="/movies/collections"
+              label={adminT("publicPages.collections")}
+            />
+          }
           client={collections}
           libraryClient={library}
           imageLoader={browserImageLoader}
@@ -87,6 +122,7 @@ export function MediaPage({
       </TabsContent>
       <TabsContent value="statistics">
         <MediaStatisticsView
+          presentation="management"
           load={getMediaStatistics}
           accountKey={session.account.id}
           onAccessFailure={onAccessFailure}

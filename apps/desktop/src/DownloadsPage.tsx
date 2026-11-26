@@ -314,6 +314,8 @@ export function DownloadsPage({
                 return (
                   <li
                     key={task.id}
+                    id={`network-download-${task.id}`}
+                    tabIndex={-1}
                     className="flex flex-col gap-2 py-4 first:pt-0 last:pb-0"
                   >
                     <p className="break-words text-sm font-medium">

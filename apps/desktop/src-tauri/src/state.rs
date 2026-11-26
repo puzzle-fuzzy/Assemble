@@ -262,6 +262,8 @@ fn receive_path_text(path: &std::path::Path) -> String {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Snapshot {
+    #[serde(default)]
+    pub system_notifications: assemble_protocol::system_notifications::SystemNotifications,
     pub downloads: assemble_protocol::downloads::DownloadsView,
     pub service: ServiceView,
     pub session: SessionView,
@@ -436,6 +438,8 @@ impl View {
     /// 这份状态交给界面的样子。`launch_at_login` 由调用方提供：它要问系统，不该在持锁时问。
     fn snapshot(&self, launch_at_login: LaunchState) -> Snapshot {
         Snapshot {
+            system_notifications:
+                assemble_protocol::system_notifications::SystemNotifications::default(),
             downloads: self.downloads.clone(),
             service: self.service.clone(),
             session: self.session.clone(),
@@ -482,6 +486,7 @@ impl View {
 }
 
 pub struct AppState<R: tauri::Runtime = tauri::Wry> {
+    system_inbox: Mutex<crate::system_notifications::Inbox>,
     app: AppHandle<R>,
     pub client: Client,
     /// 系统钥匙串。不可用时为 `None`，此时拒绝登录，而不是把凭据放在别处。
@@ -526,6 +531,7 @@ impl<R: tauri::Runtime> AppState<R> {
                 .with_planner_muted(settings.planner_muted),
         );
         Self {
+            system_inbox: Mutex::new(crate::system_notifications::Inbox::default()),
             app,
             client,
             secrets,
@@ -558,10 +564,56 @@ impl<R: tauri::Runtime> AppState<R> {
     }
 
     pub fn snapshot(&self) -> Snapshot {
-        self.view
+        let snapshot = self
+            .view
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
-            .snapshot(launch_state(&self.app))
+            .snapshot(launch_state(&self.app));
+        self.with_system_notifications(snapshot)
+    }
+
+    fn with_system_notifications(&self, mut snapshot: Snapshot) -> Snapshot {
+        snapshot.system_notifications = self
+            .system_inbox
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .observe(&snapshot, self.client.origin().as_str());
+        snapshot
+    }
+
+    pub fn attach_system_notifications(&self, path: PathBuf) {
+        self.system_inbox
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .attach(path);
+    }
+
+    pub fn refresh_system_notifications(&self) -> Snapshot {
+        self.system_inbox
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .refresh();
+        let snapshot = self.snapshot();
+        let _ = self.app.emit(SNAPSHOT_EVENT, &snapshot);
+        snapshot
+    }
+
+    pub fn read_system_notifications(
+        &self,
+        items: &[assemble_protocol::system_notifications::SystemNotificationRead],
+    ) -> Result<Snapshot, ()> {
+        let current = self
+            .view
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .snapshot(launch_state(&self.app));
+        self.system_inbox
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .read(&current, self.client.origin().as_str(), items)?;
+        let snapshot = self.snapshot();
+        let _ = self.app.emit(SNAPSHOT_EVENT, &snapshot);
+        Ok(snapshot)
     }
 
     /// 改动状态。与之前不同才推送给界面。
@@ -571,6 +623,7 @@ impl<R: tauri::Runtime> AppState<R> {
         let ((), snapshot) = revise(&self.view, change, || launch_at_login);
         // 没有窗口时什么都不做。
         if let Some(snapshot) = snapshot {
+            let snapshot = self.with_system_notifications(snapshot);
             let _ = self.app.emit(SNAPSHOT_EVENT, snapshot);
         }
     }
@@ -601,7 +654,18 @@ impl<R: tauri::Runtime> AppState<R> {
         self.update(|view| view.notice = notice);
     }
 
+    pub fn record_session_expired(&self) {
+        self.system_inbox
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .expired();
+    }
+
     pub fn set_downloads(&self, downloads: assemble_protocol::downloads::DownloadsView) {
+        self.system_inbox
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .downloads_ready();
         self.update(|view| view.downloads = downloads);
     }
 
@@ -754,6 +818,7 @@ impl<R: tauri::Runtime> AppState<R> {
         );
         // 没有窗口时什么都不做。
         if let Some(snapshot) = snapshot {
+            let snapshot = self.with_system_notifications(snapshot);
             let _ = self.app.emit(SNAPSHOT_EVENT, snapshot);
         }
         result

@@ -1,0 +1,25 @@
+{
+  "memo": {
+    "id": "memo-1",
+    "version": 1,
+    "title": "常用文本",
+    "text": "  第一行\n第二行🙂\n ",
+    "createdAt": "2026-11-26T01:02:03.000Z",
+    "updatedAt": "2026-11-26T01:02:03.000Z"
+  },
+  "listing": {
+    "items": [
+      {
+        "id": "memo-1",
+        "version": 1,
+        "title": "常用文本",
+        "preview": "  第一行\n第二行🙂\n ",
+        "createdAt": "2026-11-26T01:02:03.000Z",
+        "updatedAt": "2026-11-26T01:02:03.000Z"
+      }
+    ],
+    "total": 1,
+    "page": 1,
+    "pageSize": 10
+  }
+}

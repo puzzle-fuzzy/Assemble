@@ -39,6 +39,7 @@ const user: AdminUser = {
   lastLoginAt: null,
   hasGithub: true,
   isSuperAdmin: false,
+  suspended: false,
   deviceCount: 2,
   onlineDeviceCount: 1,
 };
@@ -113,6 +114,61 @@ afterEach(async () => {
 });
 
 describe("管理端真实数据和访问权限", () => {
+  test.each(["管理员账户菜单", "打开管理菜单"])(
+    "%s 提供关于弹窗，关闭保留原列表并返回菜单按钮",
+    async (menuLabel) => {
+      const host = await render(<App />);
+      await navigate(host, "users");
+      await search(host, "张三");
+      const before = requests.length;
+      const trigger = button(host, menuLabel);
+      await act(async () => {
+        trigger.focus();
+        trigger.dispatchEvent(
+          new KeyboardEvent("keydown", { key: "Enter", bubbles: true }),
+        );
+      });
+      await settle();
+      const about = [
+        ...document.body.querySelectorAll<HTMLElement>('[role="menuitem"]'),
+      ].find((item) => item.textContent === "关于");
+      if (!about) throw new Error("缺少关于菜单项");
+      await click(about);
+      const dialog =
+        document.body.querySelector<HTMLElement>('[role="dialog"]');
+      expect(
+        dialog?.querySelector('[data-slot="dialog-title"]')?.textContent,
+      ).toBe("关于");
+      expect(dialog?.textContent).toContain("版本");
+      expect(dialog?.querySelector("a")?.getAttribute("href")).toBe(
+        "https://as.yxswy.com",
+      );
+      expect(dialog?.contains(document.activeElement)).toBe(true);
+      expect(document.body.querySelector('[role="menu"]')).toBeNull();
+      expect(
+        host.querySelector('nav[aria-label="管理功能"]')?.textContent,
+      ).not.toContain("关于");
+      await act(async () => setLanguage("en"));
+      expect(
+        dialog?.querySelector('[data-slot="dialog-title"]')?.textContent,
+      ).toBe("About");
+      expect(dialog?.textContent).toContain("Version");
+      expect(dialog?.textContent).toContain("Website");
+      await act(async () =>
+        document.activeElement?.dispatchEvent(
+          new KeyboardEvent("keydown", { key: "Escape", bubbles: true }),
+        ),
+      );
+      await settle();
+      expect(document.body.querySelector('[role="dialog"]')).toBeNull();
+      expect(document.activeElement === trigger).toBe(true);
+      expect(window.location.hash).toBe("#users");
+      expect(
+        host.querySelector<HTMLInputElement>('input[type="search"]')?.value,
+      ).toBe("张三");
+      expect(requests).toHaveLength(before);
+    },
+  );
   test("未登录通过当前网页进入管理登录，不请求管理数据", async () => {
     handle = () => json({ message: "sensitive body" }, 401);
     const host = await render(<App />);
@@ -254,12 +310,41 @@ describe("管理端真实数据和访问权限", () => {
     await click(item);
     expect(submit).toHaveBeenCalledTimes(1);
     expect(document.body.querySelector('[role="menu"]')).toBeNull();
-    expect(document.activeElement).toBe(trigger);
+    expect(document.activeElement === trigger).toBe(true);
   });
 });
 
 describe("用户、设备和登录记录的交互", () => {
-  test("用户列表搜索会编码关键词并回第一页，详情显示设备和登录记录，返回保留查询", async () => {
+  test.each(["devices", "logins"])(
+    "%s 的详情弹窗支持 Escape 关闭和返回原按钮",
+    async (view) => {
+      const host = await render(<App />);
+      await navigate(host, view);
+      const trigger = button(
+        host,
+        view === "devices" ? "详情：工作电脑" : "详情：张三",
+      );
+      trigger.focus();
+      await click(trigger);
+      const dialog =
+        document.body.querySelector<HTMLElement>('[role="dialog"]');
+      expect(dialog?.textContent).toContain(
+        view === "devices" ? "设备详情" : "登录记录详情",
+      );
+      expect(dialog?.textContent).toContain("zhang@example.test");
+      expect(dialog?.contains(document.activeElement)).toBe(true);
+      expect(window.location.hash).toBe(`#${view}`);
+      await act(async () => {
+        document.activeElement?.dispatchEvent(
+          new KeyboardEvent("keydown", { key: "Escape", bubbles: true }),
+        );
+      });
+      await settle();
+      expect(document.body.querySelector('[role="dialog"]')).toBeNull();
+      expect(document.activeElement === trigger).toBe(true);
+    },
+  );
+  test("用户列表搜索回第一页，详情用弹窗展示且关闭后保留列表和焦点", async () => {
     handle = (path) => {
       if (path.startsWith("/v1/admin/users?")) {
         const url = new URL(path, "http://localhost");
@@ -286,26 +371,29 @@ describe("用户、设备和登录记录的交互", () => {
       .searchParams;
     expect(query.get("page")).toBe("1");
     expect(query.get("q")).toBe("张三+工作@example.test");
-    await click(button(host, "查看 张三 的详情"));
+    const trigger = button(host, "查看 张三 的详情");
+    trigger.focus();
+    await click(trigger);
     expect(
       host.querySelector('header [data-slot="breadcrumb-page"]')?.textContent,
-    ).toBe("用户详情");
-    expect(host.textContent).toContain("工作电脑");
-    expect(host.textContent).toContain("最近登录记录");
-    expect(host.textContent).toContain("GitHub");
-    expect(document.activeElement).toBe(
-      host.querySelector('header [data-slot="breadcrumb-page"]'),
-    );
-    await click(button(host, "返回用户列表"));
+    ).toBe("用户");
+    const dialog = document.body.querySelector<HTMLElement>('[role="dialog"]');
+    expect(dialog).not.toBeNull();
+    await waitForText(document.body, "最近登录记录");
+    expect(dialog?.textContent).toContain("工作电脑");
+    expect(dialog?.textContent).toContain("GitHub");
+    expect(dialog?.contains(document.activeElement)).toBe(true);
+    expect(window.location.hash).toBe("#users");
+    expect(host.querySelector("tbody")).not.toBeNull();
+    await click(button(document.body, "关闭"));
+    expect(document.body.querySelector('[role="dialog"]')).toBeNull();
     expect(
       host.querySelector<HTMLInputElement>('input[type="search"]')?.value,
     ).toBe(" 张三+工作@example.test ");
     expect(
       host.querySelector('header [data-slot="breadcrumb-page"]')?.textContent,
     ).toBe("用户");
-    expect(document.activeElement).toBe(
-      host.querySelector('header [data-slot="breadcrumb-page"]'),
-    );
+    expect(document.activeElement).toBe(trigger);
   });
 
   test("列表读取失败后重试，空结果使用真正空态，空邮箱与时间不编造", async () => {
@@ -362,7 +450,13 @@ describe("用户、设备和登录记录的交互", () => {
       };
       const host = await render(<App />);
       await navigate(host, view);
-      await waitForText(host, "未绑定邮箱");
+      if (view === "devices") {
+        await click(button(host, "详情：工作电脑"));
+        expect(
+          document.body.querySelector('[role="dialog"]')?.textContent,
+        ).toContain("未绑定邮箱");
+        await click(button(document.body, "关闭"));
+      } else await waitForText(host, "未绑定邮箱");
       expect(host.textContent).toContain(
         view === "devices" ? "离线" : "邮箱密码",
       );
@@ -432,12 +526,13 @@ describe("用户、设备和登录记录的交互", () => {
     const host = await render(<App />);
     await navigate(host, "users");
     await click(button(host, "查看 张三 的详情"));
-    await waitForText(host, "找不到这位用户");
-    await click(button(host, "返回用户列表"));
+    await waitForText(document.body, "找不到这位用户");
+    await click(button(document.body, "关闭"));
     missing = false;
     await click(button(host, "查看 张三 的详情"));
-    expect(host.textContent).toContain("这个账户还没有设备");
-    expect(host.textContent).toContain("这个账户还没有登录记录");
-    expect(host.textContent).not.toContain("工作电脑");
+    await waitForText(document.body, "这个账户还没有设备");
+    const dialog = document.body.querySelector('[role="dialog"]');
+    expect(dialog?.textContent).toContain("这个账户还没有登录记录");
+    expect(dialog?.textContent).not.toContain("工作电脑");
   });
 });

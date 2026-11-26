@@ -1,0 +1,50 @@
+{
+  "detail": {
+    "id": "0123456789012345678901234567890123456789",
+    "firstSeen": "2026-11-26T01:00:00.000Z",
+    "lastSeen": "2026-11-26T02:00:00.000Z",
+    "announceCount": 2,
+    "sampleCount": 1,
+    "status": "verified",
+    "name": "sample.txt",
+    "totalSize": 3,
+    "fileCount": 1,
+    "fetchedAt": "2026-11-26T02:00:00.000Z",
+    "attempts": 1,
+    "lastError": null,
+    "magnetUri": "magnet:?xt=urn:btih:0123456789012345678901234567890123456789&dn=sample.txt",
+    "files": [{ "path": ["sample.txt"], "length": 3 }],
+    "pieceLength": 16384,
+    "private": false,
+    "comment": null,
+    "source": null
+  },
+  "status": {
+    "enabled": true,
+    "mode": "collecting",
+    "running": true,
+    "lastError": null,
+    "total": 1,
+    "announces": 2,
+    "samples": 1,
+    "lastObservedAt": "2026-11-26T02:00:00.000Z",
+    "statuses": { "verified": 1 },
+    "queueLimit": 2000,
+    "maxRecords": 100000,
+    "workers": 4,
+    "metadataBytes": 42,
+    "metadataBudgetBytes": 536870912,
+    "counters": {
+      "lookups": 1,
+      "lookupsWithPeers": 1,
+      "fetchAttempts": 1,
+      "verified": 1,
+      "timeouts": 0,
+      "connectionErrors": 0,
+      "protocolErrors": 0,
+      "validationErrors": 0,
+      "persistenceErrors": 0,
+      "droppedEvents": 0
+    }
+  }
+}

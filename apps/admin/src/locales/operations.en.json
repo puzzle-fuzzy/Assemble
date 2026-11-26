@@ -1,0 +1,38 @@
+{
+  "account": {
+    "status": "Account status",
+    "active": "Active",
+    "suspended": "Suspended",
+    "suspend": "Suspend account",
+    "resume": "Restore account",
+    "suspendTitle": "Suspend the account for {{name}}?",
+    "resumeTitle": "Restore the account for {{name}}?",
+    "suspendDescription": "All devices will be disconnected, browser sessions will end, and the account will be unable to sign in. Existing data will be kept.",
+    "resumeDescription": "This account will be allowed to sign in again. Existing data will be kept.",
+    "cancel": "Cancel",
+    "applying": "Applying changes",
+    "error": {
+      "invalid": "This action cannot be performed. Refresh the account details and try again.",
+      "notFound": "This account no longer exists.",
+      "csrfRejected": "Page verification has expired. Reload the page and try again.",
+      "unavailable": "The result could not be confirmed. Refresh the account details to check its status."
+    }
+  },
+  "storage": {
+    "title": "Storage",
+    "content": "File content",
+    "database": "Database and journal",
+    "diskAvailable": "Disk available",
+    "accounts": "Storage referenced by accounts",
+    "user": "User",
+    "email": "Email",
+    "emailMissing": "No linked email",
+    "used": "Referenced content",
+    "noUsage": "No account usage yet",
+    "unavailable": "Unavailable",
+    "usage": "{{used}} / {{budget}}",
+    "warningTitle": "Storage capacity needs attention",
+    "budgetWarning": "File content usage has reached the warning threshold ({{percent}}%).",
+    "diskWarning": "Available disk space is below 2 GiB."
+  }
+}

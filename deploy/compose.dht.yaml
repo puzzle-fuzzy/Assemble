@@ -1,0 +1,9 @@
+# 公网 DHT 的显式开关；与 compose.yaml、compose.secrets.yaml 一起使用。
+# HTTP 仍只映射到回环地址，新增的只有独立 UDP 端口。
+services:
+  assemble:
+    environment:
+      ASSEMBLE_DHT_ENABLED: "true"
+      ASSEMBLE_DHT_LISTEN: "0.0.0.0:6882"
+    ports:
+      - "${ASSEMBLE_DHT_HOST_IP:-0.0.0.0}:${ASSEMBLE_DHT_UDP_PORT:-6882}:6882/udp"

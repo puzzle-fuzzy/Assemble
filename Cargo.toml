@@ -13,6 +13,7 @@ publish = false
 image = { version = "=0.25.10", default-features = false, features = ["jpeg", "png", "webp"] }
 assemble-client = { path = "crates/assemble-client" }
 assemble-device = { path = "crates/assemble-device" }
+assemble-dht = { path = "crates/assemble-dht" }
 assemble-download = { path = "crates/assemble-download" }
 assemble-protocol = { path = "crates/assemble-protocol" }
 assemble-schedule = { path = "crates/assemble-schedule" }

@@ -1,4 +1,4 @@
-//! 十个工具：助手能做的全部事情。
+//! 具名工具：日程、提醒与账户私有备忘录。
 //!
 //! 每个工具只做一件事：把助手的输入整成协议里的内容，交给客户端，再把结果写成给助手看的
 //! 一句话。这里没有通用的接口调用——要给助手新的能力，就在这里加一个工具，并补上测试。
@@ -36,6 +36,122 @@ const MOST_DAYS: u32 = 31;
 
 /// 没说看几天时的默认值。
 const DEFAULT_DAYS: u32 = 7;
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct MemoListInput {
+    #[serde(default)]
+    pub q: String,
+    #[serde(default = "first_page")]
+    pub page: u32,
+}
+fn first_page() -> u32 {
+    1
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct MemoIdInput {
+    pub id: String,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct MemoCreateInput {
+    /// 同一次新建的重试必须使用同一个键；不同新建使用不同的键。
+    pub request_id: String,
+    pub title: String,
+    pub text: String,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct MemoUpdateInput {
+    pub id: String,
+    pub version: i64,
+    pub title: String,
+    pub text: String,
+}
+
+fn memo_failure(error: &ClientError) -> Failure {
+    match error {
+        ClientError::Http { status: 404, .. } => {
+            Failure::Rejected("找不到这条备忘录，请用 assemble_memos 刷新名单。".into())
+        }
+        ClientError::Http { status: 409, .. } => Failure::Rejected(
+            "备忘录版本已变化，请用 assemble_memo_get 读取最新内容，确认后带新版本重试。".into(),
+        ),
+        _ => explain(error),
+    }
+}
+fn memo_result(value: &impl serde::Serialize) -> Result<String, Failure> {
+    serde_json::to_string(value).map_err(|_| Failure::Other("备忘录结果无法编码。".into()))
+}
+pub async fn memos(call: &Call<'_>, input: &MemoListInput) -> Result<String, Failure> {
+    let result = call
+        .client()
+        .memo_list(
+            &assemble_protocol::memo::MemoQuery {
+                q: input.q.clone(),
+                page: input.page,
+                page_size: 20,
+            },
+            &call.options(),
+        )
+        .await
+        .map_err(|error| memo_failure(&error))?;
+    memo_result(&result)
+}
+pub async fn memo_get(call: &Call<'_>, id: &str) -> Result<String, Failure> {
+    let result = call
+        .client()
+        .memo_get(id, &call.options())
+        .await
+        .map_err(|error| memo_failure(&error))?;
+    memo_result(&result)
+}
+pub async fn memo_create(call: &Call<'_>, input: &MemoCreateInput) -> Result<String, Failure> {
+    let result = call
+        .client()
+        .memo_create(
+            &assemble_protocol::memo::MemoCreate {
+                request_id: input.request_id.clone(),
+                content: assemble_protocol::memo::MemoContent {
+                    title: input.title.clone(),
+                    text: input.text.clone(),
+                },
+            },
+            &call.options(),
+        )
+        .await
+        .map_err(|error| memo_failure(&error))?;
+    memo_result(&result)
+}
+pub async fn memo_update(call: &Call<'_>, input: &MemoUpdateInput) -> Result<String, Failure> {
+    let result = call
+        .client()
+        .memo_update(
+            &input.id,
+            &assemble_protocol::memo::MemoUpdate {
+                version: input.version,
+                content: assemble_protocol::memo::MemoContent {
+                    title: input.title.clone(),
+                    text: input.text.clone(),
+                },
+            },
+            &call.options(),
+        )
+        .await
+        .map_err(|error| memo_failure(&error))?;
+    memo_result(&result)
+}
+pub async fn memo_remove(call: &Call<'_>, id: &str, version: i64) -> Result<String, Failure> {
+    call.client()
+        .memo_remove(id, version, &call.options())
+        .await
+        .map_err(|error| memo_failure(&error))?;
+    Ok("备忘录已删除。".into())
+}
 
 // ---- 一次调用 ----
 

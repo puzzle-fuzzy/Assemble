@@ -18,6 +18,7 @@ path = "src/main.rs"
 
 [dependencies]
 assemble-protocol.workspace = true
+assemble-dht.workspace = true
 assemble-schedule.workspace = true
 assemble-store.workspace = true
 assemble-transfer.workspace = true
@@ -30,6 +31,7 @@ chrono.workspace = true
 clap.workspace = true
 futures-core.workspace = true
 futures-util.workspace = true
+fs4.workspace = true
 getrandom.workspace = true
 image.workspace = true
 email_address = "0.2.10"

@@ -1,0 +1,20 @@
+[package]
+name = "assemble-dht"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+description = "有界 DHT 观测与经过摘要校验的 BitTorrent 元数据解析"
+
+[dependencies]
+assemble-protocol.workspace = true
+getrandom.workspace = true
+serde.workspace = true
+sha1 = "0.11.0"
+thiserror.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
+url.workspace = true
+
+[lints]
+workspace = true

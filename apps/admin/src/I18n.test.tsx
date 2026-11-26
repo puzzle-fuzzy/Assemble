@@ -14,6 +14,7 @@ import {
   render,
   search,
   settle,
+  waitForText,
 } from "./test-support/dom";
 
 const createdAt = "2026-11-25T01:02:03.000Z";
@@ -240,8 +241,9 @@ describe("管理端中英文与显示偏好", () => {
     expect(host.textContent).toContain("zhang@example.test");
     expect(host.textContent).toContain("Not recorded");
     expect(host.textContent).toContain("2 devices / 1 online");
-    expect(host.textContent).toContain("0 of 1234 rows selected.");
-    expect(host.textContent).toContain("Page 1 of 124");
+    expect(host.querySelector('thead [role="checkbox"]')).not.toBeNull();
+    expect(host.querySelector('th[data-table-column="drag"]')).not.toBeNull();
+    expect(host.textContent).toContain("Page 1 / 124");
     expect(host.querySelector("time")?.getAttribute("datetime")).toBe(
       createdAt,
     );
@@ -255,31 +257,31 @@ describe("管理端中英文与显示偏好", () => {
     await click(button(host, "View details for 张三"));
     expect(
       host.querySelector('[data-slot="breadcrumb-page"]')?.textContent,
-    ).toBe("User details");
-    expect(host.textContent).toContain("Account information");
-    expect(host.textContent).toContain("2 devices");
-    expect(host.textContent).toContain("1 device");
-    expect(host.textContent).toContain("工作电脑");
-    expect(host.textContent).toContain("Email and password");
+    ).toBe("Users");
+    await waitForText(document.body, "Account information");
+    const detail = document.body.querySelector<HTMLElement>('[role="dialog"]');
+    expect(detail?.textContent).toContain("2 devices");
+    expect(detail?.textContent).toContain("1 device");
+    expect(detail?.textContent).toContain("工作电脑");
+    expect(detail?.textContent).toContain("Email and password");
     const detailRequests = requested.length;
     await changeLanguage("zh-CN");
     expect(
       host.querySelector('[data-slot="breadcrumb-page"]')?.textContent,
-    ).toBe("用户详情");
-    expect(host.textContent).toContain("账户信息");
-    expect(host.textContent).toContain("2 台");
+    ).toBe("用户");
+    expect(detail?.textContent).toContain("账户信息");
+    expect(detail?.textContent).toContain("2 台");
     expect(requested).toHaveLength(detailRequests);
     await changeLanguage("en");
-    expect(document.title).toBe("User details · Assemble Admin");
-    await click(button(host, "Back to users"));
+    expect(document.title).toBe("Users · Assemble Admin");
+    await click(button(document.body, "Close"));
     expect(
       host.querySelector<HTMLInputElement>('input[type="search"]')?.value,
     ).toBe("张三");
-    expect(host.textContent).toContain("Page 2 of 124");
+    expect(host.textContent).toContain("Page 2 / 124");
     await changeLanguage("zh-CN");
     expect(host.textContent).toContain("2 台 / 1 在线");
-    expect(host.textContent).toContain("已选 0 条，共 1234 条");
-    expect(host.textContent).toContain("第 2 页，共 124 页");
+    expect(host.textContent).toContain("第 2 / 124 页");
     expect(document.title).toBe("用户 · Assemble 管理控制台");
   });
 
@@ -362,8 +364,7 @@ describe("管理端中英文与显示偏好", () => {
     expect(host.textContent).toContain("Registered users");
     await navigate(host, "users");
     expect(host.textContent).toContain("No registered users yet");
-    expect(host.textContent).toContain("0 of 0 rows selected.");
-    expect(host.textContent).toContain("Page 1 of 1");
+    expect(host.textContent).toContain("Page 1 / 1");
     await search(host, "nobody");
     expect(host.textContent).toContain("No matching results");
     expect(button(host, "Next page").disabled).toBe(true);

@@ -179,6 +179,7 @@ pub async fn restore(state: &AppState) {
             // 服务端已经不认这条令牌：可以放心忘掉。
             tracing::warn!("the server no longer accepts the stored session; it is forgotten");
             forget(state);
+            state.record_session_expired();
             state.set_notice(Some(Notice::info("登录已失效，请重新登录。")));
         }
         Err(error) => {
@@ -244,6 +245,7 @@ pub async fn sign_out(state: &AppState) -> Result<(), SessionError> {
 /// 服务端不再认这台设备（在别的设备上被撤销、账户被删）：不必也无法再去撤销，直接忘掉。
 pub fn revoked<R: tauri::Runtime>(state: &AppState<R>) {
     forget(state);
+    state.record_session_expired();
     state.set_notice(Some(Notice::info("这台设备的登录已失效，请重新登录。")));
 }
 

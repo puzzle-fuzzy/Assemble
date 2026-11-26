@@ -1,6 +1,6 @@
 // 应用主界面。
 //
-// 现在有六类真实内容：账户与连接、账户里的设备、文件传输、日程与提醒、云盘、本机设置。
+// 各功能共享窗口布局；账户切换统一隔离查询、草稿与异步结果。
 
 import { useDisplayPreferences } from "@assemble/display";
 import {
@@ -54,10 +54,13 @@ import {
   bridge,
   type MediaBridge,
   mediaBridge,
+  memoBridge,
   toBridgeError,
 } from "@/lib/bridge";
 import { formatBuildInfo } from "@/lib/build-info";
 import { formatStoredDate, uiText, useDesktopTranslation } from "@/lib/i18n";
+import { memoText } from "@/lib/memo-i18n";
+import type { MemoBridge } from "@/lib/memos";
 import { messageFor } from "@/lib/messages";
 import { noticeText } from "@/lib/notice-text";
 import {
@@ -78,16 +81,23 @@ import type {
 } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
+const MemosPage = lazy(() =>
+  import("@/MemosPage").then((module) => ({ default: module.MemosPage })),
+);
+
 const MediaPage = lazy(() =>
   import("@/MediaPage").then((module) => ({ default: module.MediaPage })),
 );
 
+import type { SystemNotification } from "@assemble/ui/lib/system-notifications";
 import { PlannerCard } from "@/PlannerCard";
+import { DesktopSystemNotifications } from "@/SystemNotifications";
 
 export interface AppProps {
   /** 默认使用真实的桥接；测试时注入替身。 */
   bridge?: Bridge;
   mediaBridge?: MediaBridge;
+  memoBridge?: MemoBridge;
 }
 
 const LOGIN_TIMEOUT_MESSAGE = "等待浏览器登录超时，请重试。";
@@ -95,6 +105,7 @@ const LOGIN_TIMEOUT_MESSAGE = "等待浏览器登录超时，请重试。";
 export function App({
   bridge: source = bridge,
   mediaBridge: mediaSource = mediaBridge,
+  memoBridge: memoSource = memoBridge,
 }: AppProps) {
   useDesktopTranslation();
   const { resolvedTheme } = useDisplayPreferences();
@@ -105,6 +116,19 @@ export function App({
   const [section, setSection] = useState<Section>("transfers");
   const [queries, setQueries] = useState<Partial<Record<Section, string>>>({});
   const contentHeading = useRef<HTMLSpanElement>(null);
+  const [systemFocus, setSystemFocus] = useState<{
+    section: Section;
+    id: string | null;
+    revision: number;
+  } | null>(null);
+  useEffect(() => {
+    if (!systemFocus || section !== systemFocus.section) return;
+    const target = systemFocus.id
+      ? document.getElementById(systemFocus.id)
+      : null;
+    (target ?? contentHeading.current)?.focus({ preventScroll: true });
+    target?.scrollIntoView?.({ block: "nearest" });
+  }, [systemFocus, section]);
   const phase = snapshot?.session.phase;
   const accountId =
     snapshot?.session.phase === "signedIn" ? snapshot.session.account.id : null;
@@ -174,12 +198,34 @@ export function App({
     }
   }
 
+  function openSystemNotification(item: SystemNotification) {
+    const content = item.content;
+    const next: Section =
+      content.type === "downloadFailed"
+        ? "downloads"
+        : content.type === "transferFailed"
+          ? "transfers"
+          : "account";
+    setQueries((previous) => ({ ...previous, [next]: "" }));
+    navigate(next);
+    setSystemFocus((previous) => ({
+      section: next,
+      id:
+        content.type === "transferFailed"
+          ? `transfer-${content.transferId}`
+          : content.type === "downloadFailed"
+            ? `network-download-${content.taskId}`
+            : null,
+      revision: (previous?.revision ?? 0) + 1,
+    }));
+  }
+
   return (
     <>
       <Toaster
         theme={resolvedTheme}
         closeButton
-        containerAriaLabel={uiText("signInNotifications")}
+        containerAriaLabel={uiText("actionNotifications")}
       />
       <SidebarProvider className="items-start">
         <DesktopSidebar
@@ -225,7 +271,30 @@ export function App({
                 </BreadcrumbList>
               </Breadcrumb>
             </div>
-            <div className="min-w-0 shrink-0 px-4">
+            <div className="flex min-w-0 shrink-0 items-center gap-2 px-4">
+              <DesktopSystemNotifications
+                key={accountId ?? "local"}
+                source={source}
+                view={snapshot?.systemNotifications}
+                onNavigate={openSystemNotification}
+                canNavigate={(item) =>
+                  item.content.type === "sessionExpired" ||
+                  (item.content.type === "transferFailed" &&
+                    (snapshot?.transfers.some(
+                      (transfer) =>
+                        item.content.type === "transferFailed" &&
+                        transfer.id === item.content.transferId,
+                    ) ??
+                      false)) ||
+                  (item.content.type === "downloadFailed" &&
+                    (snapshot?.downloads.tasks.some(
+                      (task) =>
+                        item.content.type === "downloadFailed" &&
+                        task.id === item.content.taskId,
+                    ) ??
+                      false))
+                }
+              />
               <ServiceStatus
                 service={snapshot?.service}
                 signedIn={phase === "signedIn"}
@@ -354,6 +423,26 @@ export function App({
                   onError={setActionError}
                 />
               </section>
+              {section === "memos" ? (
+                <section id="view-memos" aria-label={memoText("title")}>
+                  <Suspense
+                    fallback={
+                      <Skeleton
+                        className="h-64 w-full"
+                        role="status"
+                        aria-label={memoText("loading")}
+                      />
+                    }
+                  >
+                    <MemosPage
+                      key={accountId ?? "signedOut"}
+                      source={memoSource}
+                      accountId={accountId}
+                      onSignIn={() => navigate("account")}
+                    />
+                  </Suspense>
+                </section>
+              ) : null}
               {section === "media" ? (
                 <section id="view-media" aria-label={uiText("moviesAndTV")}>
                   <Suspense
@@ -991,7 +1080,12 @@ function TransferRow({
   }
 
   return (
-    <article aria-label={transfer.name} className="py-3">
+    <article
+      id={`transfer-${transfer.id}`}
+      tabIndex={-1}
+      aria-label={transfer.name}
+      className="py-3"
+    >
       <div className="flex flex-wrap items-center gap-3">
         {showPeer ? (
           <span

@@ -44,7 +44,7 @@ import {
   TrashIcon,
   XIcon,
 } from "lucide-react";
-import { useEffect, useId, useRef, useState } from "react";
+import { type ReactNode, useEffect, useId, useRef, useState } from "react";
 import type { MediaClient } from "../client";
 import { type MediaAccessFailure, useMediaTask } from "../hooks/use-media-task";
 import { useMediaTranslation } from "../i18n";
@@ -63,10 +63,13 @@ import { MediaGalleryEditor } from "./gallery";
 import { MediaImport } from "./import";
 import { MediaDetails } from "./media-details";
 import { MediaImage } from "./media-image";
+import { MediaRecordedTime } from "./recorded-time";
 
 const EMPTY_ENTRIES: MediaEntry[] = [];
 
 export interface MediaWorkspaceProps {
+  presentation?: "default" | "management";
+  toolbarActions?: ReactNode;
   client: MediaClient;
   imageLoader: ImageLoader;
   canEdit: boolean;
@@ -84,6 +87,8 @@ export function MediaWorkspace(props: MediaWorkspaceProps) {
   );
 }
 function WorkspaceContent({
+  presentation = "default",
+  toolbarActions,
   client,
   imageLoader,
   canEdit,
@@ -105,6 +110,8 @@ function WorkspaceContent({
     null,
   );
   const [selected, setSelected] = useState<MediaEntry | null>(null);
+  const [detailsOpen, setDetailsOpen] = useState(false);
+  const detailTrigger = useRef<HTMLElement | null>(null);
   const [editor, setEditor] = useState<MediaEntry | "new" | null>(null);
   const [importing, setImporting] = useState(false);
   const [gallery, setGallery] = useState(false);
@@ -122,6 +129,7 @@ function WorkspaceContent({
   useEffect(() => {
     detailTask.cancel();
     setSelected(null);
+    setDetailsOpen(false);
     void query;
   }, [query, detailTask.cancel]);
   useEffect(() => {
@@ -149,6 +157,7 @@ function WorkspaceContent({
           : capabilities.canMaintainPrivate),
     );
   function saved(entry: MediaEntry) {
+    if (presentation === "management") setDetailsOpen(false);
     setSelected(entry);
     setEditor(null);
     setImporting(false);
@@ -158,6 +167,11 @@ function WorkspaceContent({
     id: string,
     action: "view" | "edit" | "gallery" | "remove" = "view",
   ) {
+    detailTrigger.current =
+      document.activeElement instanceof HTMLElement
+        ? document.activeElement
+        : null;
+    setDetailsOpen(action === "view");
     setSelected(null);
     void detailTask.run(
       (signal) => client.get(id, signal),
@@ -195,11 +209,13 @@ function WorkspaceContent({
           >
             {entry.title}
           </Button>
-          {entry.originalTitle && entry.originalTitle !== entry.title && (
-            <p className="text-xs text-muted-foreground">
-              {entry.originalTitle}
-            </p>
-          )}
+          {presentation !== "management" &&
+            entry.originalTitle &&
+            entry.originalTitle !== entry.title && (
+              <p className="text-xs text-muted-foreground">
+                {entry.originalTitle}
+              </p>
+            )}
         </>
       ),
     },
@@ -224,11 +240,14 @@ function WorkspaceContent({
           }}
         />
       ),
-      cell: (entry) => (
-        <Badge variant="outline" className="px-1.5 text-muted-foreground">
-          {t(`type.${entry.mediaType}`)}
-        </Badge>
-      ),
+      cell: (entry) =>
+        presentation === "management" ? (
+          t(`type.${entry.mediaType}`)
+        ) : (
+          <Badge variant="outline" className="px-1.5 text-muted-foreground">
+            {t(`type.${entry.mediaType}`)}
+          </Badge>
+        ),
     },
     {
       id: "year",
@@ -261,32 +280,46 @@ function WorkspaceContent({
           }}
         />
       ),
-      cell: (entry) => (
-        <Badge variant="outline" className="px-1.5 text-muted-foreground">
-          {entry.status === "completed" ? (
-            <CircleCheckIcon
-              className="fill-success text-background"
-              aria-hidden="true"
-            />
-          ) : entry.status === "watching" ? (
-            <LoaderCircleIcon aria-hidden="true" />
-          ) : (
-            <CircleDashedIcon aria-hidden="true" />
-          )}
-          {t(`status.${entry.status}`)}
-        </Badge>
-      ),
+      cell: (entry) =>
+        presentation === "management" ? (
+          t(`status.${entry.status}`)
+        ) : (
+          <Badge variant="outline" className="px-1.5 text-muted-foreground">
+            {entry.status === "completed" ? (
+              <CircleCheckIcon
+                className="fill-success text-background"
+                aria-hidden="true"
+              />
+            ) : entry.status === "watching" ? (
+              <LoaderCircleIcon aria-hidden="true" />
+            ) : (
+              <CircleDashedIcon aria-hidden="true" />
+            )}
+            {t(`status.${entry.status}`)}
+          </Badge>
+        ),
     },
     {
       id: "watchedAt",
       label: t("entry.watchedAt"),
       cell: (entry) => entry.watchedAt ?? t("common.unknown"),
     },
+    ...(presentation === "management"
+      ? [
+          {
+            id: "updatedAt",
+            label: t("common.updatedAt"),
+            cell: (entry: MediaEntry) => (
+              <MediaRecordedTime value={entry.updatedAt} />
+            ),
+          },
+        ]
+      : []),
   ];
   return (
     <div className="@container/media flex min-w-0 flex-col gap-4">
       <MediaError error={detailTask.error} />
-      {selected ? (
+      {selected && presentation !== "management" ? (
         <Card>
           <CardHeader>
             <div className="flex flex-wrap justify-between gap-2">
@@ -356,9 +389,11 @@ function WorkspaceContent({
         </Card>
       ) : (
         <DataTable
+          variant={presentation}
           label={t("list.showing")}
           data={
-            listTask.pending || detailTask.pending
+            listTask.pending ||
+            (detailTask.pending && presentation !== "management")
               ? EMPTY_ENTRIES
               : (list?.items ?? EMPTY_ENTRIES)
           }
@@ -373,7 +408,14 @@ function WorkspaceContent({
               setQuery((previous) => ({ ...previous, page, pageSize })),
           }}
           toolbar={
-            <search aria-label={t("list.query")} className="w-full max-w-sm">
+            <search
+              aria-label={t("list.query")}
+              className={
+                presentation === "management"
+                  ? "w-full max-w-80"
+                  : "w-full max-w-sm"
+              }
+            >
               <form
                 aria-label={t("list.query")}
                 onSubmit={(event) => {
@@ -430,11 +472,19 @@ function WorkspaceContent({
                           </InputGroupAddon>
                         )}
                       </InputGroup>
-                      <Button type="submit" size="sm">
-                        <SearchIcon
-                          data-icon="inline-start"
-                          aria-hidden="true"
-                        />
+                      <Button
+                        type="submit"
+                        size="sm"
+                        variant={
+                          presentation === "management" ? "outline" : "default"
+                        }
+                      >
+                        {presentation !== "management" && (
+                          <SearchIcon
+                            data-icon="inline-start"
+                            aria-hidden="true"
+                          />
+                        )}
                         {t("common.search")}
                       </Button>
                     </div>
@@ -445,6 +495,7 @@ function WorkspaceContent({
           }
           actions={
             <>
+              {toolbarActions}
               <Button
                 variant="outline"
                 size="sm"
@@ -455,13 +506,17 @@ function WorkspaceContent({
                   setRevision((value) => value + 1);
                 }}
               >
-                <RefreshCwIcon data-icon="inline-start" />
+                {presentation !== "management" && (
+                  <RefreshCwIcon data-icon="inline-start" />
+                )}
                 {t("common.refresh")}
               </Button>
               {allowed && (
                 <>
                   <Button
-                    variant="outline"
+                    variant={
+                      presentation === "management" ? "default" : "outline"
+                    }
                     size="sm"
                     onClick={() => setEditor("new")}
                   >
@@ -522,6 +577,78 @@ function WorkspaceContent({
             )
           }
         />
+      )}
+      {presentation === "management" && (
+        <Dialog
+          open={detailsOpen}
+          onOpenChange={(open) => {
+            setDetailsOpen(open);
+            if (!open) {
+              detailTask.cancel();
+              setSelected(null);
+            }
+          }}
+        >
+          <DialogContent
+            className="max-h-[90svh] overflow-y-auto sm:max-w-5xl"
+            aria-describedby={undefined}
+            onCloseAutoFocus={(event) => {
+              if (detailTrigger.current?.isConnected) {
+                event.preventDefault();
+                detailTrigger.current.focus();
+              }
+            }}
+          >
+            <DialogHeader className="pr-8">
+              <DialogTitle>
+                {selected?.title ?? t("common.viewDetails")}
+              </DialogTitle>
+            </DialogHeader>
+            {detailTask.pending ? (
+              <MediaLoading />
+            ) : detailTask.error ? (
+              <MediaError error={detailTask.error} />
+            ) : (
+              selected && (
+                <>
+                  {allowed && (
+                    <div className="flex flex-wrap gap-2">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setEditor(selected)}
+                      >
+                        {t("common.edit")}
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setGallery(true)}
+                      >
+                        {t("entry.gallery")}
+                      </Button>
+                      <Button
+                        variant="destructive"
+                        size="sm"
+                        onClick={() => setRemoving(true)}
+                      >
+                        {t("common.remove")}
+                      </Button>
+                    </div>
+                  )}
+                  <MediaDetails
+                    key={`${selected.id}:${selected.version}`}
+                    entry={selected}
+                    imageLoader={imageLoader}
+                    onActor={showActor}
+                    onCopyMagnet={onCopyMagnet}
+                    onSignIn={onSignIn}
+                  />
+                </>
+              )
+            )}
+          </DialogContent>
+        </Dialog>
       )}
       {editor && allowed && (
         <MediaEditor

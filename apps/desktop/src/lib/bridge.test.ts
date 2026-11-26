@@ -3,12 +3,15 @@
 import { beforeEach, describe, expect, mock, test } from "bun:test";
 import type { MediaContent, MediaIdentity } from "@assemble/media";
 import type { BridgeError as BridgeErrorType } from "@/lib/bridge";
+import { isMemo, isMemoList } from "@/lib/memos";
 import type { Snapshot } from "@/lib/types";
 import mediaSamples from "../../../../packages/media/contract/snapshots.json";
+import memoSamples from "../../contract/memos.json";
 
 type InvokeCall = { command: string; args: Record<string, unknown> };
 
 const STATE: Snapshot = {
+  systemNotifications: { items: [], available: true },
   downloads: {
     browserTaskId: null,
     folderName: "",
@@ -56,11 +59,62 @@ mock.module("@tauri-apps/api/event", () => ({
   },
 }));
 
-const { SNAPSHOT_EVENT, BridgeError, bridge, mediaBridge, run, toBridgeError } =
-  await import("@/lib/bridge");
+const {
+  SNAPSHOT_EVENT,
+  BridgeError,
+  bridge,
+  mediaBridge,
+  memoBridge,
+  run,
+  toBridgeError,
+} = await import("@/lib/bridge");
 const { messageFor } = await import("@/lib/messages");
 
 describe("桥接", () => {
+  test("备忘录契约与具名桥接：复制只传标识，失败响应与取消不交给页面", async () => {
+    expect(isMemo(memoSamples.memo)).toBe(true);
+    expect(isMemoList(memoSamples.listing)).toBe(true);
+    expect(isMemo({ ...memoSamples.memo, version: 0 })).toBe(false);
+    expect(isMemoList({ ...memoSamples.listing, page: 0 })).toBe(false);
+    respondWith = memoSamples.listing;
+    const query = { q: "原文+🙂", page: 2, pageSize: 10 };
+    await memoBridge.list(query);
+    expect(calls.at(-1)).toEqual({ command: "memo_list", args: { query } });
+    respondWith = memoSamples.memo;
+    const content = { title: "标题", text: "  原文\n " };
+    await memoBridge.get("memo-1");
+    expect(calls.at(-1)).toEqual({
+      command: "memo_get",
+      args: { id: "memo-1" },
+    });
+    await memoBridge.create(content, "same-request");
+    expect(calls.at(-1)).toEqual({
+      command: "memo_create",
+      args: { input: { content, requestId: "same-request" } },
+    });
+    await memoBridge.update("memo-1", 1, content);
+    expect(calls.at(-1)).toEqual({
+      command: "memo_update",
+      args: { id: "memo-1", input: { version: 1, content } },
+    });
+    await memoBridge.remove("memo-1", 1);
+    expect(calls.at(-1)).toEqual({
+      command: "memo_remove",
+      args: { id: "memo-1", version: 1 },
+    });
+    await memoBridge.copy("memo-1");
+    expect(calls.at(-1)).toEqual({
+      command: "memo_copy",
+      args: { id: "memo-1" },
+    });
+    respondWith = { invalid: "private diagnostic" };
+    await expect(memoBridge.get("memo-1")).rejects.toBeInstanceOf(BridgeError);
+    const cancelled = new AbortController();
+    cancelled.abort();
+    const count = calls.length;
+    await expect(memoBridge.copy("memo-1", cancelled.signal)).rejects.toThrow();
+    expect(calls).toHaveLength(count);
+  });
   test("下载只通过具名命令传来源，文件操作只传任务标识", async () => {
     const preview = {
       id: "p",
@@ -142,6 +196,8 @@ describe("桥接", () => {
     await bridge.retryTransfer("transfer-1");
     await bridge.setSendMenu(true);
     await bridge.dismissNotice();
+    await bridge.systemNotificationsRefresh();
+    await bridge.systemNotificationsRead([{ id: "system-1", revision: 2 }]);
     await bridge.plannerRefresh();
     await bridge.scheduleCreate({
       title: "火车",
@@ -200,6 +256,11 @@ describe("桥接", () => {
       { command: "retry_transfer", args: { transferId: "transfer-1" } },
       { command: "set_send_menu", args: { enabled: true } },
       { command: "dismiss_notice", args: {} },
+      { command: "system_notifications_refresh", args: {} },
+      {
+        command: "system_notifications_read",
+        args: { items: [{ id: "system-1", revision: 2 }] },
+      },
       { command: "planner_refresh", args: {} },
       {
         command: "schedule_create",

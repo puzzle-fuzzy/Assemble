@@ -16,13 +16,15 @@ use reqwest::StatusCode;
 use serde_json::Value;
 
 const ADMIN_EMAIL: &str = "owner@example.test";
-const PATHS: [&str; 6] = [
+const PATHS: [&str; 8] = [
     "/v1/admin/session",
     "/v1/admin/overview",
     "/v1/admin/users",
     "/v1/admin/users/unknown",
     "/v1/admin/devices",
     "/v1/admin/logins",
+    "/v1/admin/drive/files",
+    "/v1/admin/storage",
 ];
 
 #[tokio::test]
@@ -502,13 +504,13 @@ async fn assert_account_totals(f: &common::Fixture, owner: &str, other: &str, le
     let overview: AdminOverview =
         serde_json::from_value(json(&f.browser, "/v1/admin/overview").await).unwrap();
     assert_eq!(
-        overview,
-        AdminOverview {
-            users: 3,
-            devices: 3,
-            online_devices: 1,
-            registrations_today: 2
-        }
+        (
+            overview.users,
+            overview.devices,
+            overview.online_devices,
+            overview.registrations_today
+        ),
+        (3, 3, 1, 2)
     );
     let all = json(&f.browser, "/v1/admin/users").await;
     no_credentials(&all);

@@ -115,7 +115,7 @@ pub async fn find(
 }
 
 pub async fn exists(pool: &SqlitePool, device_id: &str) -> Result<bool, sqlx::Error> {
-    let found: Option<i64> = sqlx::query_scalar("SELECT 1 FROM devices WHERE id = ?")
+    let found: Option<i64> = sqlx::query_scalar("SELECT 1 FROM devices d JOIN accounts a ON a.id = d.account_id WHERE d.id = ? AND a.suspended_at IS NULL")
         .bind(device_id)
         .fetch_optional(pool)
         .await?;

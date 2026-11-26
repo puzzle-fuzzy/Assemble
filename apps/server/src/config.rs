@@ -20,6 +20,7 @@ pub const ADDR: &str = "ASSEMBLE_ADDR";
 pub const DRIVE_QUOTA_BYTES: &str = "ASSEMBLE_DRIVE_QUOTA_BYTES";
 /// 全站的内容总量上限（字节）：云盘与还没送达的发送一起算。
 pub const STORAGE_BUDGET_BYTES: &str = "ASSEMBLE_STORAGE_BUDGET_BYTES";
+pub const STORAGE_WARN_PERCENT: &str = "ASSEMBLE_STORAGE_WARN_PERCENT";
 /// 反向代理写进来源地址的那个请求头（例如 `X-Real-IP`）。配置之后，按来源设的限额才生效。
 pub const CLIENT_IP_HEADER: &str = "ASSEMBLE_CLIENT_IP_HEADER";
 /// 未送达的发送保留多少小时。
@@ -52,6 +53,7 @@ pub struct Config {
     pub public_origin: ServerOrigin,
     pub drive_quota_bytes: u64,
     pub storage_budget_bytes: u64,
+    pub storage_warn_percent: u8,
     pub send_ttl: Duration,
     pub send_history: Duration,
     pub web_session_ttl: Duration,
@@ -60,6 +62,7 @@ pub struct Config {
     pub super_admin_email: Option<String>,
     pub admin_assets_dir: PathBuf,
     pub media: crate::media::MediaConfig,
+    pub dht: crate::dht::config::Config,
     pub media_web_assets_dir: PathBuf,
     /// 只有说明了"哪个请求头可信"，服务端才按它区分请求的来源；见 [`crate::source`]。
     pub client_ip_header: Option<axum::http::HeaderName>,
@@ -184,12 +187,23 @@ impl Config {
             public_origin,
             drive_quota_bytes,
             storage_budget_bytes,
+            storage_warn_percent: optional(
+                STORAGE_WARN_PERCENT,
+                get(STORAGE_WARN_PERCENT),
+                |value| {
+                    whole(1, 100)(value).and_then(|number| {
+                        u8::try_from(number).map_err(|_| "必须在 1 到 100 之间".to_owned())
+                    })
+                },
+            )?
+            .unwrap_or(80),
             send_ttl,
             send_history,
             web_session_ttl,
             smtp: crate::mail::SmtpConfig::from_lookup(&get)?,
             github: crate::github::GithubConfig::from_lookup(&get)?,
             media: crate::media::MediaConfig::from_lookup(&get)?,
+            dht: crate::dht::config::Config::from_lookup(&get)?,
             super_admin_email: optional(SUPER_ADMIN_EMAIL, get(SUPER_ADMIN_EMAIL), |value| {
                 crate::email_identity::normalize_email(value)
                     .map_err(|_| "必须是合法邮箱".to_owned())
@@ -215,12 +229,14 @@ impl Config {
             public_origin: ServerOrigin::development(),
             drive_quota_bytes: DEFAULT_DRIVE_QUOTA_BYTES,
             storage_budget_bytes: DEFAULT_STORAGE_BUDGET_BYTES,
+            storage_warn_percent: 80,
             send_ttl: DEFAULT_SEND_TTL,
             send_history: DEFAULT_SEND_HISTORY,
             web_session_ttl: DEFAULT_WEB_SESSION_TTL,
             smtp: None,
             github: None,
             media: crate::media::MediaConfig::default(),
+            dht: crate::dht::config::Config::default(),
             super_admin_email: None,
             admin_assets_dir: PathBuf::from("apps/admin/dist"),
             media_web_assets_dir: PathBuf::from("apps/media-web/dist"),
@@ -332,6 +348,7 @@ mod tests {
         assert_eq!(config.public_origin.as_str(), "https://assemble.example");
         assert_eq!(config.addr.to_string(), DEFAULT_ADDR);
         assert_eq!(config.drive_quota_bytes, DEFAULT_DRIVE_QUOTA_BYTES);
+        assert_eq!(config.storage_warn_percent, 80);
         assert_eq!(config.send_ttl, DEFAULT_SEND_TTL);
         assert_eq!(config.send_history, DEFAULT_SEND_HISTORY);
         assert_eq!(config.web_session_ttl, DEFAULT_WEB_SESSION_TTL);
@@ -364,6 +381,7 @@ mod tests {
             (PUBLIC_ORIGIN, "http://127.0.0.1:8787"),
             (ADDR, "0.0.0.0:9000"),
             (DRIVE_QUOTA_BYTES, "1000"),
+            (STORAGE_WARN_PERCENT, "85"),
             (SEND_TTL_HOURS, "6"),
             (SEND_HISTORY_DAYS, "7"),
             (WEB_SESSION_HOURS, "1"),
@@ -372,6 +390,7 @@ mod tests {
         .unwrap();
         assert_eq!(config.addr.to_string(), "0.0.0.0:9000");
         assert_eq!(config.drive_quota_bytes, 1000);
+        assert_eq!(config.storage_warn_percent, 85);
         assert_eq!(config.send_ttl, Duration::from_secs(6 * 60 * 60));
         assert_eq!(config.send_history, Duration::from_secs(7 * 24 * 60 * 60));
         assert_eq!(config.web_session_ttl, Duration::from_secs(60 * 60));
@@ -387,6 +406,9 @@ mod tests {
             (PUBLIC_ORIGIN, "https://user:pass@assemble.example"),
             (DRIVE_QUOTA_BYTES, "2 GB"),
             (DRIVE_QUOTA_BYTES, "0"),
+            (STORAGE_WARN_PERCENT, "0"),
+            (STORAGE_WARN_PERCENT, "101"),
+            (STORAGE_WARN_PERCENT, "NaN"),
             (SEND_TTL_HOURS, "0"),
             (SEND_TTL_HOURS, "-1"),
             (SEND_TTL_HOURS, too_many_hours.as_str()),

@@ -237,6 +237,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "assemble-dht"
+version = "0.1.0"
+dependencies = [
+ "assemble-protocol",
+ "getrandom 0.4.3",
+ "serde",
+ "sha1",
+ "thiserror 2.0.21",
+ "tokio",
+ "tokio-util",
+ "url",
+]
+
+[[package]]
 name = "assemble-download"
 version = "0.1.0"
 dependencies = [
@@ -319,6 +333,7 @@ dependencies = [
  "argon2",
  "assemble-client",
  "assemble-device",
+ "assemble-dht",
  "assemble-protocol",
  "assemble-schedule",
  "assemble-store",
@@ -330,6 +345,7 @@ dependencies = [
  "chrono",
  "clap",
  "email_address",
+ "fs4",
  "futures-core",
  "futures-util",
  "getrandom 0.4.3",

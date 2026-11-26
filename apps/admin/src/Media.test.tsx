@@ -207,6 +207,106 @@ afterEach(async () => {
 });
 
 describe("影视业务界面与权限", () => {
+  test("管理影视详情保留查询和列表，关闭弹窗后焦点回到原行", async () => {
+    const host = await render(<App />);
+    await navigate(host, "media");
+    await search(host, "真实");
+    const publicPage =
+      host.querySelector<HTMLAnchorElement>('a[href="/movies/"]');
+    expect(publicPage?.textContent).toBe("查看影视站");
+    expect(publicPage?.target).toBe("_blank");
+    expect(publicPage?.rel).toContain("noopener");
+    expect(publicPage?.getAttribute("aria-description")).toBe("在新标签页打开");
+    expect(
+      publicPage?.closest('[data-slot="tabs-content"]')?.querySelector("table"),
+    ).not.toBeNull();
+    const trigger = button(host, "查看 真实片名 的详情");
+    trigger.focus();
+    await click(trigger);
+    await waitForText(document.body, entry.overview);
+    const dialog = document.body.querySelector<HTMLElement>('[role="dialog"]');
+    expect(dialog?.textContent).toContain(entry.overview);
+    expect(host.querySelector("tbody")?.textContent).toContain(entry.title);
+    expect(
+      host.querySelector<HTMLInputElement>('input[type="search"]')?.value,
+    ).toBe("真实");
+    expect(window.location.hash).toBe("#media");
+    expect(host.querySelector('thead [role="checkbox"]')).not.toBeNull();
+    expect(host.querySelector('th[data-table-column="drag"]')).not.toBeNull();
+    await click(button(document.body, "关闭"));
+    expect(document.body.querySelector('[role="dialog"]')).toBeNull();
+    expect(document.activeElement === trigger).toBe(true);
+    const requestCount = requests.length;
+    await act(async () => setLanguage("en"));
+    expect(publicPage?.textContent).toBe("View media site");
+    expect(publicPage?.getAttribute("aria-description")).toBe(
+      "Opens in a new tab",
+    );
+    expect(requests).toHaveLength(requestCount);
+    expect(
+      host.querySelector<HTMLInputElement>('input[type="search"]')?.value,
+    ).toBe("真实");
+  });
+
+  test("管理合集使用表格和服务端分页，详情弹窗读取完整成员并保留列表", async () => {
+    const collection = {
+      id: "collection-table",
+      version: 1,
+      title: "太空系列",
+      description: "合集说明文字",
+      poster: null,
+      items: [entry],
+      createdAt: entry.createdAt,
+      updatedAt: entry.updatedAt,
+    };
+    handle = (path) =>
+      path.startsWith("/v1/media/collections?")
+        ? json({
+            items: [collection],
+            total: 23,
+            page: Number(
+              new URL(path, "http://localhost").searchParams.get("page"),
+            ),
+            pageSize: 10,
+          })
+        : path === `/v1/media/collections/${collection.id}`
+          ? json({ item: collection })
+          : response(path);
+    const host = await render(<App />);
+    await navigate(host, "media");
+    await act(async () => {
+      const tab = button(host, "影视合集");
+      tab.focus();
+      tab.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "Enter", bubbles: true }),
+      );
+    });
+    await waitForText(host, collection.title);
+    const publicPage = host.querySelector<HTMLAnchorElement>(
+      'a[href="/movies/collections"]',
+    );
+    expect(publicPage?.textContent).toBe("查看合集页");
+    expect(publicPage?.target).toBe("_blank");
+    expect(host.querySelector('a[href="/movies/"]')).toBeNull();
+    expect(host.querySelector("thead")?.textContent).toContain("更新时间");
+    await click(button(host, "下一页"));
+    expect(requests.at(-1)?.path).toContain("page=2");
+    const trigger = button(host, "查看详情：太空系列");
+    await act(async () => trigger.focus());
+    await click(trigger);
+    await waitForText(document.body, entry.title);
+    const dialog = document.body.querySelector('[role="dialog"]');
+    expect(dialog?.textContent).toContain(collection.description);
+    expect(dialog?.textContent).toContain(entry.title);
+    expect(host.querySelector("tbody")?.textContent).toContain(
+      collection.title,
+    );
+    await click(button(document.body, "关闭"));
+    expect(host.textContent).toContain("第 2 / 3 页");
+    expect(document.activeElement === trigger).toBe(true);
+    await act(async () => setLanguage("en"));
+    expect(publicPage?.textContent).toBe("View collections");
+  });
   test("筛选位于表头，搜索仅用占位文字，输入框清空图标重置全部条件并保留焦点和分页条数", async () => {
     const host = await render(
       <MediaWorkspace
@@ -343,18 +443,23 @@ describe("影视业务界面与权限", () => {
   test("管理入口读取真实片库，携带版本和CSRF更新三种状态；冲突保留输入", async () => {
     let conflict = true;
     handle = (path, init) =>
-      path === `/v1/admin/media/entries/${entry.id}` && init?.method === "PUT"
-        ? conflict
-          ? json({ code: "VERSION_CONFLICT" }, 409)
-          : json({ item: { ...entry, version: 4, status: "completed" } })
-        : response(path);
+      !conflict && path.startsWith("/v1/media/shared/entries?")
+        ? json(list([{ ...entry, version: 4, status: "completed" }]))
+        : path === `/v1/admin/media/entries/${entry.id}` &&
+            init?.method === "PUT"
+          ? conflict
+            ? json({ code: "VERSION_CONFLICT" }, 409)
+            : json({ item: { ...entry, version: 4, status: "completed" } })
+          : response(path);
     const host = await render(<App />);
     await navigate(host, "media");
     await waitForText(host, "真实片名");
     expect(document.title).toContain("影视片库");
     await click(button(host, "查看 真实片名 的详情"));
-    await click(button(host, "编辑"));
-    const editor = document.body.querySelector('[role="dialog"]');
+    await click(button(document.body, "编辑"));
+    const editor = [...document.body.querySelectorAll('[role="dialog"]')].at(
+      -1,
+    );
     if (!editor) throw new Error("missing editor");
     await change(field(editor, "观看状态"), "completed");
     await change(field(document.body, "片名"), "保留我的输入");
@@ -437,7 +542,7 @@ describe("影视业务界面与权限", () => {
               signal = init?.signal;
             })
           : response(path);
-      await click(button(host, "复制磁力链接"));
+      await click(button(document.body, "复制磁力链接"));
       expect(signal?.aborted).toBe(false);
       await cleanup();
       expect(signal?.aborted).toBe(true);
@@ -513,7 +618,8 @@ describe("影视业务界面与权限", () => {
     expect(JSON.parse(String(imports[0].init?.body)).requestId).not.toBe(
       JSON.parse(String(imports[1].init?.body)).requestId,
     );
-    expect(host.textContent).toContain("服务端简介");
+    expect(host.textContent).toContain(entry.title);
+    expect(document.body.querySelector('[role="dialog"]')).toBeNull();
   });
   test("合集从共享库选择并维护实际顺序，保存只提交成员标识", async () => {
     const second = { ...entry, id: "film-2", title: "第二部" };
@@ -554,7 +660,28 @@ describe("影视业务界面与权限", () => {
     ].filter((item) => item.textContent === "添加");
     await click(add[0]);
     await click(add[1]);
-    await click(button(dialog, "上移 第二部"));
+    const dragHandle = button(dialog, "调整 第二部 的顺序");
+    if (!dragHandle) throw new Error("missing collection member drag handle");
+    await act(async () => {
+      dragHandle.focus();
+      dragHandle.dispatchEvent(
+        new KeyboardEvent("keydown", {
+          key: "ArrowUp",
+          altKey: true,
+          bubbles: true,
+        }),
+      );
+    });
+    expect(
+      [
+        ...dialog.querySelectorAll<HTMLTableRowElement>(
+          "tbody tr[data-table-row]",
+        ),
+      ].map((row) => row.dataset.tableRow),
+    ).toEqual(["film-2", "film-1"]);
+    expect(document.activeElement).toBe(dragHandle);
+    await click(button(dialog, "下移：第二部"));
+    await click(button(dialog, "上移：第二部"));
     await submit(forms[0]);
     const save = requests.find(
       (item) =>
@@ -566,6 +693,45 @@ describe("影视业务界面与权限", () => {
       entryIds: ["film-2", "film-1"],
     });
     expect(String(save?.init?.body)).not.toContain("magnet");
+  });
+  test("所有统计表保留两列，汇总数据的拖拽和多选同时禁用", async () => {
+    handle = (path) =>
+      path === "/v1/admin/media/statistics"
+        ? json({
+            total: 2,
+            planned: 1,
+            watching: 1,
+            completed: 0,
+            movies: 2,
+            tv: 0,
+            byYear: [{ year: 2026, count: 2 }],
+            byGenre: [{ genre: "剧情", count: 2 }],
+            byMonth: [],
+          })
+        : response(path);
+    const host = await render(<App />);
+    await navigate(host, "media");
+    await act(async () => {
+      const tab = button(host, "共享片库统计");
+      tab.focus();
+      tab.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "Enter", bubbles: true }),
+      );
+    });
+    await waitForText(host, "类型分布");
+    expect(host.querySelectorAll("table")).toHaveLength(3);
+    for (const table of host.querySelectorAll("table")) {
+      expect(
+        table.querySelector('th[data-table-column="drag"]'),
+      ).not.toBeNull();
+      expect(
+        table.querySelector('th[data-table-column="select"]'),
+      ).not.toBeNull();
+      for (const control of table.querySelectorAll<HTMLButtonElement>(
+        '[role="checkbox"], [data-table-drag-handle]',
+      ))
+        expect(control.disabled).toBe(true);
+    }
   });
   test("关闭导入窗口停止轮询，重新打开能续看原任务且不重复入队", async () => {
     handle = (path, init) =>
@@ -615,7 +781,8 @@ describe("影视业务界面与权限", () => {
     expect(
       requests.some((item) => item.path === "/v1/admin/media/jobs/job-1"),
     ).toBe(true);
-    expect(host.textContent).toContain(entry.overview);
+    expect(host.textContent).toContain(entry.title);
+    expect(document.body.querySelector('[role="dialog"]')).toBeNull();
   });
   test("导入提交响应丢失时重试保留原请求id，避免未知结果重复创建", async () => {
     let first = true;
@@ -666,8 +833,10 @@ describe("影视业务界面与权限", () => {
     const host = await render(<App />);
     await navigate(host, "media");
     await click(button(host, "查看 真实片名 的详情"));
-    await click(button(host, "图集与封面"));
-    const dialog = document.body.querySelector<HTMLElement>('[role="dialog"]');
+    await click(button(document.body, "图集与封面"));
+    const dialog = [
+      ...document.body.querySelectorAll<HTMLElement>('[role="dialog"]'),
+    ].at(-1);
     if (!dialog) throw new Error("missing gallery");
     await click(button(dialog, "设为封面"));
     const patch = requests.find((item) => item.init?.method === "PATCH");

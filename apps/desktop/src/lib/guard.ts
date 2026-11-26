@@ -274,6 +274,7 @@ export function isSessionView(value: unknown): value is SessionView {
   }
 }
 
+import { isSystemNotifications } from "@assemble/ui/lib/system-notifications";
 import { isDownloadsView } from "./downloads";
 
 export function isSnapshot(value: unknown): value is Snapshot {
@@ -281,6 +282,7 @@ export function isSnapshot(value: unknown): value is Snapshot {
   const service = value.service;
   return (
     isRecord(service) &&
+    isSystemNotifications(value.systemNotifications) &&
     isDownloadsView(value.downloads) &&
     isServiceTarget(service.target) &&
     (service.reachable === null || typeof service.reachable === "boolean") &&

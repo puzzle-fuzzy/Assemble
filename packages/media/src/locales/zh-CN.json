@@ -13,6 +13,7 @@
     "completed": "已看"
   },
   "common": {
+    "updatedAt": "更新时间",
     "search": "搜索",
     "refresh": "刷新",
     "retry": "重试",
@@ -176,6 +177,7 @@
     "duplicate": "已在合集中"
   },
   "statistics": {
+    "countHeader": "作品数量",
     "title": "共享片库统计",
     "hint": "只统计共享条目，不含任何私人片库。",
     "total": "全部作品",

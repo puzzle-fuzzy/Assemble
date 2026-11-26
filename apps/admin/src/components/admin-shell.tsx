@@ -32,29 +32,40 @@ import {
 import { SidebarAccountMenu } from "@assemble/ui/sidebar-account-menu";
 import {
   ChartNoAxesCombinedIcon,
+  CloudIcon,
   FilmIcon,
+  InfoIcon,
   LogOutIcon,
   LogsIcon,
   MenuIcon,
   MonitorIcon,
+  RadioTowerIcon,
   UsersIcon,
 } from "lucide-react";
 import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import type { AccessFailure, AdminSession } from "../lib/api";
 import { useAdminTranslation } from "../lib/i18n";
+import { AboutDialog } from "./about-dialog";
+import { DrivePage } from "./drive-page";
 import { LoadingContent } from "./feedback";
 import { DevicesPage, LoginsPage, OverviewPage, UsersPage } from "./pages";
+import { AdminSystemNotifications } from "./system-notifications";
 
 const MediaPage = lazy(async () => ({
   default: (await import("./media-page")).MediaPage,
+}));
+const DhtPage = lazy(async () => ({
+  default: (await import("./dht-page")).DhtPage,
 }));
 
 const navigation = [
   { key: "overview", icon: ChartNoAxesCombinedIcon },
   { key: "users", icon: UsersIcon },
   { key: "devices", icon: MonitorIcon },
+  { key: "drive", icon: CloudIcon },
   { key: "logins", icon: LogsIcon },
   { key: "media", icon: FilmIcon },
+  { key: "dht", icon: RadioTowerIcon },
 ] as const;
 
 type View = (typeof navigation)[number]["key"];
@@ -73,8 +84,12 @@ export function AdminShell({
 }) {
   const { t } = useAdminTranslation();
   const [view, setView] = useState<View>(currentView);
+  const [aboutOpen, setAboutOpen] = useState(false);
+  const [storageFocus, setStorageFocus] = useState(0);
+  const accountFooter = useRef<HTMLDivElement>(null);
+  const mobileMenuTrigger = useRef<HTMLButtonElement>(null);
+  const aboutReturnFocus = useRef<HTMLElement | null>(null);
   const pageHeading = useRef<HTMLSpanElement>(null);
-  const [userDetail, setUserDetail] = useState(false);
   const logout = useRef<HTMLFormElement>(null);
   const focusPageOnMenuClose = useRef(false);
   const selected =
@@ -89,15 +104,11 @@ export function AdminShell({
       window.removeEventListener("popstate", update);
     };
   }, []);
-  const pageName = t(
-    view === "users" && userDetail
-      ? "navigation.userDetail"
-      : `navigation.${selected.key}`,
-  );
+  const pageName = t(`navigation.${selected.key}`);
   useEffect(() => {
     document.title = t("app.documentTitle", { page: pageName });
   }, [pageName, t]);
-  const focusKey = view === "users" && userDetail ? "user-detail" : view;
+  const focusKey = view;
   const previousFocusKey = useRef(focusKey);
   useEffect(() => {
     // 切换语言只更新文案，不把焦点从偏好菜单或搜索框抢到页面标题。
@@ -110,7 +121,6 @@ export function AdminShell({
   function navigate(next: View) {
     if (next === view) return;
     window.history.pushState(null, "", `#${next}`);
-    setUserDetail(false);
     setView(next);
   }
 
@@ -148,7 +158,7 @@ export function AdminShell({
             </SidebarGroupContent>
           </SidebarGroup>
         </SidebarContent>
-        <SidebarFooter>
+        <SidebarFooter ref={accountFooter}>
           <SidebarAccountMenu
             identity={{
               name: session.account.displayName,
@@ -158,6 +168,15 @@ export function AdminShell({
             label={t("navigation.accountMenu")}
             groups={[
               [
+                {
+                  label: t("navigation.about"),
+                  icon: InfoIcon,
+                  onSelect: () => {
+                    aboutReturnFocus.current =
+                      accountFooter.current?.querySelector("button") ?? null;
+                    setAboutOpen(true);
+                  },
+                },
                 {
                   label: t("navigation.signOut"),
                   icon: LogOutIcon,
@@ -169,11 +188,12 @@ export function AdminShell({
         </SidebarFooter>
       </Sidebar>
       <main className="flex h-svh min-w-0 flex-1 flex-col overflow-hidden">
-        <header className="flex h-16 shrink-0 items-center justify-between gap-2 transition-[width,height] ease-linear group-has-data-[collapsible=icon]/sidebar-wrapper:h-12">
+        <header className="flex h-12 shrink-0 items-center justify-between gap-2">
           <div className="flex min-w-0 items-center gap-2 px-4">
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button
+                  ref={mobileMenuTrigger}
                   variant="ghost"
                   size="icon-sm"
                   className="md:hidden"
@@ -212,6 +232,15 @@ export function AdminShell({
                 <DropdownMenuSeparator />
                 <DropdownMenuGroup>
                   <DropdownMenuItem
+                    onSelect={() => {
+                      aboutReturnFocus.current = mobileMenuTrigger.current;
+                      setAboutOpen(true);
+                    }}
+                  >
+                    <InfoIcon aria-hidden="true" />
+                    {t("navigation.about")}
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
                     onSelect={() => logout.current?.requestSubmit()}
                   >
                     <LogOutIcon aria-hidden="true" />
@@ -247,21 +276,34 @@ export function AdminShell({
               </BreadcrumbList>
             </Breadcrumb>
           </div>
+          <div className="flex shrink-0 items-center px-4">
+            <AdminSystemNotifications
+              key={session.account.id}
+              session={session}
+              onAccessFailure={onAccessFailure}
+              onStorage={() => {
+                navigate("overview");
+                setStorageFocus((value) => value + 1);
+              }}
+            />
+          </div>
         </header>
         {/* Card 的外描边需要留在滚动区内，避免顶部贴边时被视口裁掉。 */}
         <div className="admin-content flex min-w-0 flex-1 flex-col gap-4 overflow-y-auto p-4 pt-1 [&>*]:shrink-0">
           {view === "overview" && (
-            <OverviewPage onAccessFailure={onAccessFailure} />
+            <OverviewPage
+              key={storageFocus}
+              onAccessFailure={onAccessFailure}
+              storageFocus={storageFocus}
+            />
           )}
           {view === "users" && (
-            <UsersPage
-              onAccessFailure={onAccessFailure}
-              onDetailChange={setUserDetail}
-            />
+            <UsersPage session={session} onAccessFailure={onAccessFailure} />
           )}
           {view === "devices" && (
             <DevicesPage onAccessFailure={onAccessFailure} />
           )}
+          {view === "drive" && <DrivePage onAccessFailure={onAccessFailure} />}
           {view === "logins" && (
             <LoginsPage onAccessFailure={onAccessFailure} />
           )}
@@ -270,8 +312,18 @@ export function AdminShell({
               <MediaPage session={session} onAccessFailure={onAccessFailure} />
             </Suspense>
           )}
+          {view === "dht" && (
+            <Suspense fallback={<LoadingContent />}>
+              <DhtPage session={session} onAccessFailure={onAccessFailure} />
+            </Suspense>
+          )}
         </div>
       </main>
+      <AboutDialog
+        open={aboutOpen}
+        onOpenChange={setAboutOpen}
+        returnFocus={aboutReturnFocus}
+      />
     </SidebarProvider>
   );
 }

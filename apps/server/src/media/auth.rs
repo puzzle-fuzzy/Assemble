@@ -5,7 +5,6 @@ use assemble_protocol::media::MediaScope;
 use axum::http::{HeaderMap, StatusCode, header};
 use axum_extra::extract::CookieJar;
 use sqlx::{Sqlite, Transaction};
-use subtle::ConstantTimeEq as _;
 
 #[derive(Debug, Clone)]
 pub(super) struct Principal {
@@ -87,20 +86,14 @@ pub(super) async fn writer(
         return Err(forbidden());
     }
     if principal.credential_kind == "web" {
-        let csrf = headers.get("x-csrf-token").and_then(|v| v.to_str().ok());
-        if headers.get_all(header::ORIGIN).iter().count() != 1
-            || headers.get_all("x-csrf-token").iter().count() != 1
-            || !crate::auth::is_same_origin(headers, state.config.public_origin.as_str())
-            || !csrf
-                .zip(principal.csrf.as_deref())
-                .is_some_and(|(a, b)| bool::from(a.as_bytes().ct_eq(b.as_bytes())))
-        {
-            return Err(ApiError::new(
-                StatusCode::FORBIDDEN,
-                codes::CSRF_REJECTED,
-                "media request verification failed",
-            ));
-        }
+        crate::auth::verify_browser_write(
+            headers,
+            state.config.public_origin.as_str(),
+            principal
+                .csrf
+                .as_deref()
+                .ok_or_else(ApiError::unauthorized)?,
+        )?;
     }
     Ok(principal)
 }

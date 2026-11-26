@@ -6,6 +6,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@assemble/ui/card";
+import { DataTable } from "@assemble/ui/data-table";
 import { RefreshCwIcon } from "lucide-react";
 import { useEffect, useState } from "react";
 import type { MediaStatisticsLoader } from "../client";
@@ -15,10 +16,12 @@ import type { MediaStatistics } from "../model";
 import { MediaEmpty, MediaError, MediaLoading } from "./feedback";
 
 export function MediaStatisticsView({
+  presentation = "default",
   load,
   accountKey,
   onAccessFailure,
 }: {
+  presentation?: "default" | "management";
   load: MediaStatisticsLoader;
   accountKey: string;
   onAccessFailure?: (failure: MediaAccessFailure) => void;
@@ -27,14 +30,17 @@ export function MediaStatisticsView({
     <StatisticsContent
       key={accountKey}
       load={load}
+      presentation={presentation}
       onAccessFailure={onAccessFailure}
     />
   );
 }
 function StatisticsContent({
+  presentation,
   load,
   onAccessFailure,
 }: {
+  presentation: "default" | "management";
   load: MediaStatisticsLoader;
   onAccessFailure?: (failure: MediaAccessFailure) => void;
 }) {
@@ -75,23 +81,36 @@ function StatisticsContent({
     : [];
   return (
     <div className="flex flex-col gap-4">
-      <Card>
-        <CardHeader>
-          <CardTitle>{t("statistics.title")}</CardTitle>
-          <CardDescription>{t("statistics.hint")}</CardDescription>
-        </CardHeader>
-        <CardContent>
+      {presentation === "management" ? (
+        <div className="flex justify-end">
           <Button
             variant="outline"
             size="sm"
             disabled={task.pending}
             onClick={refresh}
           >
-            <RefreshCwIcon data-icon="inline-start" />
             {t("common.refresh")}
           </Button>
-        </CardContent>
-      </Card>
+        </div>
+      ) : (
+        <Card>
+          <CardHeader>
+            <CardTitle>{t("statistics.title")}</CardTitle>
+            <CardDescription>{t("statistics.hint")}</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={task.pending}
+              onClick={refresh}
+            >
+              <RefreshCwIcon data-icon="inline-start" />
+              {t("common.refresh")}
+            </Button>
+          </CardContent>
+        </Card>
+      )}
       <MediaError error={task.error} retry={refresh} />
       {task.pending ? (
         <MediaLoading />
@@ -128,34 +147,72 @@ function StatisticsContent({
               ))}
             </div>
             <div className="grid items-start gap-4 lg:grid-cols-3">
-              {groups.map((group) => (
-                <Card key={group.name}>
-                  <CardHeader>
-                    <CardTitle>{t(`statistics.${group.name}`)}</CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    {group.items.length === 0 ? (
-                      <MediaEmpty title={t("statistics.empty")} />
-                    ) : (
-                      <dl className="flex flex-col gap-3">
-                        {group.items.map((item) => (
-                          <div
-                            key={item.label}
-                            className="flex justify-between gap-4"
-                          >
-                            <dt className="break-words text-sm">
-                              {item.label}
-                            </dt>
-                            <dd className="shrink-0 text-sm text-muted-foreground tabular-nums">
-                              {t("statistics.count", { count: item.count })}
-                            </dd>
-                          </div>
-                        ))}
-                      </dl>
-                    )}
-                  </CardContent>
-                </Card>
-              ))}
+              {groups.map((group) =>
+                presentation === "management" ? (
+                  <section
+                    key={group.name}
+                    className="flex min-w-0 flex-col gap-3"
+                  >
+                    <h2 className="text-sm font-medium">
+                      {t(`statistics.${group.name}`)}
+                    </h2>
+                    <DataTable
+                      variant="management"
+                      label={t(`statistics.${group.name}`)}
+                      data={group.items.map((item) => ({
+                        ...item,
+                        id: `${group.name}:${item.label}`,
+                      }))}
+                      getRowLabel={(item) => item.label}
+                      selectable={false}
+                      paginate={false}
+                      columns={[
+                        {
+                          id: "label",
+                          label: t(`statistics.${group.name}`),
+                          hideable: false,
+                          className: "whitespace-normal break-words",
+                          cell: (item) => item.label,
+                        },
+                        {
+                          id: "count",
+                          label: t("statistics.countHeader"),
+                          cell: (item) =>
+                            t("statistics.count", { count: item.count }),
+                        },
+                      ]}
+                      emptyState={t("statistics.empty")}
+                    />
+                  </section>
+                ) : (
+                  <Card key={group.name}>
+                    <CardHeader>
+                      <CardTitle>{t(`statistics.${group.name}`)}</CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      {group.items.length === 0 ? (
+                        <MediaEmpty title={t("statistics.empty")} />
+                      ) : (
+                        <dl className="flex flex-col gap-3">
+                          {group.items.map((item) => (
+                            <div
+                              key={item.label}
+                              className="flex justify-between gap-4"
+                            >
+                              <dt className="break-words text-sm">
+                                {item.label}
+                              </dt>
+                              <dd className="shrink-0 text-sm text-muted-foreground tabular-nums">
+                                {t("statistics.count", { count: item.count })}
+                              </dd>
+                            </div>
+                          ))}
+                        </dl>
+                      )}
+                    </CardContent>
+                  </Card>
+                ),
+              )}
             </div>
           </>
         )

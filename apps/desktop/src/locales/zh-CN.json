@@ -7,7 +7,7 @@
   "signInForPrivateLibrary": "登录后管理私人片库",
   "privateLibraryDescription": "你的想看、在看和已看记录只对本人可见。",
   "browserSignInTimedOutPleaseTryAgain": "等待浏览器登录超时，请重试。",
-  "signInNotifications": "登录提示",
+  "actionNotifications": "操作提示",
   "signInToAssemble": "登录 Assemble",
   "loadingDeviceStatusEllipsis": "正在读取本机状态…",
   "completeSignInInYourSystemBrowser": "在系统浏览器中完成登录。",

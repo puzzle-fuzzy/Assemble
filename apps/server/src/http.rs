@@ -44,12 +44,16 @@ pub struct AppState {
     pub github_flows: crate::github::Flows,
     pub github_provider: Arc<dyn crate::github::Provider>,
     pub media: Arc<crate::media::jobs::Runtime>,
+    pub storage_monitor: crate::storage::Monitor,
+    pub dht: Arc<crate::dht::runtime::Runtime>,
 }
 
 impl AppState {
     pub fn new(pool: SqlitePool, config: Config) -> Self {
         Self {
             media: Arc::new(crate::media::jobs::Runtime::new(config.media.clone())),
+            storage_monitor: crate::storage::Monitor::default(),
+            dht: Arc::new(crate::dht::runtime::Runtime::default()),
             mailer: Arc::new(crate::mail::SmtpMailer(config.smtp.clone())),
             github_flows: crate::github::Flows::default(),
             github_provider: Arc::new(crate::github::GithubProvider(config.github.clone())),
@@ -72,6 +76,8 @@ fn upload_limit() -> usize {
 
 #[derive(Debug, thiserror::Error)]
 pub enum ServeError {
+    #[error("DHT recovery failed")]
+    DhtRecovery,
     #[error("media job recovery failed")]
     MediaRecovery,
     #[error("the address could not be listened on: {0}")]
@@ -96,6 +102,7 @@ pub fn router(state: Shared) -> Router {
         .merge(browser_routes)
         .merge(crate::admin::routes())
         .merge(crate::media::routes())
+        .merge(crate::memos::routes())
         .merge(crate::admin_assets::routes(&state.config.admin_assets_dir))
         .merge(crate::media_web_assets::routes(
             &state.config.media_web_assets_dir,
@@ -245,6 +252,11 @@ pub async fn serve_until(
         .recover(&state)
         .await
         .map_err(|_| ServeError::MediaRecovery)?;
+    state
+        .dht
+        .start(&state)
+        .await
+        .map_err(|_| ServeError::DhtRecovery)?;
     let closing = Arc::clone(&state);
     let waiting = stop.clone();
     let shutdown = async move {
@@ -252,13 +264,15 @@ pub async fn serve_until(
         tracing::info!("shutting down");
         // 事件流是永不主动结束的长连接。不先收掉它们，优雅退出会一直等下去。
         closing.hub.close();
+        closing.dht.shutdown().await;
         closing.media.shutdown(&closing.pool).await;
     };
     let patience = async move {
         stop.cancelled().await;
         tokio::time::sleep(grace).await;
     };
-    tokio::select! {
+    let cleanup = Arc::clone(&state);
+    let result = tokio::select! {
         result = axum::serve(listener, router(state)).with_graceful_shutdown(shutdown) => {
             result.map_err(ServeError::Server)
         }
@@ -267,7 +281,10 @@ pub async fn serve_until(
             tracing::warn!("some connections did not close in time; exiting anyway");
             Ok(())
         }
-    }
+    };
+    // HTTP 出错或宽限到期时，优雅退出 future 也可能被取消，仍显式回收采集任务。
+    cleanup.dht.shutdown().await;
+    result
 }
 
 /// 把磁盘上的一个文件当作下载交出去：可以只取一段，文件名与类型按记录里说的。

@@ -20,9 +20,19 @@ import {
   ChevronsLeftIcon,
   ChevronsRightIcon,
   Columns3Icon,
+  GripVerticalIcon,
   MoreVerticalIcon,
+  MousePointer2Icon,
 } from "lucide-react";
-import { type ReactNode, useEffect, useId, useMemo, useState } from "react";
+import {
+  type ReactNode,
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
+import { useTableReorder } from "../hooks/use-table-reorder";
 import { useUiTranslation } from "../lib/i18n";
 import { Button } from "./button";
 import { Checkbox } from "./checkbox";
@@ -78,12 +88,15 @@ export interface DataTablePagination {
   pending?: boolean;
 }
 export interface DataTableAction {
+  /** 有翻译文案的操作可提供稳定标识，切换语言时保留原按钮和返回焦点。 */
+  id?: string;
   label: string;
   onSelect: () => void;
   destructive?: boolean;
   disabled?: boolean;
 }
 export interface DataTableProps<T extends { id: string }> {
+  variant?: "default" | "management";
   label: string;
   data: T[];
   columns: DataTableColumn<T>[];
@@ -93,6 +106,13 @@ export interface DataTableProps<T extends { id: string }> {
   actions?: ReactNode;
   rowActions?: (item: T) => DataTableAction[];
   emptyState?: ReactNode;
+  /** 控件列始终保留；禁用只影响功能，不能从布局移除。 */
+  selectable?: boolean | ((item: T) => boolean);
+  reorderable?: boolean | ((item: T) => boolean);
+  /** 顺序由调用方保存；没有真实顺序写入时，拖拽柄保持禁用。 */
+  onReorder?: (items: T[]) => void;
+  /** 弹窗内的完整本地名单可不分页。 */
+  paginate?: boolean;
 }
 
 export function DataTableColumnFilter({
@@ -135,6 +155,7 @@ export function DataTableColumnFilter({
 }
 
 export function DataTable<T extends { id: string }>({
+  variant = "default",
   label,
   data,
   columns: definitions,
@@ -144,10 +165,16 @@ export function DataTable<T extends { id: string }>({
   actions,
   rowActions,
   emptyState,
+  selectable = true,
+  reorderable = true,
+  onReorder,
+  paginate = true,
 }: DataTableProps<T>) {
   const { t } = useUiTranslation();
+  const management = variant === "management";
   const pageSizeId = useId();
   const [rowSelection, setRowSelection] = useState<RowSelectionState>({});
+  const reordered = useRef<T[] | null>(null);
   const [columnVisibility, setColumnVisibility] =
     useState<ColumnVisibilityState>({});
   const [localPage, setLocalPage] = useState<PaginationState>({
@@ -159,39 +186,59 @@ export function DataTable<T extends { id: string }>({
     : localPage;
   // 选中仅属于当前数据页，不把前一页或旧账户的标记带到新结果里。
   useEffect(() => {
-    void data;
-    setRowSelection({});
+    if (data !== reordered.current) setRowSelection({});
+    reordered.current = null;
   }, [data]);
+  useEffect(() => {
+    setRowSelection((previous) => {
+      const valid = Object.fromEntries(
+        Object.entries(previous).filter(
+          ([id, selected]) =>
+            selected &&
+            data.some(
+              (item) =>
+                item.id === id &&
+                (typeof selectable === "function"
+                  ? selectable(item)
+                  : selectable),
+            ),
+        ),
+      );
+      return Object.keys(valid).length === Object.keys(previous).length
+        ? previous
+        : valid;
+    });
+  }, [data, selectable]);
+  // 直接组合单元格内容，避免列定义更新时重建按钮并丢失弹窗返回焦点。
+  function inlineActions(item: T) {
+    return (
+      <div className="flex items-center gap-1">
+        {rowActions?.(item).map((action) => (
+          <Button
+            key={action.id ?? action.label}
+            type="button"
+            variant="ghost"
+            size="sm"
+            disabled={action.disabled}
+            aria-label={t("table.actionFor", {
+              action: action.label,
+              name: getRowLabel(item),
+            })}
+            onClick={action.onSelect}
+          >
+            {action.label}
+          </Button>
+        ))}
+      </div>
+    );
+  }
   const columns = useMemo<ColumnDef<typeof features, T>[]>(
     () => [
+      { id: "drag", header: () => null, cell: () => null, enableHiding: false },
       {
         id: "select",
-        header: ({ table }) => (
-          <div className="flex items-center justify-center">
-            <Checkbox
-              checked={
-                table.getIsAllPageRowsSelected() ||
-                (table.getIsSomePageRowsSelected() && "indeterminate")
-              }
-              onCheckedChange={(value) =>
-                table.toggleAllPageRowsSelected(value === true)
-              }
-              aria-label={t("table.selectPage")}
-              disabled={data.length === 0}
-            />
-          </div>
-        ),
-        cell: ({ row }) => (
-          <div className="flex items-center justify-center">
-            <Checkbox
-              checked={row.getIsSelected()}
-              onCheckedChange={(value) => row.toggleSelected(value === true)}
-              aria-label={t("table.selectRow", {
-                name: getRowLabel(row.original),
-              })}
-            />
-          </div>
-        ),
+        header: () => null,
+        cell: () => null,
         enableHiding: false,
       },
       ...definitions.map(
@@ -208,46 +255,50 @@ export function DataTable<T extends { id: string }>({
             {
               id: "actions",
               header: () => (
-                <span className="sr-only">{t("table.actions")}</span>
+                <span className={management ? undefined : "sr-only"}>
+                  {t("table.actions")}
+                </span>
               ),
-              cell: ({ row }) => (
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="text-muted-foreground data-[state=open]:bg-muted"
-                      aria-label={t("table.rowActions", {
-                        name: getRowLabel(row.original),
-                      })}
-                    >
-                      <MoreVerticalIcon aria-hidden="true" />
-                    </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end" className="min-w-32">
-                    <DropdownMenuGroup>
-                      {rowActions(row.original).map((action) => (
-                        <DropdownMenuItem
-                          key={action.label}
-                          variant={
-                            action.destructive ? "destructive" : "default"
-                          }
-                          disabled={action.disabled}
-                          onSelect={action.onSelect}
-                        >
-                          {action.label}
-                        </DropdownMenuItem>
-                      ))}
-                    </DropdownMenuGroup>
-                  </DropdownMenuContent>
-                </DropdownMenu>
-              ),
+              cell: ({ row }) =>
+                management ? null : (
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        className="text-muted-foreground data-[state=open]:bg-muted"
+                        aria-label={t("table.rowActions", {
+                          name: getRowLabel(row.original),
+                        })}
+                      >
+                        <MoreVerticalIcon aria-hidden="true" />
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end" className="min-w-32">
+                      <DropdownMenuGroup>
+                        {rowActions(row.original).map((action) => (
+                          <DropdownMenuItem
+                            key={action.id ?? action.label}
+                            variant={
+                              action.destructive ? "destructive" : "default"
+                            }
+                            disabled={action.disabled}
+                            onSelect={action.onSelect}
+                          >
+                            {action.label}
+                          </DropdownMenuItem>
+                        ))}
+                      </DropdownMenuGroup>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                ),
               enableHiding: false,
             } satisfies ColumnDef<typeof features, T>,
           ]
         : []),
     ],
-    [data.length, definitions, getRowLabel, rowActions, t],
+    [definitions, getRowLabel, management, rowActions, t],
   );
   function updatePage(updater: Updater<PaginationState>) {
     const next = typeof updater === "function" ? updater(pageState) : updater;
@@ -260,28 +311,65 @@ export function DataTable<T extends { id: string }>({
     data,
     columns,
     getRowId: (row) => row.id,
-    manualPagination: Boolean(pagination),
+    manualPagination: Boolean(pagination) || !paginate,
     rowCount: pagination?.total ?? data.length,
     autoResetPageIndex: false,
-    enableRowSelection: true,
+    enableRowSelection: (row) =>
+      !pagination?.pending &&
+      (typeof selectable === "function"
+        ? selectable(row.original)
+        : selectable),
     state: { rowSelection, columnVisibility, pagination: pageState },
     onRowSelectionChange: setRowSelection,
     onColumnVisibilityChange: setColumnVisibility,
     onPaginationChange: updatePage,
   });
+  const visibleRows = table.getRowModel().rows;
+  const canReorder = (item: T) =>
+    Boolean(onReorder) &&
+    !pagination?.pending &&
+    (typeof reorderable === "function" ? reorderable(item) : reorderable) &&
+    visibleRows.length > 1;
+  const reorder = useTableReorder({
+    ids: visibleRows.map((row) => row.id),
+    dataIdentity: data,
+    onMove: (id, targetId) => {
+      const from = data.findIndex((item) => item.id === id);
+      const to = data.findIndex((item) => item.id === targetId);
+      if (!onReorder || from < 0 || to < 0 || !canReorder(data[from])) return;
+      const next = [...data];
+      next.splice(from, 1);
+      next.splice(to, 0, data[from]);
+      reordered.current = next;
+      onReorder(next);
+    },
+    announce: (id, position) =>
+      t("table.moved", {
+        name: data.find((item) => item.id === id)
+          ? getRowLabel(data.find((item) => item.id === id) as T)
+          : id,
+        position,
+        count: visibleRows.length,
+      }),
+    cancelled: t("table.moveCancelled"),
+  });
+  const selectedCount = table.getSelectedRowModel().rows.length;
   const pages = Math.max(1, table.getPageCount());
   return (
-    <div className="@container/data-table flex min-w-0 flex-col gap-4">
-      <div className="flex flex-wrap items-end justify-between gap-3">
+    <div
+      className="@container/data-table flex min-w-0 flex-col gap-4"
+      data-table-variant={variant}
+    >
+      <div className="flex flex-wrap items-center justify-between gap-3">
         {toolbar ? (
           <div className="min-w-0 grow basis-72">{toolbar}</div>
         ) : null}
         <div className="ms-auto flex max-w-full flex-wrap items-center gap-2">
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <Button variant="outline" size="sm">
+              <Button type="button" variant="outline" size="sm">
                 <Columns3Icon data-icon="inline-start" aria-hidden="true" />
-                {t("table.columns")}
+                {t(management ? "table.showColumns" : "table.columns")}
                 <ChevronDownIcon data-icon="inline-end" aria-hidden="true" />
               </Button>
             </DropdownMenuTrigger>
@@ -313,7 +401,10 @@ export function DataTable<T extends { id: string }>({
         aria-busy={pagination?.pending || undefined}
         // biome-ignore lint/a11y/noNoninteractiveTabindex: 表格滚动区需要键盘入口。
         tabIndex={0}
-        className="max-h-[70svh] min-w-0 overflow-auto rounded-lg border outline-none focus-visible:ring-2 focus-visible:ring-ring [&_[data-slot=table-container]]:overflow-visible"
+        className={cn(
+          "min-w-0 overflow-auto rounded-lg border outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring [&_[data-slot=table-container]]:overflow-visible",
+          !management && "max-h-[70svh]",
+        )}
       >
         <Table>
           <TableCaption className="sr-only">{label}</TableCaption>
@@ -323,17 +414,57 @@ export function DataTable<T extends { id: string }>({
                 {group.headers.map((header) => (
                   <TableHead
                     key={header.id}
+                    data-table-column={header.column.id}
                     scope="col"
                     className={cn(
                       definitions.find(
                         (column) => column.id === header.column.id,
                       )?.className,
-                      ["select", "actions"].includes(header.column.id) &&
-                        "w-12",
+                      ["drag", "select"].includes(header.column.id) &&
+                        "w-10 text-center",
+                      !management && header.column.id === "actions" && "w-12",
                     )}
                   >
-                    {header.isPlaceholder ? null : (
-                      <table.FlexRender header={header} />
+                    {header.column.id === "drag" ? (
+                      <span
+                        className="flex items-center justify-center"
+                        title={t("table.reorder")}
+                      >
+                        <MousePointer2Icon
+                          className="size-4"
+                          aria-hidden="true"
+                        />
+                        <span className="sr-only">{t("table.reorder")}</span>
+                      </span>
+                    ) : header.column.id === "select" ? (
+                      <div className="flex items-center justify-center">
+                        <Checkbox
+                          checked={
+                            table.getIsAllPageRowsSelected() ||
+                            (table.getIsSomePageRowsSelected() &&
+                              "indeterminate")
+                          }
+                          onCheckedChange={(value) =>
+                            table.toggleAllPageRowsSelected(value === true)
+                          }
+                          aria-label={t("table.selectPage")}
+                          aria-description={
+                            selectable === false
+                              ? t("table.selectionUnavailable")
+                              : undefined
+                          }
+                          disabled={visibleRows.every(
+                            (row) => !row.getCanSelect(),
+                          )}
+                        />
+                      </div>
+                    ) : header.isPlaceholder ? null : (
+                      (definitions.find(
+                        (column) => column.id === header.column.id,
+                      )?.header ??
+                      definitions.find(
+                        (column) => column.id === header.column.id,
+                      )?.label ?? <table.FlexRender header={header} />)
                     )}
                   </TableHead>
                 ))}
@@ -345,18 +476,73 @@ export function DataTable<T extends { id: string }>({
               table.getRowModel().rows.map((row) => (
                 <TableRow
                   key={row.id}
+                  data-table-row={row.id}
+                  data-table-drop={
+                    reorder.drop?.id === row.id ? reorder.drop.edge : undefined
+                  }
+                  className={management ? "h-12" : undefined}
                   data-state={row.getIsSelected() ? "selected" : undefined}
                 >
                   {row.getVisibleCells().map((cell) => (
                     <TableCell
                       key={cell.id}
-                      className={
+                      data-table-column={cell.column.id}
+                      className={cn(
+                        ["drag", "select"].includes(cell.column.id) &&
+                          "w-10 text-center",
                         definitions.find(
                           (column) => column.id === cell.column.id,
-                        )?.className
-                      }
+                        )?.className,
+                      )}
                     >
-                      <table.FlexRender cell={cell} />
+                      {cell.column.id === "drag" ? (
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon-sm"
+                          className="touch-none cursor-grab select-none active:cursor-grabbing"
+                          data-table-drag-handle=""
+                          aria-label={t("table.reorderRow", {
+                            name: getRowLabel(row.original),
+                          })}
+                          aria-description={t(
+                            canReorder(row.original)
+                              ? "table.reorderHelp"
+                              : "table.reorderUnavailable",
+                          )}
+                          disabled={!canReorder(row.original)}
+                          {...reorder.handle(row.id)}
+                        >
+                          <GripVerticalIcon aria-hidden="true" />
+                        </Button>
+                      ) : cell.column.id === "select" ? (
+                        <div className="flex items-center justify-center">
+                          <Checkbox
+                            checked={row.getIsSelected()}
+                            onCheckedChange={(value) =>
+                              row.toggleSelected(value === true)
+                            }
+                            disabled={!row.getCanSelect()}
+                            aria-label={t("table.selectRow", {
+                              name: getRowLabel(row.original),
+                            })}
+                            aria-description={
+                              !row.getCanSelect()
+                                ? t("table.selectionUnavailable")
+                                : undefined
+                            }
+                          />
+                        </div>
+                      ) : (
+                        (definitions
+                          .find((column) => column.id === cell.column.id)
+                          ?.cell(row.original) ??
+                        (management && cell.column.id === "actions" ? (
+                          inlineActions(row.original)
+                        ) : (
+                          <table.FlexRender cell={cell} />
+                        )))
+                      )}
                     </TableCell>
                   ))}
                 </TableRow>
@@ -374,98 +560,126 @@ export function DataTable<T extends { id: string }>({
           </TableBody>
         </Table>
       </section>
-      <div className="flex flex-wrap items-center justify-between gap-3 px-4">
-        <p
-          className="hidden flex-1 text-sm text-muted-foreground @3xl/data-table:block"
-          aria-live="polite"
-        >
-          {t("table.selectedRows", {
-            selected: table.getSelectedRowModel().rows.length,
-            count: pagination?.total ?? data.length,
-          })}
-        </p>
-        <nav
-          aria-label={t("table.pagination")}
-          className="flex w-full flex-wrap items-center gap-4 @3xl/data-table:w-fit @3xl/data-table:gap-8"
-        >
-          <div className="flex items-center gap-2">
-            <Label
-              htmlFor={pageSizeId}
-              className="sr-only text-sm font-medium @3xl/data-table:not-sr-only"
+      <p role="status" aria-atomic="true" className="sr-only">
+        {reorder.message}
+      </p>
+      {(paginate || selectedCount > 0) && (
+        <div className="flex flex-wrap items-center justify-end gap-3 px-4">
+          {selectable !== false && (!management || selectedCount > 0) && (
+            <p
+              className="flex-1 text-sm text-muted-foreground"
+              aria-live="polite"
             >
-              {t("table.rowsPerPage")}
-            </Label>
-            <Select
-              value={String(pageState.pageSize)}
-              onValueChange={(value) =>
-                table.setPagination({ pageIndex: 0, pageSize: Number(value) })
-              }
+              {t("table.selectedRows", {
+                selected: selectedCount,
+                count: pagination?.total ?? data.length,
+              })}
+            </p>
+          )}
+          {paginate && (
+            <nav
+              aria-label={t("table.pagination")}
+              className={cn(
+                "flex flex-wrap items-center gap-4 @3xl/data-table:gap-8",
+                management
+                  ? "ms-auto w-fit max-w-full justify-end"
+                  : "w-full @3xl/data-table:w-fit",
+              )}
             >
-              <SelectTrigger
-                id={pageSizeId}
-                size="sm"
-                className="w-20"
-                aria-label={t("table.rowsPerPage")}
-                disabled={pagination?.pending}
-              >
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent side="top">
-                <SelectGroup>
-                  {[10, 20, 30, 40, 50].map((size) => (
-                    <SelectItem key={size} value={String(size)}>
-                      {size}
-                    </SelectItem>
-                  ))}
-                </SelectGroup>
-              </SelectContent>
-            </Select>
-          </div>
-          <p className="text-sm font-medium" aria-live="polite">
-            {t("table.page", { page: pageState.pageIndex + 1, pages })}
-          </p>
-          <div className="ms-auto flex items-center gap-2 @3xl/data-table:ms-0">
-            <Button
-              variant="outline"
-              size="icon"
-              className="hidden @xl/data-table:flex"
-              disabled={pagination?.pending || !table.getCanPreviousPage()}
-              onClick={() => table.firstPage()}
-            >
-              <ChevronsLeftIcon aria-hidden="true" />
-              <span className="sr-only">{t("table.first")}</span>
-            </Button>
-            <Button
-              variant="outline"
-              size="icon"
-              disabled={pagination?.pending || !table.getCanPreviousPage()}
-              onClick={() => table.previousPage()}
-            >
-              <ChevronLeftIcon aria-hidden="true" />
-              <span className="sr-only">{t("table.previous")}</span>
-            </Button>
-            <Button
-              variant="outline"
-              size="icon"
-              disabled={pagination?.pending || !table.getCanNextPage()}
-              onClick={() => table.nextPage()}
-            >
-              <ChevronRightIcon aria-hidden="true" />
-              <span className="sr-only">{t("table.next")}</span>
-            </Button>
-            <Button
-              variant="outline"
-              size="icon"
-              className="hidden @xl/data-table:flex"
-              disabled={pagination?.pending || !table.getCanNextPage()}
-              onClick={() => table.setPageIndex(pages - 1)}
-            >
-              <ChevronsRightIcon aria-hidden="true" />
-              <span className="sr-only">{t("table.last")}</span>
-            </Button>
-          </div>
-        </nav>
-      </div>
+              <div className="flex items-center gap-2">
+                <Label
+                  htmlFor={pageSizeId}
+                  className={
+                    management
+                      ? undefined
+                      : "sr-only text-sm font-medium @3xl/data-table:not-sr-only"
+                  }
+                >
+                  {t("table.rowsPerPage")}
+                </Label>
+                <Select
+                  value={String(pageState.pageSize)}
+                  onValueChange={(value) =>
+                    table.setPagination({
+                      pageIndex: 0,
+                      pageSize: Number(value),
+                    })
+                  }
+                >
+                  <SelectTrigger
+                    id={pageSizeId}
+                    size="sm"
+                    className="w-20"
+                    aria-label={t("table.rowsPerPage")}
+                    disabled={pagination?.pending}
+                  >
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent side="top">
+                    <SelectGroup>
+                      {[10, 20, 30, 40, 50].map((size) => (
+                        <SelectItem key={size} value={String(size)}>
+                          {size}
+                        </SelectItem>
+                      ))}
+                    </SelectGroup>
+                  </SelectContent>
+                </Select>
+              </div>
+              <p className="text-sm font-medium" aria-live="polite">
+                {t(management ? "table.managementPage" : "table.page", {
+                  page: pageState.pageIndex + 1,
+                  pages,
+                })}
+              </p>
+              <div className="ms-auto flex items-center gap-2 @3xl/data-table:ms-0">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size={management ? "icon-sm" : "icon"}
+                  className="hidden @xl/data-table:flex"
+                  disabled={pagination?.pending || !table.getCanPreviousPage()}
+                  onClick={() => table.firstPage()}
+                >
+                  <ChevronsLeftIcon aria-hidden="true" />
+                  <span className="sr-only">{t("table.first")}</span>
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size={management ? "icon-sm" : "icon"}
+                  disabled={pagination?.pending || !table.getCanPreviousPage()}
+                  onClick={() => table.previousPage()}
+                >
+                  <ChevronLeftIcon aria-hidden="true" />
+                  <span className="sr-only">{t("table.previous")}</span>
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size={management ? "icon-sm" : "icon"}
+                  disabled={pagination?.pending || !table.getCanNextPage()}
+                  onClick={() => table.nextPage()}
+                >
+                  <ChevronRightIcon aria-hidden="true" />
+                  <span className="sr-only">{t("table.next")}</span>
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size={management ? "icon-sm" : "icon"}
+                  className="hidden @xl/data-table:flex"
+                  disabled={pagination?.pending || !table.getCanNextPage()}
+                  onClick={() => table.setPageIndex(pages - 1)}
+                >
+                  <ChevronsRightIcon aria-hidden="true" />
+                  <span className="sr-only">{t("table.last")}</span>
+                </Button>
+              </div>
+            </nav>
+          )}
+        </div>
+      )}
     </div>
   );
 }

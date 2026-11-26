@@ -45,6 +45,10 @@
           "createdAt": "2026-11-25T08:00:00.000Z"
         }
       ]
+    },
+    "systemNotifications": {
+      "items": [],
+      "available": true
     }
   },
   {
@@ -74,6 +78,10 @@
       "folderName": "",
       "toolsAvailable": false,
       "tasks": []
+    },
+    "systemNotifications": {
+      "items": [],
+      "available": true
     }
   },
   {
@@ -221,6 +229,10 @@
       "folderName": "",
       "toolsAvailable": false,
       "tasks": []
+    },
+    "systemNotifications": {
+      "items": [],
+      "available": true
     }
   },
   {
@@ -253,6 +265,10 @@
       "folderName": "",
       "toolsAvailable": false,
       "tasks": []
+    },
+    "systemNotifications": {
+      "items": [],
+      "available": true
     }
   },
   {
@@ -285,6 +301,10 @@
       "folderName": "",
       "toolsAvailable": false,
       "tasks": []
+    },
+    "systemNotifications": {
+      "items": [],
+      "available": true
     }
   },
   {
@@ -346,6 +366,10 @@
       "folderName": "",
       "toolsAvailable": false,
       "tasks": []
+    },
+    "systemNotifications": {
+      "items": [],
+      "available": true
     }
   },
   {
@@ -493,6 +517,10 @@
       "folderName": "",
       "toolsAvailable": false,
       "tasks": []
+    },
+    "systemNotifications": {
+      "items": [],
+      "available": true
     }
   },
   {
@@ -719,6 +747,10 @@
       "folderName": "",
       "toolsAvailable": false,
       "tasks": []
+    },
+    "systemNotifications": {
+      "items": [],
+      "available": true
     }
   },
   {
@@ -794,6 +826,10 @@
       "folderName": "",
       "toolsAvailable": false,
       "tasks": []
+    },
+    "systemNotifications": {
+      "items": [],
+      "available": true
     }
   },
   {
@@ -887,6 +923,10 @@
       "folderName": "",
       "toolsAvailable": false,
       "tasks": []
+    },
+    "systemNotifications": {
+      "items": [],
+      "available": true
     }
   },
   {
@@ -1116,6 +1156,10 @@
       "folderName": "",
       "toolsAvailable": false,
       "tasks": []
+    },
+    "systemNotifications": {
+      "items": [],
+      "available": true
     }
   },
   {
@@ -1355,6 +1399,10 @@
       "folderName": "",
       "toolsAvailable": false,
       "tasks": []
+    },
+    "systemNotifications": {
+      "items": [],
+      "available": true
     }
   },
   {
@@ -1598,6 +1646,10 @@
       "folderName": "",
       "toolsAvailable": false,
       "tasks": []
+    },
+    "systemNotifications": {
+      "items": [],
+      "available": true
     }
   },
   {
@@ -1627,6 +1679,10 @@
       "folderName": "",
       "toolsAvailable": false,
       "tasks": []
+    },
+    "systemNotifications": {
+      "items": [],
+      "available": true
     }
   },
   {
@@ -1656,6 +1712,177 @@
       "folderName": "",
       "toolsAvailable": false,
       "tasks": []
+    },
+    "systemNotifications": {
+      "items": [],
+      "available": true
+    }
+  },
+  {
+    "service": {
+      "target": "production",
+      "reachable": true,
+      "stream": "connected"
+    },
+    "session": {
+      "phase": "signedIn",
+      "account": {
+        "id": "3d1c0a5e-6cf4-4d3a-9a67-1f2f4c1f6f01",
+        "username": "example",
+        "displayName": "Example",
+        "email": "example@example.test",
+        "avatarUrl": "https://avatars.githubusercontent.com/u/123?s=96"
+      },
+      "device": {
+        "id": "9b2e7c4d1a5f4e3b8c6d0a1b2c3d4e5f",
+        "name": "MacBook-Pro",
+        "platform": "macos",
+        "online": true
+      }
+    },
+    "devices": [
+      {
+        "id": "9b2e7c4d1a5f4e3b8c6d0a1b2c3d4e5f",
+        "name": "MacBook-Pro",
+        "platform": "macos",
+        "online": true
+      },
+      {
+        "id": "c1d2e3f4a5b64c7d8e9f0a1b2c3d4e5f",
+        "name": "工作电脑",
+        "platform": "windows",
+        "online": true
+      }
+    ],
+    "transfers": [],
+    "draft": null,
+    "drive": null,
+    "sendMenu": "enabled",
+    "receive": {
+      "customFolder": null,
+      "displayPath": null
+    },
+    "launchAtLogin": "enabled",
+    "notice": null,
+    "planner": {
+      "notifications": [
+        {
+          "id": "sche-1-1795544400000",
+          "title": "周会",
+          "body": "11月25日 09:00 开始\n三楼小会议室",
+          "scheduleId": "sche-1",
+          "reminderId": null,
+          "raisedAt": "2026-11-25T01:00:00.000Z"
+        },
+        {
+          "id": "n-remi-1",
+          "title": "取快递",
+          "body": "驿站楼下",
+          "scheduleId": null,
+          "reminderId": "remi-1",
+          "raisedAt": "2026-11-25T01:00:00.000Z"
+        }
+      ],
+      "schedules": [
+        {
+          "id": "sche-2",
+          "version": 3,
+          "createdBy": "MacBook-Pro",
+          "title": "火车",
+          "location": {
+            "label": "上海虹桥站",
+            "address": "申虹路 1500 号"
+          },
+          "startAt": "2026-11-26T01:00:00.000Z",
+          "endAt": null,
+          "repeat": "none",
+          "repeatUntil": null,
+          "remindBefore": 30,
+          "notes": "带身份证",
+          "occurrences": ["2026-11-26T01:00:00.000Z"]
+        },
+        {
+          "id": "sche-1",
+          "version": 1,
+          "createdBy": "ZCode 的助手",
+          "title": "周会",
+          "location": null,
+          "startAt": "2026-11-25T01:00:00.000Z",
+          "endAt": "2026-11-25T02:00:00.000Z",
+          "repeat": "daily",
+          "repeatUntil": null,
+          "remindBefore": null,
+          "notes": "三楼小会议室",
+          "occurrences": [
+            "2026-11-25T01:00:00.000Z",
+            "2026-11-26T01:00:00.000Z",
+            "2026-11-27T01:00:00.000Z"
+          ]
+        },
+        {
+          "id": "sche-3",
+          "version": 1,
+          "createdBy": "Codex 的助手",
+          "title": "周报",
+          "location": null,
+          "startAt": "2026-11-20T08:00:00.000Z",
+          "endAt": "2026-11-20T09:00:00.000Z",
+          "repeat": "weekly",
+          "repeatUntil": "2026-12-31T16:00:00.000Z",
+          "remindBefore": null,
+          "notes": null,
+          "occurrences": ["2026-11-27T08:00:00.000Z"]
+        }
+      ],
+      "reminders": [
+        {
+          "id": "remi-2",
+          "version": 1,
+          "status": "scheduled",
+          "createdBy": "MacBook-Pro",
+          "title": "给妈妈打电话",
+          "dueAt": "2026-11-26T12:00:00.000Z",
+          "notes": null
+        },
+        {
+          "id": "remi-1",
+          "version": 2,
+          "status": "fired",
+          "createdBy": "ZCode 的助手",
+          "title": "取快递",
+          "dueAt": "2026-11-25T01:00:00.000Z",
+          "notes": "驿站楼下"
+        }
+      ],
+      "focus": null,
+      "compose": null
+    },
+    "plannerMuted": false,
+    "downloads": {
+      "browserTaskId": null,
+      "folderName": "",
+      "toolsAvailable": false,
+      "tasks": []
+    },
+    "systemNotifications": {
+      "items": [
+        {
+          "id": "system-example-transfer",
+          "revision": 2,
+          "content": {
+            "type": "transferFailed",
+            "transferId": "history-transfer",
+            "name": "样例文件.pdf",
+            "localDiskFull": true
+          },
+          "level": "error",
+          "createdAt": "2026-11-26T01:00:00.000Z",
+          "updatedAt": "2026-11-26T01:00:00.000Z",
+          "resolvedAt": null,
+          "readAt": null
+        }
+      ],
+      "available": true
     }
   }
 ]

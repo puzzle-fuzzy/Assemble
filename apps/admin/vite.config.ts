@@ -39,6 +39,6 @@ export default defineConfig({
     host: "127.0.0.1",
     port: 1421,
     strictPort: true,
-    proxy: { "/v1": proxy(), "/web": proxy() },
+    proxy: { "/v1": proxy(), "/web": proxy(), "/movies": proxy() },
   },
 });

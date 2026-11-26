@@ -7,7 +7,7 @@
   "signInForPrivateLibrary": "Sign in to manage your library",
   "privateLibraryDescription": "Your watchlist, watching and completed records are visible only to you.",
   "browserSignInTimedOutPleaseTryAgain": "Browser sign-in timed out. Please try again.",
-  "signInNotifications": "Sign-in notifications",
+  "actionNotifications": "Action notifications",
   "signInToAssemble": "Sign in to Assemble",
   "loadingDeviceStatusEllipsis": "Loading device status…",
   "completeSignInInYourSystemBrowser": "Complete sign-in in your system browser.",

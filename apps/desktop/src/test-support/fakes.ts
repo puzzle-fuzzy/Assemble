@@ -178,6 +178,7 @@ export function snapshot(overrides: Overrides = {}): Snapshot {
         : { phase: "signedOut" };
   return {
     service: service(),
+    systemNotifications: { items: [], available: true },
     downloads: {
       browserTaskId: null,
       folderName: "网络下载",
@@ -345,6 +346,17 @@ export class FakeBridge implements Bridge {
 
   dismissNotice() {
     return this.answer("dismissNotice", this.current);
+  }
+  systemNotificationsRefresh() {
+    return this.answer("systemNotificationsRefresh", this.current);
+  }
+  systemNotificationsRead(
+    items: import("@assemble/ui/lib/system-notifications").SystemNotificationRead[],
+  ) {
+    return this.answer(
+      `systemNotificationsRead:${items.map((item) => item.id).join(",")}`,
+      this.current,
+    );
   }
 
   setSendMenu(enabled: boolean) {

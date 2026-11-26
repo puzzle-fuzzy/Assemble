@@ -24,6 +24,7 @@ use tokio_stream::wrappers::ReceiverStream;
 use tokio_util::sync::CancellationToken;
 
 use crate::auth::Identity;
+use crate::error::ApiError;
 use crate::http::Shared;
 use crate::presence::{Connection, Presence};
 
@@ -40,6 +41,8 @@ const HEARTBEAT: Duration = EVENT_HEARTBEAT;
 /// 广播里传的东西。
 #[derive(Debug, Clone)]
 pub enum Message {
+    /// 只在服务端内部传递：停用之后及时结束已有的设备连接。
+    AccountSuspended,
     /// 账户里有设备上线、下线或被改动。具体列表由每条连接自己查。
     DevicesChanged,
     /// 一个给某台设备（`audience`）或全账户（`None`）的事件。
@@ -107,9 +110,13 @@ impl Hub {
 }
 
 /// `GET /v1/events`：打开一条事件流。
-pub async fn stream(State(state): State<Shared>, identity: Identity) -> Response {
+pub async fn stream(State(state): State<Shared>, identity: Identity) -> Result<Response, ApiError> {
     // 先订阅再登记：自己上线引发的那次通知也要收到。
     let receiver = state.hub.subscribe(&identity.account_id);
+    // 认证与订阅之间账户可能被停用；订阅后再核对，避免漏掉停用广播。
+    if !crate::devices::exists(&state.pool, &identity.device_id).await? {
+        return Err(ApiError::unauthorized());
+    }
     let (sender, outgoing) = mpsc::channel::<SseEvent>(OUTGOING_CAPACITY);
     let connection = Connection::open(
         Arc::clone(&state.presence),
@@ -142,7 +149,7 @@ pub async fn stream(State(state): State<Shared>, identity: Identity) -> Response
         header::HeaderName::from_static("x-accel-buffering"),
         HeaderValue::from_static("no"),
     );
-    response
+    Ok(response)
 }
 
 /// 一条事件流连接上的工作：把广播里的消息写成 SSE，并维持这条连接。
@@ -240,6 +247,7 @@ async fn deliver(
     message: &Message,
 ) -> bool {
     match message {
+        Message::AccountSuspended => false,
         Message::DevicesChanged => {
             let devices = match crate::devices::list(pool, presence, account_id).await {
                 Ok(devices) => devices,

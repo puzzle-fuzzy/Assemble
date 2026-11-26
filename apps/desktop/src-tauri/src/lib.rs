@@ -21,6 +21,7 @@ mod send_menu;
 mod send_panel;
 mod session;
 mod state;
+mod system_notifications;
 mod transfers;
 mod tray;
 
@@ -126,6 +127,12 @@ fn stop(app: &tauri::AppHandle) {
 // 命令清单单独集中，启动函数只保留生命周期编排。
 fn handlers() -> impl Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool + Send + Sync + 'static {
     tauri::generate_handler![
+        commands::memo_list,
+        commands::memo_get,
+        commands::memo_create,
+        commands::memo_update,
+        commands::memo_remove,
+        commands::memo_copy,
         commands::media_capabilities,
         commands::media_list,
         commands::media_get,
@@ -174,6 +181,8 @@ fn handlers() -> impl Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool + Send + Sync +
         commands::retry_transfer,
         commands::open_main,
         commands::dismiss_notice,
+        commands::system_notifications_refresh,
+        commands::system_notifications_read,
         commands::planner_refresh,
         commands::schedule_create,
         commands::schedule_update,
@@ -233,6 +242,12 @@ fn start(
         notifier,
     ));
     let downloads_handle = handle.clone();
+    handle.state::<AppState>().attach_system_notifications(
+        handle
+            .path()
+            .app_data_dir()?
+            .join("system-notifications.json"),
+    );
     let downloads = assemble_download::DownloadManager::open(
         handle.path().app_data_dir()?.join("network-downloads.json"),
         transfers::system_downloads_dir(&handle)

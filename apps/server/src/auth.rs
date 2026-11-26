@@ -16,6 +16,7 @@ use axum::http::request::Parts;
 use axum_extra::extract::CookieJar;
 use axum_extra::extract::cookie::{Cookie, SameSite};
 use sqlx::SqlitePool;
+use subtle::ConstantTimeEq as _;
 
 use crate::error::ApiError;
 use crate::http::Shared;
@@ -163,6 +164,32 @@ pub fn is_same_origin(headers: &HeaderMap, public_origin: &str) -> bool {
         );
     }
     matched
+}
+
+/// 网页 JSON 写入共用同一套来源与防伪校验；设备凭据不能借此获得网页权限。
+pub(crate) fn verify_browser_write(
+    headers: &HeaderMap,
+    public_origin: &str,
+    expected_csrf: &str,
+) -> Result<(), ApiError> {
+    let csrf = headers
+        .get("x-csrf-token")
+        .and_then(|value| value.to_str().ok());
+    if headers.get_all(axum::http::header::ORIGIN).iter().count() != 1
+        || headers.get_all("x-csrf-token").iter().count() != 1
+        || headers
+            .get("sec-fetch-site")
+            .is_some_and(|site| site != "same-origin")
+        || !is_same_origin(headers, public_origin)
+        || !csrf.is_some_and(|value| bool::from(value.as_bytes().ct_eq(expected_csrf.as_bytes())))
+    {
+        return Err(ApiError::new(
+            axum::http::StatusCode::FORBIDDEN,
+            assemble_protocol::error::codes::CSRF_REJECTED,
+            "browser request verification failed",
+        ));
+    }
+    Ok(())
 }
 
 #[cfg(test)]

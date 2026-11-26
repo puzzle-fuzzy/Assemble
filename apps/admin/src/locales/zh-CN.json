@@ -11,10 +11,22 @@
     "overview": "概览",
     "users": "用户",
     "devices": "设备",
+    "drive": "云盘",
     "logins": "登录记录",
     "media": "影视片库",
+    "dht": "DHT 观测",
     "userDetail": "用户详情",
+    "about": "关于",
     "signOut": "退出登录"
+  },
+  "about": {
+    "version": "版本",
+    "website": "官网"
+  },
+  "publicPages": {
+    "library": "查看影视站",
+    "collections": "查看合集页",
+    "opensNewTab": "在新标签页打开"
   },
   "common": {
     "loading": "正在加载",
@@ -24,6 +36,7 @@
     "emailMissing": "未绑定邮箱",
     "unrecorded": "未记录",
     "actions": "操作",
+    "id": "编号",
     "superAdmin": "超级管理员",
     "user": "用户",
     "online": "在线",
@@ -89,6 +102,7 @@
     "loginsCaption": "登录记录",
     "user": "用户",
     "createdAt": "注册时间",
+    "email": "邮箱",
     "lastLoginAt": "最近登录",
     "devices": "设备",
     "identity": "身份",
@@ -102,7 +116,7 @@
     "occurredAt": "登录时间",
     "deviceSummary_one": "{{count, number}} 台 / {{online, number}} 在线",
     "deviceSummary_other": "{{count, number}} 台 / {{online, number}} 在线",
-    "viewDetails": "查看详情",
+    "viewDetails": "详情",
     "viewUserDetails": "查看 {{name}} 的详情"
   },
   "userDetail": {
@@ -119,6 +133,30 @@
     "devices_other": "{{count, number}} 台",
     "ownedDevices": "所属设备",
     "recentLogins": "最近登录记录"
+  },
+  "recordDetail": {
+    "device": "设备详情",
+    "login": "登录记录详情"
+  },
+  "drive": {
+    "capacity": "服务器存储空间",
+    "available": "当前可用文件空间",
+    "diskAvailable": "服务器磁盘可用",
+    "contentUsage": "文件内容用量 / 预算（去重）",
+    "database": "数据库（含图片与日志）",
+    "capacityHint": "可用文件空间取预算余量与磁盘可用空间的较小值，单个账户仍受云盘配额限制。",
+    "unavailable": "暂不可用",
+    "filesRegion": "所有账户的云盘文件",
+    "name": "文件名称",
+    "owner": "所属用户",
+    "size": "大小",
+    "mimeType": "文件类型",
+    "createdAt": "存入时间",
+    "searchLabel": "搜索云盘文件",
+    "searchPlaceholder": "文件名、用户姓名或邮箱",
+    "emptyTitle": "还没有云盘文件",
+    "emptyDescription": "所有账户存入云盘的文件会出现在这里。",
+    "details": "文件详情"
   },
   "platform": {
     "windows": "Windows",

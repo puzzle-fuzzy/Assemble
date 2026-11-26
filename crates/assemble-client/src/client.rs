@@ -32,6 +32,7 @@ use assemble_protocol::drive::{DriveFile, DriveListing, RenameInput};
 use assemble_protocol::error::ApiErrorBody;
 use assemble_protocol::health::{HEALTH_PATH, HealthResponse};
 use assemble_protocol::login::{EXCHANGE_PATH, ExchangeInput, ExchangeResponse, MeResponse};
+use assemble_protocol::memo::{Memo, MemoCreate, MemoList, MemoQuery, MemoUpdate};
 use assemble_protocol::primitives::{MAX_FILE_SIZE, is_valid_id};
 use assemble_protocol::schedule::{
     Planner, ReadInput, Reminder, ReminderContent, ReminderUpdate, Schedule, ScheduleContent,
@@ -454,6 +455,82 @@ impl Client {
     ) -> Result<(), ClientError> {
         let path = format!("/v1/drive/files/{}", id_segment(id)?);
         self.call_empty(Call::get(&path).delete(), options).await
+    }
+
+    // ---- 账户私有备忘录 ----
+
+    pub async fn memo_list(
+        &self,
+        query: &MemoQuery,
+        options: &RequestOptions<'_>,
+    ) -> Result<MemoList, ClientError> {
+        if !query.valid() {
+            return Err(ClientError::InvalidRequest);
+        }
+        let mut call = Call::get("/v1/memos");
+        call.query = vec![
+            ("q", query.q.clone()),
+            ("page", query.page.to_string()),
+            ("pageSize", query.page_size.to_string()),
+        ];
+        self.call_json(call, options).await
+    }
+
+    pub async fn memo_get(
+        &self,
+        id: &str,
+        options: &RequestOptions<'_>,
+    ) -> Result<Memo, ClientError> {
+        self.call_json(
+            Call::get(&format!("/v1/memos/{}", id_segment(id)?)),
+            options,
+        )
+        .await
+    }
+
+    pub async fn memo_create(
+        &self,
+        input: &MemoCreate,
+        options: &RequestOptions<'_>,
+    ) -> Result<Memo, ClientError> {
+        if !input.valid() {
+            return Err(ClientError::InvalidRequest);
+        }
+        self.call_json(
+            Call::get("/v1/memos").post(Payload::Json(json(input)?)),
+            options,
+        )
+        .await
+    }
+
+    pub async fn memo_update(
+        &self,
+        id: &str,
+        input: &MemoUpdate,
+        options: &RequestOptions<'_>,
+    ) -> Result<Memo, ClientError> {
+        if input.content.cleaned().is_none() || input.version < 1 || input.version == i64::MAX {
+            return Err(ClientError::InvalidRequest);
+        }
+        self.call_json(
+            Call::get(&format!("/v1/memos/{}", id_segment(id)?)).put(Payload::Json(json(input)?)),
+            options,
+        )
+        .await
+    }
+
+    pub async fn memo_remove(
+        &self,
+        id: &str,
+        version: i64,
+        options: &RequestOptions<'_>,
+    ) -> Result<(), ClientError> {
+        if version < 1 {
+            return Err(ClientError::InvalidRequest);
+        }
+        let path = format!("/v1/memos/{}", id_segment(id)?);
+        let call = Call::get(&path).delete_with(Payload::Json(json(&Versioned { version })?));
+        self.call_empty(call, options).await
     }
 
     // ---- 日程规划 ----

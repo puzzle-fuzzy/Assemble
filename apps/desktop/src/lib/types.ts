@@ -240,6 +240,7 @@ export interface ServiceView {
 }
 
 export interface Snapshot {
+  systemNotifications: import("@assemble/ui/lib/system-notifications").SystemNotifications;
   downloads: import("./downloads").DownloadsView;
   service: ServiceView;
   session: SessionView;

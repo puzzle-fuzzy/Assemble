@@ -10,7 +10,7 @@
 //! - 时间一律是 UTC 的 RFC 3339，精确到毫秒，例如 `2026-11-24T01:26:55.123Z`；
 //! - 序列化时值为 `None` 的可选字段省略，反序列化则接受未知字段——
 //!   服务端新增字段不会让旧桌面端失效。
-//! - 影视模型的可空字段显式传 `null`，以同一状态形状表达匿名与已授权投影。
+//! - 网页管理、影视与 DHT 模型的可空字段显式传 `null`，保持投影的状态形状一致。
 
 // 测试代码以可读性优先，不套用库代码的严格检查。
 #![cfg_attr(test, allow(clippy::pedantic))]
@@ -19,6 +19,7 @@ pub mod account;
 pub mod admin;
 pub mod browser;
 pub mod device;
+pub mod dht;
 pub mod downloads;
 pub mod drive;
 pub mod error;
@@ -26,7 +27,9 @@ pub mod events;
 pub mod health;
 pub mod login;
 pub mod media;
+pub mod memo;
 pub mod origin;
 pub mod primitives;
 pub mod schedule;
 pub mod sends;
+pub mod system_notifications;

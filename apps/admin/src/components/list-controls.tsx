@@ -1,7 +1,6 @@
 import { Button } from "@assemble/ui/button";
 import { Field, FieldGroup, FieldLabel } from "@assemble/ui/field";
 import { Input } from "@assemble/ui/input";
-import { SearchIcon } from "lucide-react";
 import { useId, useState } from "react";
 import { useAdminTranslation } from "../lib/i18n";
 
@@ -38,7 +37,7 @@ export function SearchForm({
   const { t } = useAdminTranslation();
   const id = useId();
   return (
-    <search aria-label={label} className="w-full max-w-sm">
+    <search aria-label={label} className="w-full max-w-80">
       <form
         onSubmit={(event) => {
           event.preventDefault();
@@ -59,8 +58,7 @@ export function SearchForm({
                 placeholder={placeholder}
                 onChange={(event) => setDraft(event.target.value)}
               />
-              <Button type="submit" variant="outline">
-                <SearchIcon data-icon="inline-start" aria-hidden="true" />
+              <Button type="submit" variant="outline" size="sm">
                 {t("common.search")}
               </Button>
             </div>
