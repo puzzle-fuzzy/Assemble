@@ -169,7 +169,7 @@ describe("sidebar-13 整页导航", () => {
     );
     expect(text(card(view.host, "日程"))).toContain("驿站楼下");
     expect(button(view.host, "保存")).toBeUndefined();
-    await click(button(view.host, "继续编辑…"));
+    await click(button(view.host, "继续编辑"));
     expect(field(view.host, "标题").value).toBe("保存这份草稿");
   });
 });

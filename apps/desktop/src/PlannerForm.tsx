@@ -282,7 +282,7 @@ export function PlannerForm({
               disabled={pending}
               onClick={() => setConfirming(true)}
             >
-              {uiText("deleteEllipsis")}
+              {uiText("delete")}
             </Button>
           )
         ) : null}

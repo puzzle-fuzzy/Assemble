@@ -238,11 +238,11 @@ describe("日程", () => {
     // 每一行给自己的按钮：重复的日程没有"完成"，到点的提醒不能再改。
     expect(button(await planned(page, "火车"), "完成")).toBeDefined();
     expect(button(await planned(page, "周会"), "完成")).toBeUndefined();
-    expect(button(await planned(page, "火车"), "改…")).toBeDefined();
-    expect(button(await planned(page, "给妈妈打电话"), "改…")).toBeDefined();
+    expect(button(await planned(page, "火车"), "编辑")).toBeDefined();
+    expect(button(await planned(page, "给妈妈打电话"), "编辑")).toBeDefined();
     expect(button(await planned(page, "给妈妈打电话"), "办完了")).toBeDefined();
     expect(button(await planned(page, "取快递"), "看过了")).toBeDefined();
-    expect(button(await planned(page, "取快递"), "改…")).toBeUndefined();
+    expect(button(await planned(page, "取快递"), "编辑")).toBeUndefined();
     expect(button(await planned(page, "给妈妈打电话"), "不办了")).toBeDefined();
     // 通知上：提醒的能顺手看完，都能"知道了"。
     expect(button(await notice(page, "取快递"), "看过了")).toBeDefined();
@@ -390,7 +390,7 @@ describe("日程", () => {
     await settle();
     let page = card(view.host, "日程");
 
-    await click(button(page, "新建提醒…"));
+    await click(button(page, "新建提醒"));
     expect(text(page)).toContain("新建提醒");
     await click(button(page, "保存"));
     expect(text(page)).toContain("先写一个标题。");
@@ -411,7 +411,7 @@ describe("日程", () => {
     });
     // 存好了表单收起，名单又摆出来。
     page = card(view.host, "日程");
-    expect(button(page, "新建提醒…")).toBeDefined();
+    expect(button(page, "新建提醒")).toBeDefined();
     expect(button(page, "保存")).toBeUndefined();
   });
 
@@ -423,7 +423,7 @@ describe("日程", () => {
     await settle();
     const page = card(view.host, "日程");
 
-    await click(button(await planned(page, "火车"), "改…"));
+    await click(button(await planned(page, "火车"), "编辑"));
     // 从现在这一条填起，时间是这台电脑的本地时间。
     expect(text(page)).toContain("修改日程");
     expect(field(page, "标题").value).toBe("火车");
@@ -465,7 +465,7 @@ describe("日程", () => {
     await settle();
     const page = card(view.host, "日程");
 
-    await click(button(await planned(page, "火车"), "改…"));
+    await click(button(await planned(page, "火车"), "编辑"));
     await fill(page, "地点", "上海站");
     await click(button(page, "保存"));
     expect(source.lastSubmitted).toMatchObject({
@@ -487,7 +487,7 @@ describe("日程", () => {
     const page = card(view.host, "日程");
 
     expect(text(await planned(page, "火车"))).toContain("提前 45 分钟");
-    await click(button(await planned(page, "火车"), "改…"));
+    await click(button(await planned(page, "火车"), "编辑"));
     const lead = field(page, "提醒");
     expect(lead.value).toBe("45");
     expect(text(lead)).toContain("提前 45 分钟");
@@ -507,7 +507,7 @@ describe("日程", () => {
     await settle();
     const page = card(view.host, "日程");
 
-    await click(button(await planned(page, "火车"), "改…"));
+    await click(button(await planned(page, "火车"), "编辑"));
     await fill(page, "标题", "高铁");
     await click(button(page, "保存"));
     expect(text(view.host)).toContain(
@@ -515,7 +515,7 @@ describe("日程", () => {
     );
     expect(text(view.host)).not.toContain("version 3");
     // 表单里留着的是旧值：收起来，让人看最新的名单。
-    expect(button(card(view.host, "日程"), "新建日程…")).toBeDefined();
+    expect(button(card(view.host, "日程"), "新建日程")).toBeDefined();
     expect(button(card(view.host, "日程"), "保存")).toBeUndefined();
   });
 
@@ -531,7 +531,7 @@ describe("日程", () => {
     await settle();
     const page = card(view.host, "日程");
 
-    await click(button(page, "新建日程…"));
+    await click(button(page, "新建日程"));
     await fill(page, "标题", "周会");
     await fill(page, "开始时间", "2026-11-26T09:30");
     await click(button(page, "保存"));
@@ -548,21 +548,21 @@ describe("日程", () => {
     await settle();
     let page = card(view.host, "日程");
 
-    await click(button(await planned(page, "给妈妈打电话"), "改…"));
-    await click(button(page, "删除…"));
+    await click(button(await planned(page, "给妈妈打电话"), "编辑"));
+    await click(button(page, "删除"));
     await click(button(page, "算了"));
     expect(source.calls).toEqual([]);
 
-    await click(button(page, "删除…"));
+    await click(button(page, "删除"));
     await click(button(page, "确认删除"));
     expect(source.calls).toEqual(["reminderDelete:reminder-2:1"]);
 
     page = card(view.host, "日程");
-    await click(button(page, "新建日程…"));
-    expect(button(page, "删除…")).toBeUndefined();
+    await click(button(page, "新建日程"));
+    expect(button(page, "删除")).toBeUndefined();
   });
 
-  test("从托盘的“新建提醒…”进来：摆出表单，收起时告诉 Rust", async () => {
+  test("从托盘的“新建提醒”进来：摆出表单，收起时告诉 Rust", async () => {
     const source = new FakeBridge(
       snapshot({
         phase: "signedIn",
@@ -573,7 +573,7 @@ describe("日程", () => {
     await settle();
     let page = card(view.host, "日程");
     expect(text(page)).toContain("新建提醒");
-    expect(button(page, "新建日程…")).toBeUndefined();
+    expect(button(page, "新建日程")).toBeUndefined();
 
     await fill(page, "标题", "取快递");
     await fill(page, "到点时间", "2026-11-26T09:05");
@@ -593,7 +593,7 @@ describe("日程", () => {
       );
     });
     page = card(view.host, "日程");
-    expect(button(page, "新建日程…")).toBeDefined();
+    expect(button(page, "新建日程")).toBeDefined();
     expect(button(page, "保存")).toBeUndefined();
   });
 

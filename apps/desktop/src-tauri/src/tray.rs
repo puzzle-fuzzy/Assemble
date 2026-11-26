@@ -23,8 +23,8 @@ pub struct TrayMenu {
 /// 创建托盘图标与菜单。
 pub fn build(app: &AppHandle) -> tauri::Result<()> {
     let open = MenuItem::with_id(app, OPEN_ID, "打开 Assemble", true, None::<&str>)?;
-    let send = MenuItem::with_id(app, SEND_ID, "发送文件…", true, None::<&str>)?;
-    let reminder = MenuItem::with_id(app, REMINDER_ID, "新建提醒…", true, None::<&str>)?;
+    let send = MenuItem::with_id(app, SEND_ID, "发送文件", true, None::<&str>)?;
+    let reminder = MenuItem::with_id(app, REMINDER_ID, "新建提醒", true, None::<&str>)?;
     let quit = MenuItem::with_id(app, QUIT_ID, "退出 Assemble", true, None::<&str>)?;
 
     // 开机启动只在打包后的运行里提供；开发运行不写系统登录项。

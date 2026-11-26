@@ -531,7 +531,7 @@ describe("传输", () => {
     expect(page).toContain("已存为「合同 (2).pdf」");
     expect(page).toContain("正在接收 45%");
     expect(page).toContain("等待接收…");
-    expect(page).toContain("已保存");
+    expect(page).not.toContain("已保存");
     expect(page).toContain("接收失败：这台电脑的磁盘已满。");
     expect(page).toContain("对方撤回了，没有收到。");
     expect(page).toContain("过了时限，没有收到。");
@@ -612,7 +612,7 @@ describe("传输", () => {
     await act(async () => {
       source.push(snapshot({ phase: "signedIn", transfers: [transfer()] }));
     });
-    expect(text(view.host)).toContain("已保存");
+    expect(text(view.host)).not.toContain("已保存");
     expect(button(view.host, "在文件夹中显示")).toBeDefined();
   });
 
@@ -694,16 +694,16 @@ describe("传输", () => {
     expect(source.calls).toEqual(["cancelTransfer:t2", "retryTransfer:t1"]);
   });
 
-  test("点「发送文件…」交给系统选择器；挑的文件读不出来时说明原因", async () => {
+  test("点「发送文件」交给系统选择器；挑的文件读不出来时说明原因", async () => {
     const source = new FakeBridge(snapshot({ phase: "signedIn" }));
     const view = await renderApp(source);
     await settle();
 
-    await click(button(view.host, "发送文件…"));
+    await click(button(view.host, "发送文件"));
     expect(source.calls).toEqual(["startSend"]);
 
     source.failWith = new BridgeError("FILE_UNREADABLE", "open /x/y: EACCES");
-    await click(button(view.host, "发送文件…"));
+    await click(button(view.host, "发送文件"));
     expect(text(view.host)).toContain(
       "有文件读不出来，可能已被移走或没有权限。",
     );
@@ -755,7 +755,7 @@ describe("云盘", () => {
     const view = await renderApp(source, "云盘");
     await settle();
 
-    await click(button(view.host, "上传…"));
+    await click(button(view.host, "上传"));
     await click(button(view.host, "取回"));
     expect(source.calls).toEqual(["driveUpload", "driveDownload:file-1"]);
   });
@@ -825,7 +825,7 @@ describe("云盘", () => {
     const view = await renderApp(source, "文件传输");
     await settle();
     const page = text(view.host);
-    expect(page).toContain("等待上传…");
+    expect(page).toContain("等待上传");
     expect(page).toContain("正在上传到云盘 60%");
     expect(page).toContain("已存到云盘");
     expect(page).toContain("没能存进云盘：云盘空间不够。");
@@ -922,7 +922,7 @@ describe("接收位置", () => {
     expect(text(view.host)).toContain("下载/Assemble");
     expect(button(view.host, "恢复默认")).toBeUndefined();
 
-    await click(button(view.host, "更改…"));
+    await click(button(view.host, "更改"));
     expect(source.calls).toEqual(["chooseReceiveFolder"]);
   });
 
@@ -954,7 +954,7 @@ describe("接收位置", () => {
     const view = await renderApp(source, "本机设置");
     await settle();
 
-    await click(button(view.host, "更改…"));
+    await click(button(view.host, "更改"));
     expect(text(view.host)).toContain(
       "这个文件夹不能用来保存收到的文件，请换一个。",
     );

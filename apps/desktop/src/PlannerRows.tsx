@@ -64,7 +64,9 @@ function Row({
         </div>
         {children}
       </div>
-      <div className="flex shrink-0 flex-wrap justify-end gap-2">{actions}</div>
+      <div className="flex max-w-full shrink-0 flex-wrap justify-end gap-2">
+        {actions}
+      </div>
     </li>
   );
 }
@@ -143,7 +145,7 @@ export function NotificationRow({
       ref={ref}
       aria-current={highlighted ? "true" : undefined}
       className={cn(
-        "relative flex items-start gap-3 py-3",
+        "relative flex flex-wrap items-start gap-3 py-3",
         highlighted && "bg-accent",
       )}
     >
@@ -159,7 +161,7 @@ export function NotificationRow({
           {ago(notification.raisedAt, Date.now())}
         </p>
       </div>
-      <div className="flex shrink-0 gap-2">
+      <div className="flex max-w-full shrink-0 flex-wrap gap-2">
         {reminder ? (
           // 这条提醒已经到点了：看完就一起收掉，不用再去下面的名单里找它。
           <Button size="sm" disabled={pending} onClick={() => onDone(reminder)}>
@@ -221,7 +223,7 @@ export function ScheduleRow({
               disabled={pending}
               onClick={() => onEdit({ kind: "schedule", original: item })}
             >
-              {uiText("editEllipsis")}
+              {uiText("edit")}
             </Button>
             <Button
               size="sm"
@@ -289,7 +291,7 @@ export function ReminderRow({
                 disabled={pending}
                 onClick={() => onEdit({ kind: "reminder", original: item })}
               >
-                {uiText("editEllipsis")}
+                {uiText("edit")}
               </Button>
             )}
             <Button

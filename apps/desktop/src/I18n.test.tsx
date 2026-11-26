@@ -76,7 +76,7 @@ describe("桌面语言切换", () => {
     expect(text(card(view.host, "Cloud drive"))).toContain("合同.pdf");
     expect(text(card(view.host, "Cloud drive"))).not.toContain("季度报表.xlsx");
     await click(button(view.host, "Schedules and reminders"));
-    await click(button(view.host, "New reminder…"));
+    await click(button(view.host, "New reminder"));
     await fill(view.host, "Title", "明天带上合同");
     await fill(view.host, "Notes", "先找同事确认");
     await act(async () => setLanguage("zh-CN"));
@@ -93,14 +93,14 @@ describe("桌面语言切换", () => {
       "private diagnostic path",
     );
     const view = await renderApp(source, "云盘");
-    await click(button(view.host, "上传…"));
+    await click(button(view.host, "上传"));
     expect(text(view.host)).toContain("有文件读不出来");
     await act(async () => setLanguage("en"));
     expect(text(view.host)).toContain("A file cannot be read.");
     expect(text(view.host)).not.toContain("private diagnostic");
     source.failWith = null;
     await click(button(view.host, "Schedules and reminders"));
-    await click(button(view.host, "New reminder…"));
+    await click(button(view.host, "New reminder"));
     await click(button(view.host, "Save"));
     expect(text(view.host)).toContain("Enter a title first.");
     await fill(view.host, "Notes", "不要翻译这段备注");

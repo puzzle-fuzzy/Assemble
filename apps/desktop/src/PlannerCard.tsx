@@ -76,7 +76,7 @@ export function PlannerCard({
     });
   }, [signedInAs, planner, source, onError]);
 
-  // 从托盘的"新建提醒…"进来：主窗口打开，直接摆出那张表单。
+  // 从托盘的"新建提醒"进来：主窗口打开，直接摆出那张表单。
   const compose = planner?.compose ?? null;
   useEffect(() => {
     if (compose !== null) {
@@ -208,7 +208,7 @@ export function PlannerCard({
               value={query}
               onChange={(event) => onQueryChange(event.target.value)}
             />
-            <div className="flex flex-wrap items-center gap-2">
+            <div className="flex max-w-full flex-wrap items-center gap-2">
               {form ? (
                 <Button
                   size="sm"
@@ -216,7 +216,7 @@ export function PlannerCard({
                   disabled={pending}
                   onClick={() => setShowForm(true)}
                 >
-                  {uiText("resumeEditingEllipsis")}
+                  {uiText("resumeEditing")}
                 </Button>
               ) : null}
               <Button
@@ -225,7 +225,7 @@ export function PlannerCard({
                 disabled={pending}
                 onClick={() => edit({ kind: "schedule", original: null })}
               >
-                {uiText("newScheduleEllipsis")}
+                {uiText("newSchedule")}
               </Button>
               <Button
                 size="sm"
@@ -233,7 +233,7 @@ export function PlannerCard({
                 disabled={pending}
                 onClick={() => edit({ kind: "reminder", original: null })}
               >
-                {uiText("newReminderEllipsis")}
+                {uiText("newReminder")}
               </Button>
             </div>
           </>

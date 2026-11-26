@@ -146,7 +146,7 @@ export function SendPanel({ bridge: source = bridge }: SendPanelProps) {
           <p className="text-sm text-muted-foreground">
             {uiText("noFilesSelected")}
           </p>
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
             <Button
               onClick={() => void source.startSend().catch(() => undefined)}
             >

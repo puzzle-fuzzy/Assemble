@@ -47,17 +47,17 @@ describe("云盘上传进度", () => {
     );
     source.hold();
     const view = await renderApp(source, "云盘");
-    const trigger = button(view.host, "上传…");
+    const trigger = button(view.host, "上传");
     try {
       await press(trigger);
-      expect(button(view.host, "正在准备…")?.disabled).toBe(true);
+      expect(button(view.host, "正在准备")?.disabled).toBe(true);
       await press(trigger);
       expect(source.calls).toEqual(["driveUpload"]);
     } finally {
       await act(async () => source.release());
       await settle();
     }
-    expect(button(view.host, "上传…")?.disabled).toBe(false);
+    expect(button(view.host, "上传")?.disabled).toBe(false);
   });
 
   test("排队即展示文件，实际百分比持续更新，搜索和页面切换不隐藏上传", async () => {
@@ -65,14 +65,14 @@ describe("云盘上传进度", () => {
       snapshot({ phase: "signedIn", drive: emptyDrive }),
     );
     const view = await renderApp(source, "云盘");
-    await click(button(view.host, "上传…"));
+    await click(button(view.host, "上传"));
     await act(async () =>
       source.push({ ...source.current, transfers: [upload("queued")] }),
     );
     const page = card(view.host, "云盘");
     const progress = () => page.querySelector('[role="progressbar"]');
     expect(text(page)).toContain("会议录像.mp4");
-    expect(text(page)).toContain("等待上传…");
+    expect(text(page)).toContain("等待上传");
     expect(text(page)).not.toContain("云盘里还没有文件");
     expect(progress()?.getAttribute("aria-valuenow")).toBe("0");
     expect(progress()?.getAttribute("aria-label")).toBe(
@@ -126,7 +126,7 @@ describe("云盘上传进度", () => {
         transfers: [upload("inProgress", 0.8)],
       }),
     );
-    const trigger = button(view.host, "上传…");
+    const trigger = button(view.host, "上传");
     trigger?.focus();
     await act(async () =>
       source.push({

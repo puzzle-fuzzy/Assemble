@@ -191,7 +191,7 @@ export function App({
           onNavigateFocus={() => contentHeading.current?.focus()}
         />
         <main className="flex h-svh min-w-0 flex-1 flex-col overflow-hidden">
-          <header className="flex h-16 shrink-0 items-center justify-between gap-2 transition-[width,height] ease-linear group-has-data-[collapsible=icon]/sidebar-wrapper:h-12">
+          <header className="flex h-12 shrink-0 items-center justify-between gap-2">
             <div className="flex min-w-0 items-center gap-2 px-4">
               <DesktopMobileMenu
                 section={section}
@@ -792,7 +792,7 @@ function DeviceRow({
           </p>
         </div>
         {isThisDevice ? null : (
-          <div className="flex shrink-0 flex-wrap gap-2">
+          <div className="flex max-w-full shrink-0 flex-wrap gap-2">
             {confirming ? (
               <>
                 <Button
@@ -915,7 +915,7 @@ function TransfersCard({
             disabled={pending}
             onClick={() => void startSend()}
           >
-            {uiText("sendFilesEllipsis")}
+            {uiText("sendFiles")}
           </Button>
         </CardAction>
       </CardHeader>
@@ -975,6 +975,7 @@ function TransferRow({
   const receiving = transfer.direction === "in";
   const cloudTransfer = transfer.target === "drive";
   const status = transferStatus(transfer);
+  const savedHere = isSavedHere(transfer);
 
   // 一条记录上的几个按钮做的是同一类事：交出标识，等 Rust 办完。
   async function act(what: () => Promise<unknown>) {
@@ -991,11 +992,11 @@ function TransferRow({
 
   return (
     <article aria-label={transfer.name} className="py-3">
-      <div className="flex flex-wrap items-start gap-3">
+      <div className="flex flex-wrap items-center gap-3">
         {showPeer ? (
           <span
             aria-hidden
-            className="mt-0.5 text-muted-foreground"
+            className="text-muted-foreground"
             data-direction={transfer.direction}
           >
             {receiving ? (
@@ -1030,8 +1031,8 @@ function TransferRow({
             </p>
           ) : null}
         </div>
-        <div className="flex shrink-0 flex-wrap gap-2">
-          {isSavedHere(transfer) ? (
+        <div className="ms-auto flex max-w-full shrink-0 flex-wrap items-center gap-2">
+          {savedHere ? (
             // 只在文件夹里选中它，不打开：收到的东西要不要打开由用户自己决定。
             <Button
               size="sm"
@@ -1076,7 +1077,7 @@ function TransferRow({
           getValueLabel={() => status}
         />
       ) : null}
-      {!cloudTransfer ? (
+      {!cloudTransfer && !savedHere ? (
         <p
           role={failed ? "alert" : undefined}
           className={
@@ -1209,7 +1210,7 @@ function DriveCard({
             disabled={pending}
             onClick={() => void upload()}
           >
-            {preparing ? uiText("preparingEllipsis") : uiText("uploadEllipsis")}
+            {preparing ? uiText("preparing") : uiText("upload")}
           </Button>
         </CardAction>
       </CardHeader>
@@ -1292,7 +1293,7 @@ function DriveRow({
           {formatSize(file.size)} · {formatStoredDate(file.createdAt)}
         </p>
       </div>
-      <div className="flex shrink-0 flex-wrap gap-2">
+      <div className="flex max-w-full shrink-0 flex-wrap gap-2">
         {confirming ? (
           <>
             <Button
@@ -1414,14 +1415,14 @@ function LaunchCard({ source, snapshot, onError }: CardProps) {
                   : uiText("folder", { value0: customFolder }))}
             </p>
           </div>
-          <div className="flex shrink-0 flex-wrap gap-2">
+          <div className="flex max-w-full shrink-0 flex-wrap gap-2">
             <Button
               size="sm"
               variant="outline"
               disabled={pending}
               onClick={() => void locate(() => source.chooseReceiveFolder())}
             >
-              {uiText("changeEllipsis")}
+              {uiText("change")}
             </Button>
             {customFolder !== null ? (
               <Button

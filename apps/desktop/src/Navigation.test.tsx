@@ -102,7 +102,7 @@ describe("主窗口导航", () => {
       });
     };
     const view = await renderApp(source, "日程与提醒");
-    await click(button(card(view.host, "日程"), "新建提醒…"));
+    await click(button(card(view.host, "日程"), "新建提醒"));
     await fill(view.host, "标题", "退出失败仍需保留");
     const trigger = await openAccountMenu(view.host);
     await act(async () => {
@@ -144,7 +144,7 @@ describe("主窗口导航", () => {
       new FakeBridge(snapshot({ phase: "signedIn" })),
       "日程与提醒",
     );
-    await click(button(card(view.host, "日程"), "新建提醒…"));
+    await click(button(card(view.host, "日程"), "新建提醒"));
     await fill(view.host, "标题", "周五带上合同");
     await fill(view.host, "备注", "先给同事确认");
     await click(button(view.host, "云盘"));
@@ -159,7 +159,7 @@ describe("主窗口导航", () => {
     async (signedOut) => {
       const source = new FakeBridge(snapshot({ phase: "signedIn" }));
       const view = await renderApp(source, "日程与提醒");
-      await click(button(card(view.host, "日程"), "新建提醒…"));
+      await click(button(card(view.host, "日程"), "新建提醒"));
       await fill(view.host, "标题", "原账户的私人草稿");
       if (signedOut) await act(async () => source.push(snapshot()));
       await act(async () =>
@@ -173,7 +173,7 @@ describe("主窗口导航", () => {
         }),
       );
       expect(button(view.host, "保存") === undefined).toBe(true);
-      await click(button(card(view.host, "日程"), "新建提醒…"));
+      await click(button(card(view.host, "日程"), "新建提醒"));
       expect(field(view.host, "标题").value).toBe("");
     },
   );

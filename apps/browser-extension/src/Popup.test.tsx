@@ -56,7 +56,7 @@ test("点击下载显示加入结果，重复点击不会重复提交，标题�
     download?.click();
   });
   expect(calls).toBe(1);
-  expect(text(view.host)).toContain("加入中…");
+  expect(text(view.host)).toContain("加入中");
   await act(async () => release());
   await settle();
   expect(text(view.host)).toContain("已加入");
