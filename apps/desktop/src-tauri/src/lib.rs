@@ -214,6 +214,10 @@ fn start(
             .map_err(|error| io::Error::other(error.to_string()))
             .and_then(|directory| LogFile::open(&directory, "desktop.log")),
     );
+    tracing::info!(
+        version = env!("CARGO_PKG_VERSION"),
+        "Assemble desktop is starting; the local log file is attached unless a warning says otherwise"
+    );
 
     let secrets: Option<Arc<dyn SecretStore>> = assemble_store::secret::system_secret_store()
         .map(|store| Arc::new(store) as Arc<dyn SecretStore>);

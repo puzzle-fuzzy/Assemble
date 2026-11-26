@@ -130,6 +130,12 @@ pub fn device_name_from_host(host: Option<&str>, platform: Platform) -> String {
 
 /// 启动时恢复会话：探测服务，再核对钥匙串里保存的设备令牌。
 pub async fn restore(state: &AppState) {
+    // 读钥匙串之前先留一行。重新构建过的应用第一次去读旧登录时，系统会弹一个确认框等人点，
+    // 这一步就此停住（2026-11-26 更新这台 Mac 上的应用时真的遇到了）：日志里看得到它停在哪，
+    // 才不会被当成应用卡死，或者当成登录丢了。
+    tracing::info!(
+        "checking the service, then the stored session in the system keychain; the system may ask the user to allow it"
+    );
     let reachable = state.client.health(&short(&state.lifetime)).await.is_ok();
     state.set_reachable(reachable);
 
@@ -163,10 +169,15 @@ pub async fn restore(state: &AppState) {
             if state.store_session(&refreshed).is_err() {
                 tracing::debug!("the refreshed account could not be saved");
             }
+            tracing::info!(
+                account = %refreshed.account.username,
+                "signed in from the stored session"
+            );
             adopt(state, &refreshed.account, &refreshed.device);
         }
         Err(error) if error.is_unauthorized() => {
             // 服务端已经不认这条令牌：可以放心忘掉。
+            tracing::warn!("the server no longer accepts the stored session; it is forgotten");
             forget(state);
             state.set_notice(Some(Notice::info("登录已失效，请重新登录。")));
         }
