@@ -17,11 +17,18 @@ pub(crate) fn enough(free: u64, wanted: u64) -> bool {
 /// 开始之前问一句：`path` 所在的磁盘放得下 `wanted` 字节吗。
 /// 要写多少还不知道时给 0，只看那一口气还在不在。
 pub(crate) fn ensure_room(path: &Path, wanted: u64) -> Result<()> {
-    // 文件可能还没建：问它所在的目录。
-    let directory = path
-        .parent()
-        .filter(|parent| !parent.as_os_str().is_empty())
-        .unwrap_or(path);
+    // 文件可能还没建：问它所在的目录；目录本身可能是挂载点，不能改查上一级。
+    let directory = if path.is_dir() {
+        path
+    } else {
+        path.parent()
+            .filter(|parent| !parent.as_os_str().is_empty())
+            .unwrap_or(path)
+    };
+    // Windows 查询卷余量时不保证目录存在，不能把不存在的目标当成可下载。
+    if !directory.is_dir() {
+        return Err(DownloadError::Storage);
+    }
     let free = fs4::available_space(directory).map_err(|_| DownloadError::Storage)?;
     if enough(free, wanted) {
         Ok(())
@@ -73,6 +80,7 @@ mod tests {
     #[test]
     fn asking_a_real_disk_works_even_before_the_file_exists() {
         let dir = tempfile::tempdir().unwrap();
+        ensure_room(dir.path(), 0).unwrap();
         ensure_room(&dir.path().join("not-yet.mp4"), 0).unwrap();
         // 谁也拿不出这么大一块盘。
         assert_eq!(
