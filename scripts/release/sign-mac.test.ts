@@ -28,17 +28,19 @@ Policy: Code Signing
 
 describe("本地签名", () => {
   test("包里的桥接程序排在包的前面，没构建出来的跳过", () => {
-    const everything = signTargets("/target", () => true);
-    expect(everything).toEqual([
-      "/target/release/bundle/macos/Assemble.app/Contents/MacOS/assemble-browser-host",
-      "/target/release/bundle/macos/Assemble.app",
-      "/target/release/assemble-mcp",
-      "/target/release/assemble-browser-host",
+    // 期望值也用 join 拼：Windows 上分隔符是反斜杠，写死斜杠只有那一栏会红。
+    const target = "target";
+    const bundle = join(target, "release/bundle/macos/Assemble.app");
+    expect(signTargets(target, () => true)).toEqual([
+      join(bundle, "Contents/MacOS/assemble-browser-host"),
+      bundle,
+      join(target, "release/assemble-mcp"),
+      join(target, "release/assemble-browser-host"),
     ]);
     expect(
-      signTargets("/target", (path) => path.endsWith("assemble-mcp")),
-    ).toEqual(["/target/release/assemble-mcp"]);
-    expect(signTargets("/target", () => false)).toEqual([]);
+      signTargets(target, (candidate) => candidate.endsWith("assemble-mcp")),
+    ).toEqual([join(target, "release/assemble-mcp")]);
+    expect(signTargets(target, () => false)).toEqual([]);
   });
 
   test("在钥匙串的身份清单里按名字数，不把名字相近的算进去", () => {
