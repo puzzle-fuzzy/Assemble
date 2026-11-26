@@ -7,6 +7,7 @@ mod hls;
 mod manager;
 mod media;
 mod network;
+mod space;
 #[cfg(test)]
 mod tests;
 
@@ -42,6 +43,8 @@ pub enum DownloadError {
     Expired,
     #[error("download task is busy")]
     Busy,
+    #[error("the disk of the download folder does not have enough free space")]
+    NoSpace,
 }
 
 impl DownloadError {
@@ -59,6 +62,7 @@ impl DownloadError {
             Self::Cancelled => "DOWNLOAD_CANCELLED",
             Self::Expired => "DOWNLOAD_EXPIRED",
             Self::Busy => "DOWNLOAD_BUSY",
+            Self::NoSpace => "DOWNLOAD_NO_SPACE",
         }
     }
 }
@@ -73,3 +77,6 @@ pub(crate) fn random_id() -> Result<String> {
 
 pub(crate) const MAX_BYTES: u64 = 10 * 1024 * 1024 * 1024;
 pub(crate) const MAX_METADATA: u64 = 4 * 1024 * 1024;
+/// 下载目录所在的磁盘至少要剩这么多，才开始写。留给系统和别人正在用的程序；
+/// 点播清单合并时还要再写一份成品，所以不是"刚好放得下"就够。
+pub(crate) const MIN_FREE_BYTES: u64 = 200 * 1024 * 1024;

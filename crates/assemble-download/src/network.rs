@@ -325,12 +325,14 @@ impl Network {
         if range.is_some() && declared.is_some() && declared != expected {
             return Err(DownloadError::InvalidMedia);
         }
+        // 知道要写多少：先看磁盘放不放得下，不够就别开了头。
+        crate::space::ensure_room(path, expected.unwrap_or(0))?;
         let mut file = tokio::fs::OpenOptions::new()
             .write(true)
             .create_new(true)
             .open(path)
             .await
-            .map_err(|_| DownloadError::Storage)?;
+            .map_err(|error| crate::space::write_failure(&error))?;
         let mut received = 0_u64;
         loop {
             let chunk = tokio::select! { () = cancel.cancelled() => return Err(DownloadError::Cancelled), value = response.chunk() => value.map_err(|_|DownloadError::Network)? };
@@ -343,15 +345,18 @@ impl Network {
             if received > crate::MAX_BYTES || expected.is_some_and(|size| received > size) {
                 return Err(DownloadError::Limit);
             }
+            // 写不进去多半是磁盘满了：那要说成空间不够，不是笼统的"存储失败"。
             file.write_all(&chunk)
                 .await
-                .map_err(|_| DownloadError::Storage)?;
+                .map_err(|error| crate::space::write_failure(&error))?;
             progress(chunk.len() as u64, expected);
         }
         if received == 0 || expected.is_some_and(|size| size != received) {
             return Err(DownloadError::InvalidMedia);
         }
-        file.sync_all().await.map_err(|_| DownloadError::Storage)?;
+        file.sync_all()
+            .await
+            .map_err(|error| crate::space::write_failure(&error))?;
         Ok(received)
     }
 }

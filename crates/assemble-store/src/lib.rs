@@ -11,5 +11,6 @@
 #![cfg_attr(test, allow(clippy::pedantic))]
 
 pub mod json;
+pub mod logfile;
 pub mod scope;
 pub mod secret;

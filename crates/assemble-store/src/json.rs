@@ -99,7 +99,7 @@ pub fn write_private_json<T: Serialize + ?Sized>(path: &Path, value: &T) -> Resu
 }
 
 #[cfg(unix)]
-fn create_private_dir(path: &Path) -> std::io::Result<()> {
+pub(crate) fn create_private_dir(path: &Path) -> std::io::Result<()> {
     use std::os::unix::fs::DirBuilderExt;
 
     fs::DirBuilder::new()
@@ -109,12 +109,12 @@ fn create_private_dir(path: &Path) -> std::io::Result<()> {
 }
 
 #[cfg(not(unix))]
-fn create_private_dir(path: &Path) -> std::io::Result<()> {
+pub(crate) fn create_private_dir(path: &Path) -> std::io::Result<()> {
     fs::create_dir_all(path)
 }
 
 #[cfg(unix)]
-fn set_private_file(path: &Path) -> std::io::Result<()> {
+pub(crate) fn set_private_file(path: &Path) -> std::io::Result<()> {
     use std::os::unix::fs::PermissionsExt;
 
     fs::set_permissions(path, fs::Permissions::from_mode(0o600))?;

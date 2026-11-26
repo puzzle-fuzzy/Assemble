@@ -38,26 +38,68 @@ pub struct MediaTools {
     ffprobe: Option<PathBuf>,
 }
 
-fn find(name: &str, variable: &str) -> Option<PathBuf> {
-    if let Some(path) = std::env::var_os(variable)
-        .map(PathBuf::from)
-        .filter(|path| path.is_file())
-    {
+/// PATH 里找不到时再看这几个地方。
+///
+/// 从启动台、托盘或开机启动项起来的应用，拿不到用户在 shell 里设的 PATH：macOS 上
+/// launchd 只给系统的那几个目录。而 Homebrew 和不少工具正是装在这些用户级或第三方的
+/// 位置里——2026-11-26 在真机上就撞上了：终端里找得到 FFmpeg，装好的应用却说没找到。
+fn usual_places(home: Option<PathBuf>) -> Vec<PathBuf> {
+    let mut places = Vec::new();
+    if let Some(home) = home {
+        places.push(home.join(".local").join("bin"));
+    }
+    if cfg!(target_os = "macos") {
+        places.push(PathBuf::from("/opt/homebrew/bin"));
+        places.push(PathBuf::from("/usr/local/bin"));
+    }
+    places
+}
+
+/// 找一个媒体程序，按先后：指定的环境变量、本程序旁边、PATH、常见安装位置。
+fn locate(
+    name: &str,
+    variable: Option<std::ffi::OsString>,
+    beside_exe: Option<PathBuf>,
+    path: Option<std::ffi::OsString>,
+    usual: &[PathBuf],
+) -> Option<PathBuf> {
+    if let Some(path) = variable.map(PathBuf::from).filter(|path| path.is_file()) {
         return Some(path);
     }
     let filename = format!("{name}{}", std::env::consts::EXE_SUFFIX);
-    if let Some(path) = std::env::current_exe()
-        .ok()
-        .and_then(|path| path.parent().map(|parent| parent.join(&filename)))
+    if let Some(path) = beside_exe
+        .map(|parent| parent.join(&filename))
         .filter(|path| path.is_file())
     {
         return Some(path);
     }
-    std::env::var_os("PATH").and_then(|paths| {
+    path.and_then(|paths| {
         std::env::split_paths(&paths)
             .map(|path| path.join(&filename))
             .find(|path| path.is_file())
     })
+    .or_else(|| {
+        usual
+            .iter()
+            .map(|place| place.join(&filename))
+            .find(|path| path.is_file())
+    })
+}
+
+fn find(name: &str, variable: &str) -> Option<PathBuf> {
+    locate(
+        name,
+        std::env::var_os(variable),
+        std::env::current_exe()
+            .ok()
+            .and_then(|path| path.parent().map(ToOwned::to_owned)),
+        std::env::var_os("PATH"),
+        &usual_places(
+            std::env::var_os("HOME")
+                .or_else(|| std::env::var_os("USERPROFILE"))
+                .map(PathBuf::from),
+        ),
+    )
 }
 
 impl MediaTools {
@@ -288,5 +330,99 @@ impl MediaTools {
             .and_then(|v| v.parse::<f64>().ok())
             .filter(|v| v.is_finite() && *v > 0.0)
             .ok_or(DownloadError::InvalidMedia)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn tool(directory: &Path) -> PathBuf {
+        std::fs::create_dir_all(directory).unwrap();
+        let path = directory.join(format!("ffmpeg{}", std::env::consts::EXE_SUFFIX));
+        std::fs::write(&path, b"tool").unwrap();
+        path
+    }
+
+    #[test]
+    fn a_tool_in_a_usual_place_is_found_when_the_path_does_not_have_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let usual = dir.path().join("usual");
+        let found = tool(&usual);
+        assert_eq!(
+            locate(
+                "ffmpeg",
+                None,
+                None,
+                Some(std::ffi::OsString::from("/nonexistent")),
+                std::slice::from_ref(&usual),
+            ),
+            Some(found.clone())
+        );
+        assert_eq!(locate("ffmpeg", None, None, None, &[usual]), Some(found));
+        assert_eq!(locate("ffmpeg", None, None, None, &[]), None);
+    }
+
+    #[test]
+    fn an_explicit_path_and_the_path_variable_win_over_usual_places() {
+        let dir = tempfile::tempdir().unwrap();
+        let explicit = tool(&dir.path().join("explicit"));
+        let on_path = tool(&dir.path().join("on-path"));
+        let usual = tool(&dir.path().join("usual"));
+        let path = std::env::join_paths([dir.path().join("on-path"), dir.path().join("elsewhere")])
+            .unwrap();
+        assert_eq!(
+            locate(
+                "ffmpeg",
+                Some(explicit.as_path().as_os_str().to_owned()),
+                None,
+                Some(path.clone()),
+                std::slice::from_ref(&usual),
+            ),
+            Some(explicit)
+        );
+        assert_eq!(
+            locate(
+                "ffmpeg",
+                None,
+                None,
+                Some(path),
+                std::slice::from_ref(&usual)
+            ),
+            Some(on_path)
+        );
+    }
+
+    #[test]
+    fn a_tool_beside_the_executable_wins_over_the_path() {
+        let dir = tempfile::tempdir().unwrap();
+        let beside = tool(&dir.path().join("beside"));
+        tool(&dir.path().join("on-path"));
+        let path = std::env::join_paths([dir.path().join("on-path")]).unwrap();
+        assert_eq!(
+            locate(
+                "ffmpeg",
+                None,
+                Some(dir.path().join("beside")),
+                Some(path),
+                &[],
+            ),
+            Some(beside)
+        );
+    }
+
+    #[test]
+    fn usual_places_start_with_the_users_own_bin() {
+        let home = PathBuf::from("/home/alex");
+        let places = usual_places(Some(home.clone()));
+        assert_eq!(places[0], home.join(".local").join("bin"));
+        if cfg!(target_os = "macos") {
+            assert!(places.contains(&PathBuf::from("/opt/homebrew/bin")));
+        }
+        assert!(
+            usual_places(None)
+                .iter()
+                .all(|place| !place.starts_with("/home"))
+        );
     }
 }

@@ -22,7 +22,12 @@ use url::Url;
 
 use crate::hls::{self, Track, Variant};
 use crate::network::{Network, headers, source_url};
+use crate::space;
 use crate::{DownloadError, MAX_METADATA, MediaTools, Result, douyin, random_id};
+
+/// 一次下载的暂存目录在接收目录里叫这个名字开头。完成了它会连着内容一起消失；
+/// 进程被杀掉的时候它就留下了，下次启动时由 [`DownloadManager::sweep_staging`] 清掉。
+const STAGING_PREFIX: &str = ".assemble-download-";
 
 #[derive(Clone)]
 enum Source {
@@ -115,6 +120,45 @@ impl DownloadManager {
             lifetime: CancellationToken::new(),
             changed: Arc::new(changed),
         }))
+    }
+
+    /// 清掉上次崩溃留下的暂存目录。返回清掉了几个。
+    ///
+    /// 正常结束的下载会自己删掉暂存目录；进程被杀掉的时候就留下了，里面可能是好几个 G
+    /// 的分片。只在启动之后、还没有任何任务的时候做：正在下载的暂存目录也在同一个地方。
+    /// 目录先过 [`assemble_device::validate_directory`]，只删名字对得上的目录，不跟着链接走。
+    ///
+    /// 调用方要在窗口开出来之前把它做完：那之后随时可能有任务开始，这个函数分不清
+    /// "上次留下的"和"刚建的"。
+    pub async fn sweep_staging(self: &Arc<Self>) -> usize {
+        if !self.lock().jobs.is_empty() {
+            return 0;
+        }
+        let folder = self.lock().history.folder.clone();
+        if assemble_device::validate_directory(&folder).await.is_err() {
+            return 0;
+        }
+        let mut removed = 0;
+        let Ok(mut entries) = tokio::fs::read_dir(&folder).await else {
+            return 0;
+        };
+        while let Ok(Some(entry)) = entries.next_entry().await {
+            let is_staging = entry
+                .file_name()
+                .to_string_lossy()
+                .starts_with(STAGING_PREFIX)
+                && entry.file_type().await.is_ok_and(|kind| kind.is_dir());
+            if is_staging && tokio::fs::remove_dir_all(entry.path()).await.is_ok() {
+                removed += 1;
+            }
+        }
+        if removed > 0 {
+            tracing::info!(
+                removed,
+                "staging folders left by an interrupted run were removed"
+            );
+        }
+        removed
     }
 
     fn lock(&self) -> MutexGuard<'_, State> {
@@ -362,6 +406,8 @@ impl DownloadManager {
         let folder = assemble_device::validate_directory(&folder)
             .await
             .map_err(|_| DownloadError::Storage)?;
+        // 磁盘快满了就别开这个头：说清楚是空间不够，而不是下到一半才失败。
+        space::ensure_room(&folder, 0)?;
         let id = random_id()?;
         {
             let mut state = self.lock();
@@ -523,10 +569,12 @@ impl DownloadManager {
         let folder = assemble_device::validate_directory(&job.folder)
             .await
             .map_err(|_| DownloadError::Storage)?;
+        // 排队的时候别的任务可能已经把磁盘写满了：轮到自己时再看一眼。
+        space::ensure_room(&folder, 0)?;
         let directory = tempfile::Builder::new()
-            .prefix(".assemble-download-")
+            .prefix(STAGING_PREFIX)
             .tempdir_in(&folder)
-            .map_err(|_| DownloadError::Storage)?;
+            .map_err(|error| space::write_failure(&error))?;
         let started = Instant::now();
         let (video, audio, hls) = match &job.source {
             Source::Hls(variant) => {
