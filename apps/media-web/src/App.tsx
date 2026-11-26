@@ -8,8 +8,6 @@ import {
 import { Alert, AlertDescription, AlertTitle } from "@assemble/ui/alert";
 import { Button } from "@assemble/ui/button";
 import { DisplayPreferencesMenu } from "@assemble/ui/display-preferences";
-import { Separator } from "@assemble/ui/separator";
-import { FilmIcon, LogInIcon, UserRoundIcon } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   EmptyContentView,
@@ -148,60 +146,6 @@ export function App() {
       <a href="#main-content" className="skip-link">
         {t("skip")}
       </a>
-      <header className="site-header">
-        <div className="site-header-inner">
-          <SiteLink href="/movies/" className="site-brand">
-            <FilmIcon aria-hidden="true" />
-            <span>{t("brand")}</span>
-          </SiteLink>
-          <nav className="site-nav" aria-label={t("navigation")}>
-            <Button
-              asChild
-              variant={
-                !privateRoute && !collectionsRoute ? "secondary" : "ghost"
-              }
-            >
-              <SiteLink
-                href="/movies/"
-                aria-current={
-                  !privateRoute && !collectionsRoute ? "page" : undefined
-                }
-              >
-                {t("shared")}
-              </SiteLink>
-            </Button>
-            <Button asChild variant={privateRoute ? "secondary" : "ghost"}>
-              <SiteLink
-                href="/movies/private"
-                aria-current={privateRoute ? "page" : undefined}
-              >
-                {t("private")}
-              </SiteLink>
-            </Button>
-            <Button asChild variant={collectionsRoute ? "secondary" : "ghost"}>
-              <SiteLink
-                href="/movies/collections"
-                aria-current={collectionsRoute ? "page" : undefined}
-              >
-                {t("collections")}
-              </SiteLink>
-            </Button>
-          </nav>
-          <div className="site-account">
-            <DisplayPreferencesMenu />
-            <Button asChild variant="outline">
-              <a href={account ? "/web/account" : loginPath}>
-                {account ? (
-                  <UserRoundIcon data-icon="inline-start" />
-                ) : (
-                  <LogInIcon data-icon="inline-start" />
-                )}
-                <span>{account ? account.displayName : t("signIn")}</span>
-              </a>
-            </Button>
-          </div>
-        </div>
-      </header>
       <main id="main-content" className="site-main" tabIndex={-1}>
         {state.phase === "checking" ? (
           <LoadingContent />
@@ -219,7 +163,7 @@ export function App() {
                   <AlertTitle>{t("sessionError")}</AlertTitle>
                   <AlertDescription className="flex flex-col items-start gap-3">
                     <p>{t("sessionHelp")}</p>
-                    <Button variant="outline" size="sm" onClick={refresh}>
+                    <Button variant="outline" size="default" onClick={refresh}>
                       {t("retry")}
                     </Button>
                   </AlertDescription>
@@ -241,7 +185,7 @@ export function App() {
                 </EmptyContentView>
               ) : (
                 <SiteContent
-                  key={`${account?.id ?? "anonymous"}:${location}`}
+                  key={`${account?.id ?? "anonymous"}:${location.split("?")[0]}`}
                   route={route}
                   signedIn={account !== null}
                   sessionSignal={state.signal}
@@ -252,28 +196,43 @@ export function App() {
         )}
       </main>
       <footer className="site-footer">
-        <Separator />
-        <div className="flex flex-col gap-2">
-          <p>{account ? t("readOnly") : t("anonymous")}</p>
-          <p>
-            <a
-              href="https://www.themoviedb.org/"
-              target="_blank"
-              rel="noreferrer"
-              className="underline underline-offset-4"
+        <div className="site-footer-row">
+          <nav className="site-footer-links" aria-label={t("navigation")}>
+            <SiteLink
+              href="/movies/"
+              aria-current={
+                !privateRoute && !collectionsRoute ? "page" : undefined
+              }
             >
-              TMDB
-            </a>
-            <span aria-hidden="true"> · </span>
-            <a
-              href="https://movie.douban.com/"
-              target="_blank"
-              rel="noreferrer"
-              className="underline underline-offset-4"
+              {t("shared")}
+            </SiteLink>
+            <SiteLink
+              href="/movies/private"
+              aria-current={privateRoute ? "page" : undefined}
             >
-              豆瓣 / Douban
+              {t("private")}
+            </SiteLink>
+            <SiteLink
+              href="/movies/collections"
+              aria-current={collectionsRoute ? "page" : undefined}
+            >
+              {t("collections")}
+            </SiteLink>
+            <a href={account ? "/web/account" : loginPath}>
+              {account ? t("account") : t("signIn")}
             </a>
-          </p>
+          </nav>
+          <DisplayPreferencesMenu />
+        </div>
+        <div className="site-attribution">
+          <a
+            href="https://www.themoviedb.org/"
+            target="_blank"
+            rel="noreferrer"
+            className="underline underline-offset-4"
+          >
+            TMDB
+          </a>
           <p>{t("tmdbNotice")}</p>
         </div>
       </footer>
@@ -301,6 +260,7 @@ function SiteContent({
         <LibraryWall
           client={route.scope === "private" ? privateClient : shared}
           query={route.query}
+          pages={route.pages}
           {...props}
         />
       );

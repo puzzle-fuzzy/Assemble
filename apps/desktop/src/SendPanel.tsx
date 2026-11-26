@@ -189,8 +189,8 @@ export function SendPanel({ bridge: source = bridge }: SendPanelProps) {
               <Button
                 type="button"
                 variant="outline"
-                size="lg"
-                className="h-auto min-h-12 w-full justify-start gap-3 py-3 text-left whitespace-normal"
+                size="default"
+                className="w-full justify-start gap-3 text-left"
                 disabled={pending}
                 onClick={() => void sendTo("drive")}
               >
@@ -206,20 +206,18 @@ export function SendPanel({ bridge: source = bridge }: SendPanelProps) {
                 <Button
                   type="button"
                   variant="outline"
-                  size="lg"
-                  className="h-auto min-h-12 w-full justify-start gap-3 py-3 text-left whitespace-normal"
+                  size="default"
+                  className="w-full justify-start gap-3 text-left"
                   disabled={!device.online || pending}
                   onClick={() => void sendTo(device.id)}
                 >
                   <Monitor aria-hidden data-icon="inline-start" />
-                  <span className="flex min-w-0 flex-1 flex-col items-start gap-1">
-                    <span className="wrap-anywhere">
-                      {uiText("sendToDeviceName", { name: device.name })}
-                    </span>
-                    <span className="text-xs font-normal text-muted-foreground">
-                      {PLATFORM_NAMES[device.platform]} ·{" "}
-                      {device.online ? uiText("online") : uiText("offline")}
-                    </span>
+                  <span className="min-w-0 flex-1 truncate" title={device.name}>
+                    {uiText("sendToDeviceName", { name: device.name })}
+                  </span>
+                  <span className="shrink-0 text-xs font-normal text-muted-foreground">
+                    {PLATFORM_NAMES[device.platform]} ·{" "}
+                    {device.online ? uiText("online") : uiText("offline")}
                   </span>
                   <ArrowRight aria-hidden data-icon="inline-end" />
                 </Button>

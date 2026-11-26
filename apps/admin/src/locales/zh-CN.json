@@ -144,7 +144,6 @@
     "diskAvailable": "服务器磁盘可用",
     "contentUsage": "文件内容用量 / 预算（去重）",
     "database": "数据库（含图片与日志）",
-    "capacityHint": "可用文件空间取预算余量与磁盘可用空间的较小值，单个账户仍受云盘配额限制。",
     "unavailable": "暂不可用",
     "filesRegion": "所有账户的云盘文件",
     "name": "文件名称",

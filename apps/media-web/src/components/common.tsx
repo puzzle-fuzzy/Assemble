@@ -4,16 +4,10 @@ import {
   EmptyContent,
   EmptyDescription,
   EmptyHeader,
-  EmptyMedia,
   EmptyTitle,
 } from "@assemble/ui/empty";
-import { Skeleton } from "@assemble/ui/skeleton";
-import {
-  ArrowLeftIcon,
-  ArrowRightIcon,
-  FilmIcon,
-  RotateCwIcon,
-} from "lucide-react";
+import { LoadingState } from "@assemble/ui/loading-state";
+import { ArrowLeftIcon, ArrowRightIcon, RotateCwIcon } from "lucide-react";
 import type { ComponentProps } from "react";
 import { useSiteTranslation } from "../lib/i18n";
 import { loginPath, navigate } from "../lib/navigation";
@@ -50,30 +44,10 @@ export function SiteLink({
 export function LoadingContent({ wall = false }: { wall?: boolean }) {
   const { t } = useSiteTranslation();
   return (
-    <section aria-busy="true" aria-label={t("loading")}>
-      <p className="sr-only" role="status">
-        {t("loading")}
-      </p>
-      {wall ? (
-        <div className="poster-grid">
-          {["a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l"].map(
-            (key) => (
-              <div className="flex flex-col gap-3" key={key}>
-                <Skeleton className="aspect-[2/3] w-full rounded-xl" />
-                <Skeleton className="h-4 w-3/4" />
-                <Skeleton className="h-3 w-1/3" />
-              </div>
-            ),
-          )}
-        </div>
-      ) : (
-        <div className="flex flex-col gap-5">
-          <Skeleton className="h-10 w-2/3" />
-          <Skeleton className="h-5 w-1/2" />
-          <Skeleton className="h-64 w-full" />
-        </div>
-      )}
-    </section>
+    <LoadingState
+      className={wall ? "min-h-[50svh]" : "min-h-64"}
+      label={t("loading")}
+    />
   );
 }
 
@@ -89,9 +63,6 @@ export function EmptyContentView({
   return (
     <Empty>
       <EmptyHeader>
-        <EmptyMedia variant="icon">
-          <FilmIcon />
-        </EmptyMedia>
         <EmptyTitle>{title}</EmptyTitle>
         {description && <EmptyDescription>{description}</EmptyDescription>}
       </EmptyHeader>
@@ -136,7 +107,7 @@ export function RequestError({
 export function BackLink({ href = "/movies/" }: { href?: string }) {
   const { t } = useSiteTranslation();
   return (
-    <Button asChild variant="ghost">
+    <Button asChild variant="ghost" className="w-fit">
       <SiteLink href={href}>
         <ArrowLeftIcon data-icon="inline-start" />
         {t("back")}
@@ -150,18 +121,23 @@ export function Pagination({
   total,
   pageSize,
   onPage,
+  compact = false,
+  label,
 }: {
   page: number;
   total: number;
   pageSize: number;
   onPage: (page: number) => void;
+  compact?: boolean;
+  label?: string;
 }) {
   const { t } = useSiteTranslation();
   const pages = Math.max(1, Math.ceil(total / pageSize));
+  if (pages === 1) return null;
   return (
-    <nav className="media-pagination" aria-label={t("pagination")}>
+    <nav className="media-pagination" aria-label={label ?? t("pagination")}>
       <p className="text-sm text-muted-foreground" aria-live="polite">
-        {t("results", { count: total, page, pages })}
+        {t(compact ? "pagePosition" : "results", { count: total, page, pages })}
       </p>
       <div className="flex gap-2">
         <Button

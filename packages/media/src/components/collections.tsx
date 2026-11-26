@@ -170,14 +170,14 @@ function CollectionsContent({
               {toolbarActions}
               <Button
                 variant="outline"
-                size="sm"
+                size="default"
                 disabled={task.pending}
                 onClick={() => setRevision((value) => value + 1)}
               >
                 {t("common.refresh")}
               </Button>
               {canEdit && (
-                <Button size="sm" onClick={() => setEditing("new")}>
+                <Button size="default" onClick={() => setEditing("new")}>
                   {t("collections.create")}
                 </Button>
               )}
@@ -272,7 +272,7 @@ function CollectionsContent({
                         <li key={entry.id}>
                           <Button
                             variant="link"
-                            className="h-auto justify-start whitespace-normal p-0 text-left"
+                            className="h-auto min-h-8 justify-start whitespace-normal p-0 text-left"
                             onClick={() =>
                               void detailTask.run(
                                 (signal) => libraryClient.get(entry.id, signal),
@@ -289,7 +289,7 @@ function CollectionsContent({
                       <div className="flex gap-2">
                         <Button
                           variant="outline"
-                          size="sm"
+                          size="default"
                           onClick={() =>
                             void detailTask.run(
                               (signal) => client.get(collection.id, signal),
@@ -301,7 +301,7 @@ function CollectionsContent({
                         </Button>
                         <Button
                           variant="destructive"
-                          size="sm"
+                          size="default"
                           onClick={() => setRemoving(collection)}
                         >
                           {t("common.remove")}
@@ -728,7 +728,7 @@ function CollectionEditor({
                 </p>
                 <Button
                   variant="outline"
-                  size="sm"
+                  size="default"
                   disabled={
                     task.pending ||
                     members.some((member) => member.id === item.id)

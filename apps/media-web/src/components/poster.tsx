@@ -5,10 +5,9 @@ import type {
   MediaImage,
   MediaImageVariant,
 } from "@assemble/media";
-import { Badge } from "@assemble/ui/badge";
 import { Button } from "@assemble/ui/button";
 import { cn } from "@assemble/ui/lib/utils";
-import { Skeleton } from "@assemble/ui/skeleton";
+import { LoadingState } from "@assemble/ui/loading-state";
 import { FilmIcon, RotateCwIcon } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useSiteTranslation } from "../lib/i18n";
@@ -66,9 +65,9 @@ export function MediaImageView({
     );
   if (source === undefined)
     return (
-      <Skeleton
+      <LoadingState
         className={cn("media-image", className)}
-        aria-label={t("loading")}
+        label={t("loading")}
       />
     );
   if (source === null)
@@ -78,7 +77,7 @@ export function MediaImageView({
         {allowRetry && (
           <Button
             variant="ghost"
-            size="sm"
+            size="default"
             onClick={(event) => {
               event.preventDefault();
               event.stopPropagation();
@@ -111,16 +110,20 @@ export function PosterCard({
   item,
   imageLoader,
   priority = false,
+  returnTo,
 }: {
   item: MediaEntry | MediaCandidate;
   imageLoader: ImageLoader;
   priority?: boolean;
+  returnTo?: string;
 }) {
-  const { t } = useSiteTranslation();
   const isEntry = "id" in item;
-  const href = isEntry
+  const destination = isEntry
     ? entryPath(item.scope, item.id)
     : catalogPath(item.identity);
+  const href = returnTo
+    ? `${destination}?from=${encodeURIComponent(returnTo)}`
+    : destination;
   return (
     <article className="poster-card">
       <MediaImageView
@@ -130,15 +133,20 @@ export function PosterCard({
         priority={priority}
         className="poster-art"
       />
-      <div className="flex flex-col items-start gap-1.5">
-        <h2 className="poster-title">
-          <SiteLink href={href}>{item.title}</SiteLink>
-        </h2>
-        <p className="text-sm text-muted-foreground">
-          {item.year ?? t("unknownYear")} ·{" "}
-          {t(isEntry ? item.mediaType : item.identity.mediaType)}
-        </p>
-        {isEntry && <Badge variant="secondary">{t(item.status)}</Badge>}
+      <div className="poster-caption">
+        <div className="poster-heading">
+          <h3 className="poster-title">
+            <SiteLink href={href} title={item.title}>
+              {item.title}
+            </SiteLink>
+          </h3>
+          {item.year !== null && (
+            <span className="poster-year">{item.year}</span>
+          )}
+        </div>
+        {item.overview?.trim() && (
+          <p className="poster-overview">{item.overview}</p>
+        )}
       </div>
     </article>
   );

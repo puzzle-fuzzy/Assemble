@@ -1,14 +1,25 @@
-import { Badge } from "@assemble/ui/badge";
 import { Button } from "@assemble/ui/button";
-import { Checkbox } from "@assemble/ui/checkbox";
 import {
   DataTable,
   type DataTableColumn,
   DataTableColumnFilter,
 } from "@assemble/ui/data-table";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuGroup,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@assemble/ui/dropdown-menu";
 import { Field, FieldLabel } from "@assemble/ui/field";
 import { Input } from "@assemble/ui/input";
-import { Label } from "@assemble/ui/label";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@assemble/ui/tooltip";
+import { ActivityIcon, ChevronDownIcon } from "lucide-react";
 import { useEffect, useId, useRef, useState } from "react";
 import {
   type AccessFailure,
@@ -27,7 +38,7 @@ import {
 } from "../lib/dht-api";
 import { useDhtTranslation } from "../lib/dht-i18n";
 import { RecordedTime } from "../lib/text";
-import { useDhtResource } from "../lib/use-dht-resource";
+import { useResource } from "../lib/use-resource";
 import { DetailDialog, DetailFields } from "./detail-dialog";
 import { LoadingContent, RequestError } from "./feedback";
 import { SearchForm, useListQuery } from "./list-controls";
@@ -67,24 +78,21 @@ export function DhtPage({
 }) {
   const { t } = useDhtTranslation();
   const query = useListQuery();
-  const [statusFilter, setStatusFilter] = useState("all");
+  const [statusFilter, setStatusFilter] = useState("verified");
   const [sourceFilter, setSourceFilter] = useState("all");
-  const [autoRefresh, setAutoRefresh] = useState(true);
-  const autoId = useId();
   const queryId = useId();
+  const [runtimeOpen, setRuntimeOpen] = useState(false);
   const [selected, setSelected] = useState<string | null>(null);
   const [queryOpen, setQueryOpen] = useState(false);
   const [hash, setHash] = useState("");
   const [busy, setBusy] = useState(false);
-  const [settling, setSettling] = useState(false);
   const [failure, setFailure] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const mutation = useRef<AbortController | null>(null);
   useEffect(() => () => mutation.current?.abort(), []);
-  const status = useDhtResource<DhtStatus>(
+  const status = useResource<DhtStatus>(
     "/v1/admin/dht/status",
     onAccessFailure,
-    settling ? 1000 : autoRefresh ? 30000 : null,
   );
   const parameters = new URLSearchParams({
     q: query.query,
@@ -93,22 +101,13 @@ export function DhtPage({
     ...(statusFilter !== "all" ? { status: statusFilter } : {}),
     ...(sourceFilter !== "all" ? { source: sourceFilter } : {}),
   });
-  const list = useDhtResource<AdminPage<DhtObservation>>(
+  const list = useResource<AdminPage<DhtObservation>>(
     `/v1/admin/dht/observations?${parameters}`,
     onAccessFailure,
-    autoRefresh && selected === null && !queryOpen ? 30000 : null,
   );
   const page = list.resource.phase === "ready" ? list.resource.value : null;
   const runtime =
     status.resource.phase === "ready" ? status.resource.value : null;
-  useEffect(() => {
-    if (
-      runtime &&
-      (runtime.running === (runtime.mode !== "stopped") ||
-        runtime.lastError !== null)
-    )
-      setSettling(false);
-  }, [runtime]);
 
   async function mutate(
     action: "query" | "control",
@@ -135,7 +134,6 @@ export function DhtPage({
       }
       if (action === "control" && "mode" in result) {
         status.update((old) => ({ ...old, mode: result.mode }));
-        setSettling(true);
       }
     } catch (error) {
       if (controller.signal.aborted) return;
@@ -187,7 +185,7 @@ export function DhtPage({
       cell: (row) => (
         <Button
           variant="link"
-          className="h-auto max-w-full justify-start p-0 text-left whitespace-normal break-all"
+          className="h-auto min-h-8 max-w-full justify-start p-0 text-left whitespace-normal break-all"
           onClick={() => {
             setNotice(null);
             setSelected(row.id);
@@ -215,9 +213,16 @@ export function DhtPage({
         />
       ),
       cell: (row) => (
-        <Badge variant={row.status === "verified" ? "secondary" : "outline"}>
+        <Button
+          type="button"
+          variant={row.status === "verified" ? "secondary" : "outline"}
+          onClick={() => {
+            setNotice(null);
+            setSelected(row.id);
+          }}
+        >
           {t(`statuses.${row.status}`)}
-        </Badge>
+        </Button>
       ),
     },
     {
@@ -259,64 +264,12 @@ export function DhtPage({
   ];
   return (
     <div className="flex min-w-0 flex-col gap-4">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex flex-wrap items-center gap-2">
-          {runtime && (
-            <Badge variant="outline">{t(`modes.${runtime.mode}`)}</Badge>
-          )}
-          <Button
-            size="sm"
-            variant="outline"
-            disabled={
-              busy || !runtime?.enabled || runtime.mode === "collecting"
-            }
-            onClick={() => void mutate("control", { mode: "collecting" })}
-          >
-            {t("collect")}
-          </Button>
-          <Button
-            size="sm"
-            variant="outline"
-            disabled={
-              busy || !runtime?.enabled || runtime.mode !== "collecting"
-            }
-            onClick={() => void mutate("control", { mode: "draining" })}
-          >
-            {t("drain")}
-          </Button>
-          <Button
-            size="sm"
-            variant="outline"
-            disabled={busy || !runtime || runtime.mode === "stopped"}
-            onClick={() => void mutate("control", { mode: "stopped" })}
-          >
-            {t("stop")}
-          </Button>
-        </div>
-        <div className="flex items-center gap-2">
-          <Checkbox
-            id={autoId}
-            checked={autoRefresh}
-            onCheckedChange={(value) => setAutoRefresh(value === true)}
-          />
-          <Label htmlFor={autoId}>{t("autoRefresh")}</Label>
-        </div>
-      </div>
-      {status.resource.phase === "loading" ? (
-        <LoadingContent />
-      ) : status.resource.phase === "error" ? (
+      {status.resource.phase === "error" && (
         <RequestError failure={status.resource.failure} retry={status.retry} />
-      ) : (
-        <RuntimeStatus status={status.resource.value} />
       )}
       {failure && (
         <p role="alert" className="text-sm text-destructive">
           {t(errorKey(failure))}
-        </p>
-      )}
-      {(list.refreshFailed || status.refreshFailed) && (
-        <p role="alert" className="text-sm text-destructive">
-          {t("errors.unavailable")}
         </p>
       )}
       <p
@@ -341,9 +294,60 @@ export function DhtPage({
         }
         actions={
           <>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="outline" disabled={!runtime || busy}>
+                  {runtime ? t(`modes.${runtime.mode}`) : t("working")}
+                  <ChevronDownIcon data-icon="inline-end" aria-hidden="true" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuGroup>
+                  {(["collecting", "draining", "stopped"] as const).map(
+                    (mode) => (
+                      <DropdownMenuItem
+                        key={mode}
+                        disabled={
+                          busy ||
+                          !runtime ||
+                          runtime.mode === mode ||
+                          (mode !== "stopped" && !runtime.enabled) ||
+                          (mode === "draining" && runtime.mode !== "collecting")
+                        }
+                        onSelect={() => void mutate("control", { mode })}
+                      >
+                        {t(
+                          mode === "collecting"
+                            ? "collect"
+                            : mode === "draining"
+                              ? "drain"
+                              : "stop",
+                        )}
+                      </DropdownMenuItem>
+                    ),
+                  )}
+                </DropdownMenuGroup>
+              </DropdownMenuContent>
+            </DropdownMenu>
+            <TooltipProvider delayDuration={250}>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant={runtime?.lastError ? "destructive" : "outline"}
+                    size="icon"
+                    aria-label={t("diagnostics")}
+                    disabled={!runtime}
+                    onClick={() => setRuntimeOpen(true)}
+                  >
+                    <ActivityIcon aria-hidden="true" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>{t("diagnostics")}</TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
             <Button
               variant="outline"
-              size="sm"
+              size="default"
               disabled={busy || !runtime?.enabled || runtime.mode === "stopped"}
               onClick={() => {
                 setFailure(null);
@@ -355,7 +359,7 @@ export function DhtPage({
             </Button>
             <Button
               variant="outline"
-              size="sm"
+              size="default"
               disabled={
                 list.resource.phase === "loading" ||
                 status.resource.phase === "loading"
@@ -410,6 +414,14 @@ export function DhtPage({
           )
         }
       />
+      {runtimeOpen && runtime && (
+        <DetailDialog
+          title={t("diagnostics")}
+          onClose={() => setRuntimeOpen(false)}
+        >
+          <RuntimeStatus status={runtime} />
+        </DetailDialog>
+      )}
       {selected && (
         <ObservationDetail
           hash={selected}
@@ -508,41 +520,34 @@ function RuntimeStatus({ status }: { status: DhtStatus }) {
         status.metadataBytes >= status.metadataBudgetBytes) && (
         <p role="alert">{t("capacity")}</p>
       )}
-      <details className="rounded-lg border p-3">
-        <summary className="cursor-pointer font-medium">
-          {t("diagnostics")}
-        </summary>
-        <dl className="mt-4 grid gap-4 sm:grid-cols-3 xl:grid-cols-4">
-          {[
-            [t("recordBudget"), status.maxRecords],
-            [
-              t("metadataBudget"),
-              <span key="bytes">
-                <Bytes value={status.metadataBytes} /> /{" "}
-                <Bytes value={status.metadataBudgetBytes} />
-              </span>,
-            ],
-            [t("workers"), status.workers],
-            [t("announces"), status.announces],
-            [t("samples"), status.samples],
-            [
-              t("lastObserved"),
-              <RecordedTime key="time" value={status.lastObservedAt} />,
-            ],
-            ...Object.entries(status.counters).map(([key, count]) => [
-              t(`counters.${key}`),
-              count,
-            ]),
-          ].map(([label, value]) => (
-            <div key={String(label)}>
-              <dt className="text-muted-foreground">{label}</dt>
-              <dd className="mt-1 tabular-nums">{value}</dd>
-            </div>
-          ))}
-        </dl>
-        <p className="mt-4 text-xs text-muted-foreground">{t("processHint")}</p>
-      </details>
-      <p className="text-xs text-muted-foreground">{t("evidenceHint")}</p>
+      <dl className="grid gap-4 sm:grid-cols-3 xl:grid-cols-4">
+        {[
+          [t("recordBudget"), status.maxRecords],
+          [
+            t("metadataBudget"),
+            <span key="bytes">
+              <Bytes value={status.metadataBytes} /> /{" "}
+              <Bytes value={status.metadataBudgetBytes} />
+            </span>,
+          ],
+          [t("workers"), status.workers],
+          [t("announces"), status.announces],
+          [t("samples"), status.samples],
+          [
+            t("lastObserved"),
+            <RecordedTime key="time" value={status.lastObservedAt} />,
+          ],
+          ...Object.entries(status.counters).map(([key, count]) => [
+            t(`counters.${key}`),
+            count,
+          ]),
+        ].map(([label, value]) => (
+          <div key={String(label)}>
+            <dt className="text-muted-foreground">{label}</dt>
+            <dd className="mt-1 tabular-nums">{value}</dd>
+          </div>
+        ))}
+      </dl>
     </section>
   );
 }
@@ -560,11 +565,9 @@ function ObservationDetail({
 }) {
   const { t } = useDhtTranslation();
   const [copyNotice, setCopyNotice] = useState<string | null>(null);
-  const detail = useDhtResource<DhtDetails>(
+  const detail = useResource<DhtDetails>(
     `/v1/admin/dht/observations/${hash}`,
     onAccessFailure,
-    3000,
-    (value) => ["pending", "fetching", "deferred"].includes(value.status),
   );
   const value =
     detail.resource.phase === "ready" ? detail.resource.value : null;
@@ -580,9 +583,8 @@ function ObservationDetail({
         value && (
           <>
             <div className="flex flex-wrap items-center gap-2">
-              <Badge variant="outline">{t(`statuses.${value.status}`)}</Badge>
               <Button
-                size="sm"
+                size="default"
                 variant="outline"
                 onClick={() => {
                   void copy(value).then((success) =>
@@ -591,6 +593,9 @@ function ObservationDetail({
                 }}
               >
                 {t("copy")}
+              </Button>
+              <Button variant="outline" onClick={detail.retry}>
+                {t("refresh")}
               </Button>
             </div>
             <p
@@ -602,6 +607,7 @@ function ObservationDetail({
             </p>
             <DetailFields
               fields={[
+                { label: t("status"), value: t(`statuses.${value.status}`) },
                 {
                   label: t("hash"),
                   value: (
@@ -678,11 +684,6 @@ function ObservationDetail({
                 </p>
               }
             />
-            {detail.refreshFailed && (
-              <p role="alert" className="text-sm text-destructive">
-                {t("errors.unavailable")}
-              </p>
-            )}
           </>
         )
       )}

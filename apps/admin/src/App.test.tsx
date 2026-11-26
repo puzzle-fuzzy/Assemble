@@ -208,7 +208,7 @@ describe("管理端真实数据和访问权限", () => {
     ).toBe("概览");
   });
 
-  test("加载只显示 Skeleton，拿到结果后展示实际数量，菜单导航对应右侧内容", async () => {
+  test("加载显示统一加载区，拿到结果后展示实际数量，菜单导航对应右侧内容", async () => {
     let resolveOverview: ((value: Response) => void) | undefined;
     handle = (path) =>
       path === "/v1/admin/overview"
@@ -217,14 +217,15 @@ describe("管理端真实数据和访问权限", () => {
           })
         : defaultResponse(path);
     const host = await render(<App />);
-    expect(host.querySelector('[data-slot="skeleton"]')).not.toBeNull();
+    expect(host.querySelector('[data-slot="loading-state"]')).not.toBeNull();
+    expect(host.querySelector('[data-slot="skeleton"]')).toBeNull();
     expect(host.textContent).not.toContain("23");
     await act(async () =>
       resolveOverview?.(defaultResponse("/v1/admin/overview")),
     );
     expect(host.textContent).toContain("23");
     expect(host.querySelector("main h1") === null).toBe(true);
-    expect(host.querySelector('[data-slot="skeleton"]')).toBeNull();
+    expect(host.querySelector('[data-slot="loading-state"]')).toBeNull();
     await navigate(host, "devices");
     expect(
       host.querySelector('header [data-slot="breadcrumb-page"]')?.textContent,
@@ -496,7 +497,7 @@ describe("用户、设备和登录记录的交互", () => {
     const host = await render(<App />);
     await navigate(host, "users");
     await search(host, "旧查询");
-    expect(host.querySelector('[data-slot="skeleton"]')).not.toBeNull();
+    expect(host.querySelector('[data-slot="loading-state"]')).not.toBeNull();
     expect(host.textContent).not.toContain(user.email);
     await search(host, "新查询");
     expect(oldSignal?.aborted).toBe(true);

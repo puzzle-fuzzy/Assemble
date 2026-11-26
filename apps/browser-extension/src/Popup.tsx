@@ -81,7 +81,7 @@ export function Popup({ send, requestCapture }: PopupProps) {
         <h1 className="text-sm font-semibold">Assemble</h1>
         <div className="flex gap-1">
           <Button
-            size="sm"
+            size="default"
             variant="outline"
             disabled={pending !== null}
             aria-pressed={list.capturing}
@@ -91,7 +91,7 @@ export function Popup({ send, requestCapture }: PopupProps) {
           </Button>
           <Button
             variant="ghost"
-            size="icon-sm"
+            size="icon"
             aria-label={t("refresh")}
             disabled={pending !== null}
             onClick={() => void run({ type: "scan" })}
@@ -100,11 +100,7 @@ export function Popup({ send, requestCapture }: PopupProps) {
           </Button>
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <Button
-                variant="ghost"
-                size="icon-sm"
-                aria-label={t("preferences")}
-              >
+              <Button variant="ghost" size="icon" aria-label={t("preferences")}>
                 <Settings2 aria-hidden="true" />
               </Button>
             </DropdownMenuTrigger>
@@ -147,7 +143,7 @@ export function Popup({ send, requestCapture }: PopupProps) {
                 </div>
                 <Button
                   variant="outline"
-                  size="sm"
+                  size="default"
                   disabled={pending !== null || source.submitted}
                   aria-label={`${t(source.submitted ? "submitted" : pending === source.id ? "adding" : "download")} ${source.title}`}
                   onClick={() => void run({ type: "download", id: source.id })}

@@ -55,7 +55,7 @@ export function OverviewPage({
       <div className="flex justify-end">
         <Button
           variant="outline"
-          size="sm"
+          size="default"
           onClick={retry}
           disabled={resource.phase === "loading"}
         >
@@ -173,7 +173,7 @@ function Collection<T>({
       actions: (
         <Button
           variant="outline"
-          size="sm"
+          size="default"
           onClick={retry}
           disabled={resource.phase === "loading"}
         >
@@ -303,7 +303,7 @@ function UserDetail({
       ) : (
         <>
           <div className="flex flex-wrap justify-end gap-2">
-            <Button variant="outline" size="sm" onClick={retry}>
+            <Button variant="outline" size="default" onClick={retry}>
               <RefreshCwIcon data-icon="inline-start" aria-hidden="true" />
               {t("common.refresh")}
             </Button>

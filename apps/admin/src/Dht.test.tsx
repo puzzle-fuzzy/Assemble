@@ -13,6 +13,7 @@ import {
   click,
   render,
   search,
+  settle,
   waitFor,
   waitForText,
 } from "./test-support/dom";
@@ -41,6 +42,25 @@ function normal(path: string) {
     return json({ items: [samples.detail], total: 1, page: 1, pageSize: 10 });
   if (path.includes("/observations/")) return json(samples.detail);
   return json({}, 404);
+}
+
+async function chooseMode(host: HTMLElement, current: string, action: string) {
+  await act(async () => {
+    const trigger = button(host, current);
+    trigger.focus();
+    trigger.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "Enter", bubbles: true }),
+    );
+  });
+  await waitFor(
+    () => Boolean(document.querySelector('[role="menuitem"]')),
+    "采集操作菜单",
+  );
+  const option = [
+    ...document.querySelectorAll<HTMLElement>('[role="menuitem"]'),
+  ].find((item) => item.textContent?.trim() === action);
+  if (!option) throw new Error(`找不到采集操作：${action}`);
+  await click(option);
 }
 beforeEach(async () => {
   requests.length = 0;
@@ -95,7 +115,7 @@ test("uses shared tables, server search, details and English translations", asyn
   await act(async () => {
     await setLanguage("en");
   });
-  expect(host.textContent).toContain("Pause collection");
+  expect(host.textContent).toContain("Collecting");
   expect(host.textContent).not.toContain("statuses.");
 });
 
@@ -108,7 +128,7 @@ test("control writes use CSRF without putting it in a URL", async () => {
     <DhtPage session={session} onAccessFailure={() => {}} />,
   );
   await waitForText(host, "sample.txt");
-  await click(button(host, "暂停采集"));
+  await chooseMode(host, "采集中", "暂停采集");
   const written = requests.find(({ path }) => path.endsWith("/control"));
   expect(written?.init?.method).toBe("POST");
   expect(written?.init?.credentials).toBe("same-origin");
@@ -118,6 +138,79 @@ test("control writes use CSRF without putting it in a URL", async () => {
   expect(JSON.parse(String(written?.init?.body))).toEqual({ mode: "draining" });
   expect(requests.every(({ path }) => !path.includes(session.csrfToken))).toBe(
     true,
+  );
+});
+
+test("only explicit actions refresh the list, runtime and pending metadata", async () => {
+  const originalTimeout = globalThis.setTimeout;
+  // 加速经过的时间，让意外保留的周期请求暴露出来，而不用让测试等待半分钟。
+  globalThis.setTimeout = ((...arguments_: Parameters<typeof setTimeout>) => {
+    arguments_[1] = Math.min(Number(arguments_[1]) || 0, 1);
+    return originalTimeout(...arguments_);
+  }) as typeof setTimeout;
+  handle = (path, init) => {
+    if (path.endsWith("/control")) return json(JSON.parse(String(init?.body)));
+    if (path.includes("/observations/"))
+      return json({ ...samples.detail, status: "fetching" });
+    return normal(path);
+  };
+  const reads = () =>
+    requests.filter(({ init }) => !init?.method || init.method === "GET")
+      .length;
+  async function idle() {
+    for (let step = 0; step < 8; step++) await settle();
+  }
+  try {
+    const host = await render(
+      <DhtPage session={session} onAccessFailure={() => {}} />,
+    );
+    await waitForText(host, "sample.txt");
+    const initial = reads();
+    await idle();
+    expect(reads()).toBe(initial);
+
+    await click(button(host, "sample.txt"));
+    const dialog = document.querySelector('[role="dialog"]') as HTMLElement;
+    await waitForText(dialog, "解析中");
+    const withDetail = reads();
+    await idle();
+    expect(reads()).toBe(withDetail);
+    await click(button(dialog, "刷新"));
+    await waitFor(() => reads() === withDetail + 1, "手动刷新详情");
+    await click(button(dialog, "关闭"));
+
+    await chooseMode(host, "采集中", "暂停采集");
+    await waitForText(host, "正在排空队列");
+    const afterControl = reads();
+    await idle();
+    expect(reads()).toBe(afterControl);
+    await click(button(host, "刷新"));
+    await waitFor(() => reads() === afterControl + 2, "手动刷新列表和状态");
+  } finally {
+    await cleanup();
+    globalThis.setTimeout = originalTimeout;
+  }
+});
+
+test("runtime diagnostics stay behind a named icon and status buttons open details", async () => {
+  const host = await render(
+    <DhtPage session={session} onAccessFailure={() => {}} />,
+  );
+  await waitForText(host, "sample.txt");
+  expect(host.textContent).not.toContain("每 30 秒刷新");
+  expect(host.textContent).not.toContain("全网热度");
+  expect(host.textContent).not.toContain("记录上限");
+  expect(host.querySelector("details")).toBeNull();
+  expect(host.querySelector('[data-slot="badge"]')).toBeNull();
+  await click(button(host, "运行状态"));
+  const runtime = document.querySelector('[role="dialog"]') as HTMLElement;
+  await waitForText(runtime, "记录上限");
+  expect(runtime.textContent).toContain("文件清单存储");
+  await click(button(runtime, "关闭"));
+  await click(button(host, "已验证"));
+  await waitForText(
+    document.querySelector('[role="dialog"]') as HTMLElement,
+    "文件清单",
   );
 });
 

@@ -2,235 +2,176 @@ import type {
   ImageLoader,
   MediaClient,
   MediaQuery,
-  MediaScope,
+  MediaStatus,
 } from "@assemble/media";
-import { Button } from "@assemble/ui/button";
-import {
-  Field,
-  FieldGroup,
-  FieldLabel,
-  FieldLegend,
-  FieldSet,
-} from "@assemble/ui/field";
-import { Input } from "@assemble/ui/input";
-import { Select } from "@assemble/ui/select";
-import { SearchIcon, XIcon } from "lucide-react";
-import { useEffect, useState } from "react";
+import { ToggleGroup, ToggleGroupItem } from "@assemble/ui/toggle-group";
+import { useEffect } from "react";
 import { useSiteTranslation } from "../lib/i18n";
-import { navigate, readQuery, wallPath } from "../lib/navigation";
+import { navigate, type ShelfPages, wallPath } from "../lib/navigation";
 import { useResource } from "../lib/use-resource";
-import {
-  EmptyContentView,
-  LoadingContent,
-  Pagination,
-  RequestError,
-} from "./common";
+import { LoadingContent, Pagination, RequestError } from "./common";
 import { PosterCard } from "./poster";
+
+function useShelf(
+  client: MediaClient,
+  query: MediaQuery,
+  status: MediaStatus,
+  page: number,
+) {
+  const request: MediaQuery = {
+    mediaType: query.mediaType,
+    status,
+    page,
+    pageSize: 12,
+    sort: status === "completed" ? "watched" : "updated",
+  };
+  return useResource(`${client.scope}:${JSON.stringify(request)}`, (signal) =>
+    client.list(request, signal),
+  );
+}
 
 export function LibraryWall({
   client,
   query,
+  pages,
   imageLoader,
 }: {
   client: MediaClient;
   query: MediaQuery;
+  pages: ShelfPages;
   imageLoader: ImageLoader;
 }) {
   const { t } = useSiteTranslation();
-  const { resource, retry } = useResource(
-    `${client.scope}:${JSON.stringify(query)}`,
-    (signal) => client.list(query, signal),
-  );
-  const filtered = Boolean(
-    query.q || query.genre || query.year || query.status || query.mediaType,
-  );
+  const planned = useShelf(client, query, "planned", pages.planned);
+  const watching = useShelf(client, query, "watching", pages.watching);
+  const completed = useShelf(client, query, "completed", pages.completed);
+  const shelves = [
+    { status: "planned", ...planned },
+    { status: "watching", ...watching },
+    { status: "completed", ...completed },
+  ] as const;
   useEffect(() => {
-    if (resource.phase !== "ready") return;
-    const pages = Math.max(
-      1,
-      Math.ceil(resource.value.total / resource.value.pageSize),
-    );
-    if ((query.page ?? 1) > pages)
-      navigate(wallPath(client.scope, { ...query, page: pages }), true);
-  }, [client.scope, query, resource]);
-  return (
-    <section className="flex min-w-0 flex-col gap-7">
-      <header className="flex flex-col gap-2">
-        <h1 className="site-heading">{t(client.scope)}</h1>
-        <p className="text-sm text-muted-foreground">{t("readOnly")}</p>
-      </header>
-      <Filters
-        key={wallPath(client.scope, query)}
-        scope={client.scope}
-        query={query}
-      />
-      {resource.phase === "loading" ? (
-        <LoadingContent wall />
-      ) : resource.phase === "failed" ? (
-        <RequestError status={resource.status} retry={retry} />
-      ) : (
-        <>
-          {resource.value.items.length === 0 ? (
-            <EmptyContentView
-              title={t(filtered ? "noResults" : "noEntries")}
-              description={t(filtered ? "noResultsHelp" : "noEntriesHelp")}
-            >
-              {filtered && (
-                <Button
-                  variant="outline"
-                  onClick={() => navigate(wallPath(client.scope))}
-                >
-                  {t("reset")}
-                </Button>
-              )}
-            </EmptyContentView>
-          ) : (
-            <div className="poster-grid">
-              {resource.value.items.map((entry, index) => (
-                <PosterCard
-                  key={entry.id}
-                  item={entry}
-                  imageLoader={imageLoader}
-                  priority={index < 4}
-                />
-              ))}
-            </div>
-          )}
-          <Pagination
-            page={resource.value.page}
-            total={resource.value.total}
-            pageSize={resource.value.pageSize}
-            onPage={(page) =>
-              navigate(wallPath(client.scope, { ...query, page }))
-            }
-          />
-        </>
-      )}
-    </section>
+    const next = { ...pages };
+    for (const { status, resource } of [
+      { status: "planned", ...planned },
+      { status: "watching", ...watching },
+      { status: "completed", ...completed },
+    ] as const) {
+      if (resource.phase === "ready")
+        next[status] = Math.min(
+          pages[status],
+          Math.max(
+            1,
+            Math.ceil(resource.value.total / resource.value.pageSize),
+          ),
+        );
+    }
+    if (
+      Object.keys(pages).some(
+        (key) => next[key as MediaStatus] !== pages[key as MediaStatus],
+      )
+    )
+      navigate(wallPath(client.scope, query, next), true);
+  }, [client.scope, query, pages, planned, watching, completed]);
+  const empty = shelves.every(
+    ({ resource }) => resource.phase === "ready" && resource.value.total === 0,
   );
-}
-
-function Filters({ scope, query }: { scope: MediaScope; query: MediaQuery }) {
-  const { t } = useSiteTranslation();
-  const [draft, setDraft] = useState({
-    q: query.q ?? "",
-    genre: query.genre ?? "",
-    year: query.year?.toString() ?? "",
-    mediaType: query.mediaType ?? "",
-    status: query.status ?? "",
-    sort: query.sort ?? "updated",
-  });
-  const update = (key: keyof typeof draft, value: string) =>
-    setDraft((current) => ({ ...current, [key]: value }));
+  const failed = shelves.every(({ resource }) => resource.phase === "failed");
+  const returnTo = wallPath(client.scope, query, pages);
   return (
-    <form
-      onSubmit={(event) => {
-        event.preventDefault();
-        const next = readQuery(new URLSearchParams(draft));
-        navigate(wallPath(scope, { ...next, page: 1 }));
-      }}
-    >
-      <FieldSet>
-        <FieldLegend className="sr-only">{t("filters")}</FieldLegend>
-        <FieldGroup className="media-filters">
-          <Field className="media-search">
-            <FieldLabel htmlFor="film-search">{t("searchLabel")}</FieldLabel>
-            <Input
-              id="film-search"
-              type="search"
-              maxLength={200}
-              placeholder={t("searchPlaceholder")}
-              value={draft.q}
-              onChange={(event) => update("q", event.target.value)}
-            />
-          </Field>
-          <Field>
-            <FieldLabel htmlFor="film-type">{t("mediaType")}</FieldLabel>
-            <Select
-              id="film-type"
-              value={draft.mediaType}
-              onChange={(event) => update("mediaType", event.target.value)}
+    <div className="home-shelves">
+      <h1 className="sr-only">{t(client.scope)}</h1>
+      <ToggleGroup
+        type="single"
+        value={query.mediaType ?? "all"}
+        aria-label={t("mediaType")}
+        onValueChange={(value) => {
+          if (value === "all" || value === "movie" || value === "tv")
+            navigate(
+              wallPath(
+                client.scope,
+                value === "all" ? {} : { mediaType: value },
+              ),
+            );
+        }}
+      >
+        <ToggleGroupItem value="all">{t("all")}</ToggleGroupItem>
+        <ToggleGroupItem value="movie">{t("movie")}</ToggleGroupItem>
+        <ToggleGroupItem value="tv">{t("tv")}</ToggleGroupItem>
+      </ToggleGroup>
+      {failed ? (
+        <RequestError
+          status={
+            planned.resource.phase === "failed" ? planned.resource.status : null
+          }
+          retry={() => {
+            planned.retry();
+            watching.retry();
+            completed.retry();
+          }}
+        />
+      ) : empty ? (
+        <p className="site-empty" role="status">
+          {t("noEntries")}
+        </p>
+      ) : (
+        shelves.map(({ status, resource, retry }) => {
+          if (resource.phase === "ready" && resource.value.total === 0)
+            return null;
+          const title = t(status === "completed" ? "recentlyWatched" : status);
+          return (
+            <section
+              key={status}
+              className="home-shelf"
+              aria-labelledby={`shelf-${status}`}
+              aria-busy={resource.phase === "loading"}
             >
-              <option value="">{t("all")}</option>
-              <option value="movie">{t("movie")}</option>
-              <option value="tv">{t("tv")}</option>
-            </Select>
-          </Field>
-          <Field>
-            <FieldLabel htmlFor="film-status">{t("status")}</FieldLabel>
-            <Select
-              id="film-status"
-              value={draft.status}
-              onChange={(event) => update("status", event.target.value)}
-            >
-              <option value="">{t("all")}</option>
-              <option value="planned">{t("planned")}</option>
-              <option value="watching">{t("watching")}</option>
-              <option value="completed">{t("completed")}</option>
-            </Select>
-          </Field>
-          <Field>
-            <FieldLabel htmlFor="film-year">{t("year")}</FieldLabel>
-            <Input
-              id="film-year"
-              type="number"
-              min={1800}
-              max={9999}
-              step={1}
-              placeholder={t("yearPlaceholder")}
-              value={draft.year}
-              onChange={(event) => update("year", event.target.value)}
-            />
-          </Field>
-          <Field>
-            <FieldLabel htmlFor="film-genre">{t("genre")}</FieldLabel>
-            <Input
-              id="film-genre"
-              maxLength={80}
-              placeholder={t("genrePlaceholder")}
-              value={draft.genre}
-              onChange={(event) => update("genre", event.target.value)}
-            />
-          </Field>
-          <Field>
-            <FieldLabel htmlFor="film-sort">{t("sort")}</FieldLabel>
-            <Select
-              id="film-sort"
-              value={draft.sort}
-              onChange={(event) => update("sort", event.target.value)}
-            >
-              <option value="updated">{t("updated")}</option>
-              <option value="title">{t("titleSort")}</option>
-              <option value="year">{t("yearSort")}</option>
-              <option value="watched">{t("watched")}</option>
-            </Select>
-          </Field>
-          <div className="media-filter-actions">
-            <Button type="submit">
-              <SearchIcon data-icon="inline-start" />
-              {t("search")}
-            </Button>
-            <Button
-              type="button"
-              variant="ghost"
-              onClick={() => {
-                setDraft({
-                  q: "",
-                  genre: "",
-                  year: "",
-                  mediaType: "",
-                  status: "",
-                  sort: "updated",
-                });
-                navigate(wallPath(scope));
-              }}
-            >
-              <XIcon data-icon="inline-start" />
-              {t("reset")}
-            </Button>
-          </div>
-        </FieldGroup>
-      </FieldSet>
-    </form>
+              <div className="shelf-heading">
+                <h2 id={`shelf-${status}`}>{title}</h2>
+                {resource.phase === "ready" && (
+                  <span className="shelf-count">
+                    {t("shelfCount", { count: resource.value.total })}
+                  </span>
+                )}
+              </div>
+              {resource.phase === "loading" ? (
+                <LoadingContent wall />
+              ) : resource.phase === "failed" ? (
+                <RequestError status={resource.status} retry={retry} />
+              ) : (
+                <>
+                  <div className="poster-grid">
+                    {resource.value.items.map((entry, index) => (
+                      <PosterCard
+                        key={entry.id}
+                        item={entry}
+                        imageLoader={imageLoader}
+                        priority={status === "planned" && index < 4}
+                        returnTo={returnTo}
+                      />
+                    ))}
+                  </div>
+                  <Pagination
+                    compact
+                    label={t("shelfPagination", { title })}
+                    page={resource.value.page}
+                    total={resource.value.total}
+                    pageSize={resource.value.pageSize}
+                    onPage={(page) =>
+                      navigate(
+                        wallPath(client.scope, query, {
+                          ...pages,
+                          [status]: page,
+                        }),
+                      )
+                    }
+                  />
+                </>
+              )}
+            </section>
+          );
+        })
+      )}
+    </div>
   );
 }

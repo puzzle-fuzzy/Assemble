@@ -94,7 +94,7 @@ export function DesktopSidebar({
   return (
     <Sidebar
       collapsible="none"
-      className="sticky top-0 hidden h-svh md:flex"
+      className="hidden min-h-0 shrink-0 md:flex"
       aria-label={uiText("sidebar")}
       role="complementary"
     >
@@ -180,7 +180,7 @@ export function DesktopMobileMenu({
       <DropdownMenuTrigger asChild>
         <Button
           variant="ghost"
-          size="icon-sm"
+          size="icon"
           className="md:hidden"
           aria-label={uiText("openNavigationMenu")}
         >

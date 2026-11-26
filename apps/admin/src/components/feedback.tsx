@@ -8,21 +8,14 @@ import {
   EmptyMedia,
   EmptyTitle,
 } from "@assemble/ui/empty";
-import { Skeleton } from "@assemble/ui/skeleton";
+import { LoadingState } from "@assemble/ui/loading-state";
 import { AlertCircleIcon, LogInIcon, ShieldXIcon } from "lucide-react";
 import type { AccessFailure, RequestFailure } from "../lib/api";
 import { useAdminTranslation } from "../lib/i18n";
 
 export function LoadingContent() {
   const { t } = useAdminTranslation();
-  return (
-    <div aria-busy="true" className="flex flex-col gap-4">
-      <span className="sr-only">{t("common.loading")}</span>
-      <Skeleton className="h-8 w-40" />
-      <Skeleton className="h-20 w-full" />
-      <Skeleton className="h-20 w-full" />
-    </div>
-  );
+  return <LoadingState className="min-h-48" label={t("common.loading")} />;
 }
 
 export function RequestError({
@@ -51,7 +44,7 @@ export function RequestError({
               : "error.unavailableDescription",
           )}
         </p>
-        <Button variant="outline" size="sm" onClick={retry}>
+        <Button variant="outline" size="default" onClick={retry}>
           {t("common.retry")}
         </Button>
       </AlertDescription>

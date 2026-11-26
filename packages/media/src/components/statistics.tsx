@@ -85,7 +85,7 @@ function StatisticsContent({
         <div className="flex justify-end">
           <Button
             variant="outline"
-            size="sm"
+            size="default"
             disabled={task.pending}
             onClick={refresh}
           >
@@ -101,7 +101,7 @@ function StatisticsContent({
           <CardContent>
             <Button
               variant="outline"
-              size="sm"
+              size="default"
               disabled={task.pending}
               onClick={refresh}
             >

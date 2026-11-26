@@ -144,7 +144,6 @@
     "diskAvailable": "Server disk available",
     "contentUsage": "File content / budget (deduplicated)",
     "database": "Database (including images and logs)",
-    "capacityHint": "Available file storage is the smaller of the remaining budget and free disk space. Each account still has its own drive quota.",
     "unavailable": "Unavailable",
     "filesRegion": "Cloud files from all accounts",
     "name": "File name",

@@ -133,7 +133,7 @@ export function DataTableColumnFilter({
         <Button
           type="button"
           variant="ghost"
-          size="sm"
+          size="default"
           className="-ms-2"
           aria-label={`${label}: ${selected?.label ?? label}`}
         >
@@ -218,7 +218,7 @@ export function DataTable<T extends { id: string }>({
             key={action.id ?? action.label}
             type="button"
             variant="ghost"
-            size="sm"
+            size="default"
             disabled={action.disabled}
             aria-label={t("table.actionFor", {
               action: action.label,
@@ -357,7 +357,8 @@ export function DataTable<T extends { id: string }>({
   const pages = Math.max(1, table.getPageCount());
   return (
     <div
-      className="@container/data-table flex min-w-0 flex-col gap-4"
+      // 为绝对定位的 sr-only 文案提供就近定位范围，避免其静态位置撑高外层页面。
+      className="@container/data-table relative flex min-w-0 flex-col gap-4"
       data-table-variant={variant}
     >
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -367,7 +368,7 @@ export function DataTable<T extends { id: string }>({
         <div className="ms-auto flex max-w-full flex-wrap items-center gap-2">
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <Button type="button" variant="outline" size="sm">
+              <Button type="button" variant="outline" size="default">
                 <Columns3Icon data-icon="inline-start" aria-hidden="true" />
                 {t(management ? "table.showColumns" : "table.columns")}
                 <ChevronDownIcon data-icon="inline-end" aria-hidden="true" />
@@ -499,7 +500,7 @@ export function DataTable<T extends { id: string }>({
                         <Button
                           type="button"
                           variant="ghost"
-                          size="icon-sm"
+                          size="icon"
                           className="touch-none cursor-grab select-none active:cursor-grabbing"
                           data-table-drag-handle=""
                           aria-label={t("table.reorderRow", {
@@ -608,7 +609,7 @@ export function DataTable<T extends { id: string }>({
                 >
                   <SelectTrigger
                     id={pageSizeId}
-                    size="sm"
+                    size="default"
                     className="w-20"
                     aria-label={t("table.rowsPerPage")}
                     disabled={pagination?.pending}
@@ -636,7 +637,7 @@ export function DataTable<T extends { id: string }>({
                 <Button
                   type="button"
                   variant="outline"
-                  size={management ? "icon-sm" : "icon"}
+                  size="icon"
                   className="hidden @xl/data-table:flex"
                   disabled={pagination?.pending || !table.getCanPreviousPage()}
                   onClick={() => table.firstPage()}
@@ -647,7 +648,7 @@ export function DataTable<T extends { id: string }>({
                 <Button
                   type="button"
                   variant="outline"
-                  size={management ? "icon-sm" : "icon"}
+                  size="icon"
                   disabled={pagination?.pending || !table.getCanPreviousPage()}
                   onClick={() => table.previousPage()}
                 >
@@ -657,7 +658,7 @@ export function DataTable<T extends { id: string }>({
                 <Button
                   type="button"
                   variant="outline"
-                  size={management ? "icon-sm" : "icon"}
+                  size="icon"
                   disabled={pagination?.pending || !table.getCanNextPage()}
                   onClick={() => table.nextPage()}
                 >
@@ -667,7 +668,7 @@ export function DataTable<T extends { id: string }>({
                 <Button
                   type="button"
                   variant="outline"
-                  size={management ? "icon-sm" : "icon"}
+                  size="icon"
                   className="hidden @xl/data-table:flex"
                   disabled={pagination?.pending || !table.getCanNextPage()}
                   onClick={() => table.setPageIndex(pages - 1)}

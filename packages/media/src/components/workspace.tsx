@@ -203,7 +203,7 @@ function WorkspaceContent({
         <>
           <Button
             variant="link"
-            className="h-auto justify-start whitespace-normal p-0 text-left wrap-anywhere"
+            className="h-auto min-h-8 justify-start whitespace-normal p-0 text-left wrap-anywhere"
             aria-label={t("common.details", { title: entry.title })}
             onClick={() => openEntry(entry.id)}
           >
@@ -325,7 +325,7 @@ function WorkspaceContent({
             <div className="flex flex-wrap justify-between gap-2">
               <Button
                 variant="ghost"
-                size="sm"
+                size="default"
                 onClick={() => setSelected(null)}
               >
                 <ArrowLeftIcon data-icon="inline-start" />
@@ -334,7 +334,7 @@ function WorkspaceContent({
               <div className="flex max-w-full flex-wrap gap-2">
                 <Button
                   variant="outline"
-                  size="sm"
+                  size="default"
                   disabled={listTask.pending}
                   onClick={() => {
                     detailTask.cancel();
@@ -349,7 +349,7 @@ function WorkspaceContent({
                   <>
                     <Button
                       variant="outline"
-                      size="sm"
+                      size="default"
                       onClick={() => setEditor(selected)}
                     >
                       <PencilIcon data-icon="inline-start" />
@@ -357,7 +357,7 @@ function WorkspaceContent({
                     </Button>
                     <Button
                       variant="outline"
-                      size="sm"
+                      size="default"
                       onClick={() => setGallery(true)}
                     >
                       <ImageIcon data-icon="inline-start" />
@@ -365,7 +365,7 @@ function WorkspaceContent({
                     </Button>
                     <Button
                       variant="destructive"
-                      size="sm"
+                      size="default"
                       onClick={() => setRemoving(true)}
                     >
                       <TrashIcon data-icon="inline-start" />
@@ -451,9 +451,9 @@ function WorkspaceContent({
                           onChange={(event) => setQ(event.target.value)}
                         />
                         {(q || query.q || query.mediaType || query.status) && (
-                          <InputGroupAddon align="inline-end">
+                          <InputGroupAddon align="inline-end" className="py-0">
                             <InputGroupButton
-                              size="icon-xs"
+                              size="icon"
                               aria-label={t("list.reset")}
                               title={t("list.reset")}
                               onClick={() => {
@@ -474,7 +474,7 @@ function WorkspaceContent({
                       </InputGroup>
                       <Button
                         type="submit"
-                        size="sm"
+                        size="default"
                         variant={
                           presentation === "management" ? "outline" : "default"
                         }
@@ -498,7 +498,7 @@ function WorkspaceContent({
               {toolbarActions}
               <Button
                 variant="outline"
-                size="sm"
+                size="default"
                 disabled={listTask.pending}
                 onClick={() => {
                   detailTask.cancel();
@@ -517,7 +517,7 @@ function WorkspaceContent({
                     variant={
                       presentation === "management" ? "default" : "outline"
                     }
-                    size="sm"
+                    size="default"
                     onClick={() => setEditor("new")}
                   >
                     <PlusIcon data-icon="inline-start" />
@@ -525,7 +525,7 @@ function WorkspaceContent({
                   </Button>
                   <Button
                     variant="outline"
-                    size="sm"
+                    size="default"
                     onClick={() => setImporting(true)}
                   >
                     <SearchIcon data-icon="inline-start" />
@@ -615,21 +615,21 @@ function WorkspaceContent({
                     <div className="flex flex-wrap gap-2">
                       <Button
                         variant="outline"
-                        size="sm"
+                        size="default"
                         onClick={() => setEditor(selected)}
                       >
                         {t("common.edit")}
                       </Button>
                       <Button
                         variant="outline"
-                        size="sm"
+                        size="default"
                         onClick={() => setGallery(true)}
                       >
                         {t("entry.gallery")}
                       </Button>
                       <Button
                         variant="destructive"
-                        size="sm"
+                        size="default"
                         onClick={() => setRemoving(true)}
                       >
                         {t("common.remove")}

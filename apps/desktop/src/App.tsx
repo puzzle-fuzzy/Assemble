@@ -11,7 +11,7 @@ import {
   BreadcrumbPage,
   BreadcrumbSeparator,
 } from "@assemble/ui/breadcrumb";
-import { Skeleton } from "@assemble/ui/skeleton";
+import { LoadingState } from "@assemble/ui/loading-state";
 import { ArrowDownToLine, ArrowUpToLine, UserRound } from "lucide-react";
 import { Fragment, lazy, Suspense, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
@@ -227,7 +227,7 @@ export function App({
         closeButton
         containerAriaLabel={uiText("actionNotifications")}
       />
-      <SidebarProvider className="items-start">
+      <SidebarProvider className="h-dvh min-h-0 items-stretch">
         <DesktopSidebar
           section={section}
           onNavigate={navigate}
@@ -236,7 +236,7 @@ export function App({
           onSignOut={() => void signOut()}
           onNavigateFocus={() => contentHeading.current?.focus()}
         />
-        <main className="flex h-svh min-w-0 flex-1 flex-col overflow-hidden">
+        <main className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
           <header className="flex h-12 shrink-0 items-center justify-between gap-2">
             <div className="flex min-w-0 items-center gap-2 px-4">
               <DesktopMobileMenu
@@ -301,7 +301,7 @@ export function App({
               />
             </div>
           </header>
-          <ScrollArea className="min-h-0 flex-1">
+          <ScrollArea className="min-h-0 min-w-0 flex-1 [&>[data-slot=scroll-area-viewport]]:overscroll-y-contain">
             {/* Card 的外描边需要留在滚动区内，避免顶部贴边时被视口裁掉。 */}
             <div className="@container mx-auto flex w-full min-w-0 flex-col gap-4 p-4 pt-1">
               {loadError ? (
@@ -427,10 +427,9 @@ export function App({
                 <section id="view-memos" aria-label={memoText("title")}>
                   <Suspense
                     fallback={
-                      <Skeleton
+                      <LoadingState
                         className="h-64 w-full"
-                        role="status"
-                        aria-label={memoText("loading")}
+                        label={memoText("loading")}
                       />
                     }
                   >
@@ -447,10 +446,9 @@ export function App({
                 <section id="view-media" aria-label={uiText("moviesAndTV")}>
                   <Suspense
                     fallback={
-                      <Skeleton
+                      <LoadingState
                         className="h-64 w-full"
-                        role="status"
-                        aria-label={uiText("loadingMediaLibrary")}
+                        label={uiText("loadingMediaLibrary")}
                       />
                     }
                   >
@@ -598,13 +596,14 @@ function NoticeLine({
       }
     >
       <p>{noticeText(notice)}</p>
-      <button
+      <Button
         type="button"
-        className="shrink-0 text-sm text-muted-foreground underline-offset-2 hover:underline"
+        variant="ghost"
+        className="shrink-0"
         onClick={onDismiss}
       >
         {uiText("dismiss")}
-      </button>
+      </Button>
     </div>
   );
 }
@@ -885,7 +884,7 @@ function DeviceRow({
             {confirming ? (
               <>
                 <Button
-                  size="sm"
+                  size="default"
                   variant="destructive"
                   disabled={pending}
                   onClick={() =>
@@ -895,7 +894,7 @@ function DeviceRow({
                   {uiText("confirmRemoval")}
                 </Button>
                 <Button
-                  size="sm"
+                  size="default"
                   variant="outline"
                   disabled={pending}
                   onClick={() => setConfirming(false)}
@@ -905,11 +904,11 @@ function DeviceRow({
               </>
             ) : editing ? (
               <>
-                <Button size="sm" disabled={pending} onClick={save}>
+                <Button size="default" disabled={pending} onClick={save}>
                   {uiText("save")}
                 </Button>
                 <Button
-                  size="sm"
+                  size="default"
                   variant="outline"
                   disabled={pending}
                   onClick={() => {
@@ -923,7 +922,7 @@ function DeviceRow({
             ) : (
               <>
                 <Button
-                  size="sm"
+                  size="default"
                   variant="outline"
                   onClick={() => {
                     setDraft(device.name);
@@ -933,7 +932,7 @@ function DeviceRow({
                   {uiText("rename")}
                 </Button>
                 <Button
-                  size="sm"
+                  size="default"
                   variant="outline"
                   onClick={() => setConfirming(true)}
                 >
@@ -999,7 +998,7 @@ function TransfersCard({
         />
         <CardAction className="self-center">
           <Button
-            size="sm"
+            size="default"
             variant="outline"
             disabled={pending}
             onClick={() => void startSend()}
@@ -1129,7 +1128,7 @@ function TransferRow({
           {savedHere ? (
             // 只在文件夹里选中它，不打开：收到的东西要不要打开由用户自己决定。
             <Button
-              size="sm"
+              size="default"
               variant="outline"
               disabled={pending}
               onClick={() => void act(() => source.revealReceived(transfer.id))}
@@ -1139,7 +1138,7 @@ function TransferRow({
           ) : null}
           {transfer.retryable ? (
             <Button
-              size="sm"
+              size="default"
               variant="outline"
               disabled={pending}
               onClick={() => void act(() => source.retryTransfer(transfer.id))}
@@ -1149,7 +1148,7 @@ function TransferRow({
           ) : null}
           {CANCELLABLE.has(transfer.phase) ? (
             <Button
-              size="sm"
+              size="default"
               variant="outline"
               disabled={pending}
               onClick={() => void act(() => source.cancelTransfer(transfer.id))}
@@ -1299,7 +1298,7 @@ function DriveCard({
           />
           <Button
             className="shrink-0"
-            size="sm"
+            size="default"
             variant="outline"
             disabled={pending}
             onClick={() => void upload()}
@@ -1391,7 +1390,7 @@ function DriveRow({
         {confirming ? (
           <>
             <Button
-              size="sm"
+              size="default"
               variant="destructive"
               disabled={pending}
               onClick={() => void act(() => source.driveDelete(file.id))}
@@ -1399,7 +1398,7 @@ function DriveRow({
               {uiText("confirmDeletion")}
             </Button>
             <Button
-              size="sm"
+              size="default"
               variant="outline"
               disabled={pending}
               onClick={onCancel}
@@ -1410,7 +1409,7 @@ function DriveRow({
         ) : (
           <>
             <Button
-              size="sm"
+              size="default"
               variant="outline"
               disabled={pending}
               onClick={() => void act(() => source.driveDownload(file.id))}
@@ -1418,7 +1417,7 @@ function DriveRow({
               {uiText("download")}
             </Button>
             <Button
-              size="sm"
+              size="default"
               variant="outline"
               disabled={pending}
               onClick={onConfirm}
@@ -1511,7 +1510,7 @@ function LaunchCard({ source, snapshot, onError }: CardProps) {
           </div>
           <div className="flex max-w-full shrink-0 flex-wrap gap-2">
             <Button
-              size="sm"
+              size="default"
               variant="outline"
               disabled={pending}
               onClick={() => void locate(() => source.chooseReceiveFolder())}
@@ -1520,7 +1519,7 @@ function LaunchCard({ source, snapshot, onError }: CardProps) {
             </Button>
             {customFolder !== null ? (
               <Button
-                size="sm"
+                size="default"
                 variant="outline"
                 disabled={pending}
                 onClick={() => void locate(() => source.resetReceiveFolder())}

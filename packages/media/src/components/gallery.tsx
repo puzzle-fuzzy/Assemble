@@ -131,7 +131,7 @@ export function MediaGalleryEditor({
                 />
                 <Button
                   variant="outline"
-                  size="sm"
+                  size="default"
                   disabled={
                     task.pending || image.assetId === current.poster?.assetId
                   }

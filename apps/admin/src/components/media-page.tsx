@@ -19,7 +19,7 @@ import { useAdminTranslation } from "../lib/i18n";
 function PublicPageLink({ href, label }: { href: string; label: string }) {
   const { t } = useAdminTranslation();
   return (
-    <Button asChild variant="outline" size="sm">
+    <Button asChild variant="outline" size="default">
       <a
         href={href}
         target="_blank"

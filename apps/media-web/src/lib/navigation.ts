@@ -3,6 +3,7 @@ import type {
   MediaPersonIdentity,
   MediaQuery,
   MediaScope,
+  MediaStatus,
   MediaType,
 } from "@assemble/media";
 import { useEffect, useState } from "react";
@@ -10,8 +11,10 @@ import { useEffect, useState } from "react";
 export const loginPath = "/web/login?next=/movies/";
 const navigationEvent = "assemble:media-navigation";
 
+export type ShelfPages = Record<MediaStatus, number>;
+
 export type SiteRoute =
-  | { kind: "wall"; scope: MediaScope; query: MediaQuery }
+  | { kind: "wall"; scope: MediaScope; query: MediaQuery; pages: ShelfPages }
   | { kind: "entry"; scope: MediaScope; id: string }
   | { kind: "catalog"; identity: MediaIdentity }
   | { kind: "actor"; identity: MediaPersonIdentity; mediaType: MediaType }
@@ -27,30 +30,11 @@ function positive(value: string | null) {
 }
 
 export function readQuery(search: URLSearchParams): MediaQuery {
-  const year = Number(search.get("year"));
   const mediaType = search.get("mediaType");
-  const status = search.get("status");
-  const sort = search.get("sort");
   return {
     page: positive(search.get("page")),
-    pageSize: 24,
-    ...(search.get("q")?.trim()
-      ? { q: search.get("q")?.trim().slice(0, 200) }
-      : {}),
-    ...(search.get("genre")?.trim()
-      ? { genre: search.get("genre")?.trim().slice(0, 80) }
-      : {}),
+    pageSize: 12,
     ...(mediaType === "movie" || mediaType === "tv" ? { mediaType } : {}),
-    ...(status === "planned" || status === "watching" || status === "completed"
-      ? { status }
-      : {}),
-    ...(Number.isSafeInteger(year) && year >= 1800 && year <= 9999
-      ? { year }
-      : {}),
-    sort:
-      sort === "title" || sort === "year" || sort === "watched"
-        ? sort
-        : "updated",
   };
 }
 
@@ -81,6 +65,13 @@ export function readRoute(location: string): SiteRoute {
       kind: "wall",
       scope: parts[0] === "private" ? "private" : "shared",
       query: readQuery(url.searchParams),
+      pages: {
+        planned: positive(
+          url.searchParams.get("plannedPage") ?? url.searchParams.get("page"),
+        ),
+        watching: positive(url.searchParams.get("watchingPage")),
+        completed: positive(url.searchParams.get("completedPage")),
+      },
     };
   }
   if (
@@ -127,19 +118,32 @@ export function readRoute(location: string): SiteRoute {
   return { kind: "missing" };
 }
 
-export function wallPath(scope: MediaScope, query: MediaQuery = {}) {
+export function wallPath(
+  scope: MediaScope,
+  query: MediaQuery = {},
+  pages?: ShelfPages,
+) {
   const parameters = new URLSearchParams();
-  for (const [key, value] of Object.entries(query)) {
-    if (
-      value !== undefined &&
-      value !== "" &&
-      key !== "pageSize" &&
-      !(key === "page" && value === 1)
-    )
-      parameters.set(key, String(value));
+  if (query.mediaType) parameters.set("mediaType", query.mediaType);
+  if (pages) {
+    for (const [status, page] of Object.entries(pages)) {
+      if (page > 1) parameters.set(`${status}Page`, String(page));
+    }
+  } else if (query.page && query.page > 1) {
+    parameters.set("plannedPage", String(query.page));
   }
   const search = parameters.toString();
   return `/movies/${scope === "private" ? "private" : ""}${search ? `?${search}` : ""}`;
+}
+
+export function readerBackPath(scope: MediaScope) {
+  const from = new URLSearchParams(window.location.search).get("from");
+  if (from?.startsWith("/movies/")) {
+    const route = readRoute(from);
+    if (route.kind === "wall" && route.scope === scope)
+      return wallPath(scope, route.query, route.pages);
+  }
+  return wallPath(scope);
 }
 export const entryPath = (scope: MediaScope, id: string) =>
   `/movies/entries/${scope}/${encodeURIComponent(id)}`;

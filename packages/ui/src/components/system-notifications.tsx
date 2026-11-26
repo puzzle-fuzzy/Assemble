@@ -111,7 +111,7 @@ export function SystemNotificationCenter({
       <DialogTrigger asChild>
         <Button
           variant="ghost"
-          size="icon-sm"
+          size="icon"
           className="relative"
           aria-label={t(unread.length ? "unreadLabel" : "title")}
         >
@@ -141,7 +141,7 @@ export function SystemNotificationCenter({
           {unread.length > 0 && (
             <Button
               variant="ghost"
-              size="sm"
+              size="default"
               disabled={pending}
               onClick={() => void onRead(selection(unread))}
             >
@@ -223,7 +223,7 @@ export function SystemNotificationCenter({
                       {(!canNavigate || canNavigate(item)) && (
                         <Button
                           variant="ghost"
-                          size="sm"
+                          size="default"
                           onClick={() => {
                             if (!item.readAt) void onRead(selection([item]));
                             navigation.current = true;
@@ -237,7 +237,7 @@ export function SystemNotificationCenter({
                       {!item.readAt && (
                         <Button
                           variant="ghost"
-                          size="sm"
+                          size="default"
                           disabled={pending}
                           onClick={() => void onRead(selection([item]))}
                         >

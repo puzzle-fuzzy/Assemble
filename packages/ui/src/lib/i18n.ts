@@ -3,6 +3,7 @@ import { registerTranslations, useTranslation } from "@assemble/display";
 registerTranslations("ui", {
   "zh-CN": {
     preferences: "语言与外观",
+    loading: "正在加载",
     breadcrumb: "当前位置",
     more: "更多",
     language: "语言",
@@ -45,6 +46,7 @@ registerTranslations("ui", {
   },
   en: {
     preferences: "Language and appearance",
+    loading: "Loading",
     breadcrumb: "Breadcrumb",
     more: "More",
     language: "Language",

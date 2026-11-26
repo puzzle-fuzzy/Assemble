@@ -5,14 +5,7 @@ import { act } from "react";
 import { App } from "./App";
 import { mediaSiteResources } from "./lib/i18n";
 import { navigate, readRoute, wallPath } from "./lib/navigation";
-import {
-  button,
-  change,
-  cleanup,
-  click,
-  render,
-  settle,
-} from "./test-support/dom";
+import { button, cleanup, click, render, settle } from "./test-support/dom";
 
 const entry: MediaEntry = {
   id: "film-1",
@@ -63,7 +56,7 @@ function list(items = [entry], page = 1, total = items.length) {
     items,
     total,
     page,
-    pageSize: 24,
+    pageSize: 12,
     counts: { all: total, planned: 0, watching: total, completed: 0 },
   };
 }
@@ -170,13 +163,22 @@ afterEach(async () => {
 });
 
 describe("影视展示端", () => {
-  test("匿名浏览真实共享接口，三种状态均可筛选且无写入操作", async () => {
+  test("匿名首页只有类型切换和三种状态海报分区，没有header和管理筛选", async () => {
     const host = await render(<App />);
     expect(host.textContent).toContain(entry.title);
-    const options = [
-      ...host.querySelectorAll<HTMLOptionElement>("#film-status option"),
-    ].map((item) => item.value);
-    expect(options).toEqual(["", "planned", "watching", "completed"]);
+    expect(host.querySelector("header")).toBeNull();
+    expect(host.querySelector("form, input, select")).toBeNull();
+    expect(host.querySelectorAll(".home-shelf")).toHaveLength(3);
+    expect(
+      host.querySelectorAll(".poster-card [data-slot=badge]"),
+    ).toHaveLength(0);
+    expect(host.textContent).not.toContain("在这里浏览");
+    const statuses = requests
+      .filter(({ path }) => path.startsWith("/v1/media/shared/entries?"))
+      .map(({ path }) =>
+        new URL(path, "http://localhost").searchParams.get("status"),
+      );
+    expect(statuses).toEqual(["planned", "watching", "completed"]);
     expect(
       host.querySelector('a[href="/web/login?next=/movies/"]'),
     ).not.toBeNull();
@@ -190,47 +192,55 @@ describe("影视展示端", () => {
     expect(requests.some(({ path }) => path.includes("private"))).toBe(false);
   });
 
-  test("搜索、类型、状态、年份、题材和排序共同传给真实接口，筛选重置分页", async () => {
-    window.history.replaceState(null, "", "/movies/?page=2");
+  test("类型一次切换三个分区，各自服务端分页且详情返回保留位置", async () => {
+    window.history.replaceState(
+      null,
+      "",
+      "/movies/?plannedPage=2&watchingPage=3&completedPage=2",
+    );
     handle = (path) =>
       path.startsWith("/v1/media/shared/entries?")
         ? json(
             list(
               [entry],
-              new URL(path, "http://localhost").searchParams.get("page") === "2"
-                ? 2
-                : 1,
+              Number(
+                new URL(path, "http://localhost").searchParams.get("page") ?? 1,
+              ),
               48,
             ),
           )
         : response(path);
     const host = await render(<App />);
-    await change(host, "film-search", "星际");
-    await change(host, "film-type", "tv");
-    await change(host, "film-status", "watching");
-    await change(host, "film-year", "2026");
-    await change(host, "film-genre", "科幻");
-    await change(host, "film-sort", "year");
-    await click(button(host, "搜索"));
-    const parameters = new URL(requests.at(-1)?.path ?? "", "http://localhost")
-      .searchParams;
-    expect(Object.fromEntries(parameters)).toEqual({
-      page: "1",
-      pageSize: "24",
-      q: "星际",
-      genre: "科幻",
-      mediaType: "tv",
-      status: "watching",
-      year: "2026",
-      sort: "year",
-    });
-    await click(button(host, "下一页"));
-    expect(window.location.search).toContain("page=2");
-    await click(button(host, "清除筛选"));
-    expect(window.location.search).toBe("");
-    expect(host.querySelector<HTMLInputElement>("#film-search")?.value).toBe(
-      "",
+    await click(button(host, "剧集"));
+    expect(window.location.search).toBe("?mediaType=tv");
+    for (const { path } of requests.slice(-3)) {
+      const params = new URL(path, "http://localhost").searchParams;
+      expect(params.get("mediaType")).toBe("tv");
+      expect(params.get("page")).toBe("1");
+      expect(params.get("pageSize")).toBe("12");
+      expect(params.get("sort")).toBe(
+        params.get("status") === "completed" ? "watched" : "updated",
+      );
+      expect(params.has("q") || params.has("genre") || params.has("year")).toBe(
+        false,
+      );
+    }
+    const planned = host.querySelector<HTMLElement>(
+      '[aria-labelledby="shelf-planned"]',
     );
+    if (!planned) throw new Error("SHELF_MISSING");
+    await click(button(planned, "下一页"));
+    expect(window.location.search).toContain("plannedPage=2");
+    expect(window.location.search).not.toContain("watchingPage");
+    const link = planned.querySelector<HTMLAnchorElement>("h3 a");
+    if (!link) throw new Error("FILM_LINK_MISSING");
+    await click(link);
+    const back = host.querySelector<HTMLAnchorElement>(
+      'a[href="/movies/?mediaType=tv&plannedPage=2"]',
+    );
+    if (!back) throw new Error("BACK_LINK_MISSING");
+    await click(back);
+    expect(window.location.search).toBe("?mediaType=tv&plannedPage=2");
   });
 
   test("匿名访问私人地址只显示登录入口，不发私人请求", async () => {
@@ -265,13 +275,12 @@ describe("影视展示端", () => {
     expect(host.textContent).not.toContain("账户甲的私人作品");
   });
 
-  test("同账户重新聚焦安全隐藏并恢复原视图、搜索草稿和控件焦点", async () => {
+  test("同账户重新聚焦安全隐藏并恢复类型选择、原视图和控件焦点", async () => {
     session = { account };
     const host = await render(<App />);
-    await change(host, "film-search", "未提交的搜索");
-    const input = host.querySelector<HTMLInputElement>("#film-search");
-    if (!input) throw new Error("SEARCH_MISSING");
-    input.focus();
+    await click(button(host, "电影"));
+    const input = button(host, "电影");
+    await act(async () => input.focus());
     let finish: ((value: Response) => void) | undefined;
     handle = (path) =>
       path === "/v1/media/session"
@@ -292,8 +301,8 @@ describe("影视展示端", () => {
     expect(
       host.querySelector<HTMLElement>("[data-session-content]")?.hidden,
     ).toBe(false);
-    expect(host.querySelector("#film-search")).toBe(input);
-    expect(input.value).toBe("未提交的搜索");
+    expect(button(host, "电影")).toBe(input);
+    expect(input.getAttribute("data-state")).toBe("on");
     expect(document.activeElement).toBe(input);
     expect(
       requests.filter(({ path }) =>
@@ -323,7 +332,7 @@ describe("影视展示端", () => {
       requests.filter(({ path }) =>
         path.startsWith("/v1/media/private/entries"),
       ),
-    ).toHaveLength(2);
+    ).toHaveLength(6);
   });
 
   test("匿名详情显示磁力登录提示，演员作品和来源详情通过真实导航读取", async () => {
@@ -332,7 +341,12 @@ describe("影视展示端", () => {
     expect(host.textContent).toContain(entry.title);
     expect(host.textContent).toContain("登录后查看磁力链接");
     expect(host.textContent).not.toContain("magnet:?");
-    expect(host.textContent).toContain("暂无图集");
+    expect(host.textContent).not.toContain("暂无图集");
+    expect(host.textContent).not.toContain("还没有观后感");
+    expect(host.querySelectorAll("h1")).toHaveLength(1);
+    expect(
+      host.querySelector('a[href="https://www.themoviedb.org/movie/99"]'),
+    ).not.toBeNull();
     await click(button(host, "演员甲"));
     expect(host.textContent).toContain("来源中的作品");
     expect(
@@ -345,7 +359,9 @@ describe("影视展示端", () => {
     );
     expect(link).not.toBeNull();
     if (link) await click(link);
-    expect(host.textContent).toContain("以下为来源资料，不包含私人片库状态。");
+    expect(host.textContent).not.toContain(
+      "以下为来源资料，不包含私人片库状态。",
+    );
     expect(host.textContent).toContain("来源简介");
   });
 
@@ -534,9 +550,10 @@ describe("影视展示端", () => {
         : response(path);
     const host = await render(<App />);
     expect(host.textContent).toContain("Shared library");
-    expect(host.textContent).toContain("Want to watch");
-    expect(host.textContent).toContain("Watching");
-    expect(host.textContent).toContain("Watched");
+    expect(host.textContent).toContain("Movies");
+    expect(host.textContent).toContain("TV shows");
+    expect(host.querySelectorAll(".home-shelf")).toHaveLength(0);
+    expect(host.querySelectorAll(".site-empty")).toHaveLength(1);
     expect(host.textContent).toContain("No films in this library yet");
     expect(button(host, "Language and appearance")).toBeDefined();
     expect(Object.keys(mediaSiteResources.en).sort()).toEqual(
@@ -547,12 +564,10 @@ describe("影视展示端", () => {
   test("浏览器返回恢复筛选 URL，非法与跨域路径不进入请求", async () => {
     const host = await render(<App />);
     await act(async () =>
-      navigate(wallPath("shared", { status: "completed", page: 1 })),
+      navigate(wallPath("shared", { mediaType: "tv", page: 1 })),
     );
     await settle();
-    expect(host.querySelector<HTMLSelectElement>("#film-status")?.value).toBe(
-      "completed",
-    );
+    expect(button(host, "剧集").getAttribute("data-state")).toBe("on");
     expect(readRoute("/movies/entries/private/%2Fsecret")).toEqual({
       kind: "missing",
     });

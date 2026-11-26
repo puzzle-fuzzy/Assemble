@@ -103,14 +103,19 @@ function Confirming({
   return (
     <>
       <Button
-        size="sm"
+        size="default"
         variant="destructive"
         disabled={pending}
         onClick={onConfirm}
       >
         {label}
       </Button>
-      <Button size="sm" variant="outline" disabled={pending} onClick={onBail}>
+      <Button
+        size="default"
+        variant="outline"
+        disabled={pending}
+        onClick={onBail}
+      >
         {uiText("neverMind")}
       </Button>
     </>
@@ -164,11 +169,20 @@ export function NotificationRow({
       <div className="flex max-w-full shrink-0 flex-wrap gap-2">
         {reminder ? (
           // 这条提醒已经到点了：看完就一起收掉，不用再去下面的名单里找它。
-          <Button size="sm" disabled={pending} onClick={() => onDone(reminder)}>
+          <Button
+            size="default"
+            disabled={pending}
+            onClick={() => onDone(reminder)}
+          >
             {uiText("done")}
           </Button>
         ) : null}
-        <Button size="sm" variant="outline" disabled={pending} onClick={onRead}>
+        <Button
+          size="default"
+          variant="outline"
+          disabled={pending}
+          onClick={onRead}
+        >
           {uiText("dismiss")}
         </Button>
       </div>
@@ -208,7 +222,7 @@ export function ScheduleRow({
             {/* 重复的日程没有"办完"的那一天：要停就取消。 */}
             {item.repeat === "none" ? (
               <Button
-                size="sm"
+                size="default"
                 disabled={pending}
                 onClick={() =>
                   void act(() => source.scheduleComplete(item.id, item.version))
@@ -218,7 +232,7 @@ export function ScheduleRow({
               </Button>
             ) : null}
             <Button
-              size="sm"
+              size="default"
               variant="outline"
               disabled={pending}
               onClick={() => onEdit({ kind: "schedule", original: item })}
@@ -226,7 +240,7 @@ export function ScheduleRow({
               {uiText("edit")}
             </Button>
             <Button
-              size="sm"
+              size="default"
               variant="outline"
               disabled={pending}
               onClick={() => setConfirming(true)}
@@ -276,7 +290,7 @@ export function ReminderRow({
         ) : (
           <>
             <Button
-              size="sm"
+              size="default"
               disabled={pending}
               onClick={() =>
                 void act(() => source.reminderDismiss(item.id, item.version))
@@ -286,7 +300,7 @@ export function ReminderRow({
             </Button>
             {fired ? null : (
               <Button
-                size="sm"
+                size="default"
                 variant="outline"
                 disabled={pending}
                 onClick={() => onEdit({ kind: "reminder", original: item })}
@@ -295,7 +309,7 @@ export function ReminderRow({
               </Button>
             )}
             <Button
-              size="sm"
+              size="default"
               variant="outline"
               disabled={pending}
               onClick={() => setConfirming(true)}

@@ -56,7 +56,6 @@ function DriveCapacity({ storage }: { storage: AdminStorage }) {
           </div>
         ))}
       </dl>
-      <p className="text-xs text-muted-foreground">{t("drive.capacityHint")}</p>
     </section>
   );
 }
@@ -145,7 +144,7 @@ export function DrivePage({
         actions={
           <Button
             variant="outline"
-            size="sm"
+            size="default"
             disabled={
               files.resource.phase === "loading" ||
               storage.resource.phase === "loading"

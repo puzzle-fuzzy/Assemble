@@ -273,14 +273,14 @@ export function DownloadsPage({
           </div>
           <CardAction className="ms-auto flex min-w-0 flex-wrap gap-2">
             <DialogTrigger asChild>
-              <Button type="button" variant="outline" size="sm">
+              <Button type="button" variant="outline" size="default">
                 {t("new")}
               </Button>
             </DialogTrigger>
             <Button
               type="button"
               variant="outline"
-              size="sm"
+              size="default"
               disabled={pending}
               onClick={() => void run(() => source.downloadChooseFolder())}
             >
@@ -361,7 +361,7 @@ export function DownloadsPage({
                         <Button
                           type="button"
                           variant="outline"
-                          size="sm"
+                          size="default"
                           disabled={pending}
                           onClick={() =>
                             void run(() => source.downloadCancel(task.id))
@@ -374,7 +374,7 @@ export function DownloadsPage({
                         <Button
                           type="button"
                           variant="outline"
-                          size="sm"
+                          size="default"
                           disabled={pending}
                           onClick={() =>
                             void run(() => source.downloadRetry(task.id))
@@ -388,7 +388,7 @@ export function DownloadsPage({
                           <Button
                             type="button"
                             variant="outline"
-                            size="sm"
+                            size="default"
                             disabled={pending}
                             onClick={() =>
                               void run(() => source.downloadOpen(task.id))
@@ -399,7 +399,7 @@ export function DownloadsPage({
                           <Button
                             type="button"
                             variant="ghost"
-                            size="sm"
+                            size="default"
                             disabled={pending}
                             onClick={() =>
                               void run(() => source.downloadReveal(task.id))

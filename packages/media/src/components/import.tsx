@@ -213,7 +213,7 @@ export function MediaImport({
                     </p>
                     <Button
                       variant="outline"
-                      size="sm"
+                      size="default"
                       className="w-fit"
                       disabled={task.pending}
                       onClick={() =>

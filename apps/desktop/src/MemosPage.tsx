@@ -33,7 +33,7 @@ import {
   FieldLabel,
 } from "@assemble/ui/field";
 import { Input } from "@assemble/ui/input";
-import { Skeleton } from "@assemble/ui/skeleton";
+import { LoadingState } from "@assemble/ui/loading-state";
 import { Textarea } from "@assemble/ui/textarea";
 import { type ReactNode, useEffect, useId, useRef, useState } from "react";
 import { toast } from "sonner";
@@ -313,7 +313,7 @@ function MemosContent({
                     placeholder={t("searchPlaceholder")}
                     onChange={(event) => setDraft(event.target.value)}
                   />
-                  <Button variant="outline" size="sm" type="submit">
+                  <Button variant="outline" size="default" type="submit">
                     {t("search")}
                   </Button>
                 </div>
@@ -324,7 +324,7 @@ function MemosContent({
         actions={
           <>
             <Button
-              size="sm"
+              size="default"
               variant="outline"
               disabled={pending}
               onClick={() => setRevision((value) => value + 1)}
@@ -333,7 +333,7 @@ function MemosContent({
             </Button>
             <Button
               ref={createTrigger}
-              size="sm"
+              size="default"
               disabled={busy}
               onClick={() => {
                 captureFocus();
@@ -386,18 +386,14 @@ function MemosContent({
         ]}
         emptyState={
           pending ? (
-            <Skeleton
-              className="h-24 w-full"
-              role="status"
-              aria-label={t("loading")}
-            />
+            <LoadingState className="h-24 w-full" label={t("loading")} />
           ) : listError ? (
             <Alert>
               <AlertDescription className="flex flex-wrap items-center gap-3">
                 {t("error")}
                 <Button
                   variant="outline"
-                  size="sm"
+                  size="default"
                   onClick={() => setRevision((value) => value + 1)}
                 >
                   {t("retry")}

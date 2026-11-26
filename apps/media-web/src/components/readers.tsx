@@ -23,14 +23,15 @@ import {
   DialogTrigger,
 } from "@assemble/ui/dialog";
 import { Separator } from "@assemble/ui/separator";
+import { ToggleGroup, ToggleGroupItem } from "@assemble/ui/toggle-group";
 import { useEffect, useRef, useState } from "react";
 import { useSiteTranslation } from "../lib/i18n";
 import {
   actorPath,
   loginPath,
   navigate,
+  readerBackPath,
   type SiteRoute,
-  wallPath,
 } from "../lib/navigation";
 import { useResource } from "../lib/use-resource";
 import {
@@ -64,15 +65,15 @@ export function EntryReader({
   useEffect(() => () => copying.current?.abort(), []);
   return (
     <div className="flex flex-col gap-5">
-      <BackLink href={wallPath(client.scope)} />
+      <BackLink href={readerBackPath(client.scope)} />
       {resource.phase === "loading" ? (
         <LoadingContent />
       ) : resource.phase === "failed" ? (
         <RequestError status={resource.status} retry={retry} />
       ) : (
         <>
-          <h1 className="sr-only">{resource.value.title}</h1>
           <MediaDetails
+            presentation="reader"
             entry={resource.value}
             imageLoader={imageLoader}
             onActor={(identity) =>
@@ -130,6 +131,8 @@ function Gallery({
     `${client.scope}:${entry.id}:gallery`,
     (signal) => client.gallery(entry.id, signal),
   );
+  if (resource.phase === "ready" && resource.value.items.length === 0)
+    return null;
   return (
     <section className="flex flex-col gap-4">
       <Separator />
@@ -138,8 +141,6 @@ function Gallery({
         <LoadingContent />
       ) : resource.phase === "failed" ? (
         <RequestError status={resource.status} retry={retry} />
-      ) : resource.value.items.length === 0 ? (
-        <p className="text-sm text-muted-foreground">{t("galleryEmpty")}</p>
       ) : (
         <div className="gallery-grid">
           {resource.value.items.map((image, index) => {
@@ -227,9 +228,6 @@ export function CatalogReader({
                 {resource.value.year ?? t("unknownYear")} ·{" "}
                 {t(resource.value.identity.mediaType)}
               </p>
-              <p className="text-sm text-muted-foreground">
-                {t("catalogHelp")}
-              </p>
             </header>
           </div>
           <section className="flex flex-col gap-2">
@@ -259,7 +257,6 @@ export function ActorReader({
   return (
     <section className="flex flex-col gap-6">
       <BackLink />
-      <h1 className="site-heading">{t("actors")}</h1>
       <div className="flex gap-3">
         <label htmlFor="actor-type" className="sr-only">
           {t("mediaType")}
@@ -280,9 +277,7 @@ export function ActorReader({
               variant="200"
               className="actor-photo"
             />
-            <h2 className="text-2xl font-semibold">
-              {resource.value.actor.name}
-            </h2>
+            <h1 className="site-heading">{resource.value.actor.name}</h1>
           </header>
           {resource.value.items.length === 0 ? (
             <EmptyContentView title={t("noCredits")} />
@@ -314,8 +309,6 @@ export function ActorReader({
   );
 }
 
-import { Select } from "@assemble/ui/select";
-
 function ActorType({
   route,
 }: {
@@ -323,19 +316,19 @@ function ActorType({
 }) {
   const { t } = useSiteTranslation();
   return (
-    <Select
+    <ToggleGroup
       id="actor-type"
-      className="max-w-40"
+      type="single"
+      aria-label={t("mediaType")}
       value={route.mediaType}
-      onChange={(event) => {
-        const type = event.target.value;
+      onValueChange={(type) => {
         if (type === "movie" || type === "tv")
           navigate(actorPath(route.identity, type));
       }}
     >
-      <option value="movie">{t("movie")}</option>
-      <option value="tv">{t("tv")}</option>
-    </Select>
+      <ToggleGroupItem value="movie">{t("movie")}</ToggleGroupItem>
+      <ToggleGroupItem value="tv">{t("tv")}</ToggleGroupItem>
+    </ToggleGroup>
   );
 }
 
@@ -370,10 +363,7 @@ export function CollectionsReader({
       ) : (
         <>
           {resource.value.items.length === 0 ? (
-            <EmptyContentView
-              title={t("collectionsEmpty")}
-              description={t("collectionsHelp")}
-            />
+            <EmptyContentView title={t("collectionsEmpty")} />
           ) : (
             <div className="collection-grid">
               {resource.value.items.map((collection) => (

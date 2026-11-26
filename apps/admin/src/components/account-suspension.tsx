@@ -83,7 +83,10 @@ export function AccountSuspension({
       }}
     >
       <AlertDialogTrigger asChild>
-        <Button variant={user.suspended ? "outline" : "destructive"} size="sm">
+        <Button
+          variant={user.suspended ? "outline" : "destructive"}
+          size="default"
+        >
           {t(`account.${action}`)}
         </Button>
       </AlertDialogTrigger>

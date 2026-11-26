@@ -58,7 +58,7 @@ export function SearchForm({
                 placeholder={placeholder}
                 onChange={(event) => setDraft(event.target.value)}
               />
-              <Button type="submit" variant="outline" size="sm">
+              <Button type="submit" variant="outline" size="default">
                 {t("common.search")}
               </Button>
             </div>

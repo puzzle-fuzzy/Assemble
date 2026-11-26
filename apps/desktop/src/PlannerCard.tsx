@@ -4,6 +4,7 @@
 // 每一次改动都带着看到的版本号；别处改过时 Rust 已经换上最新的名单，这里只提示"再看一眼"。
 // 表单交给 Rust 的只有标题、时间与几句备注，没有这台电脑上的任何位置。
 
+import { LoadingState } from "@assemble/ui/loading-state";
 import { CalendarClock } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
@@ -15,7 +16,6 @@ import {
   EmptyTitle,
 } from "@/components/ui/empty";
 import { Input } from "@/components/ui/input";
-import { Skeleton } from "@/components/ui/skeleton";
 import { type Bridge, toBridgeError } from "@/lib/bridge";
 import { uiText, useDesktopTranslation } from "@/lib/i18n";
 import { agenda } from "@/lib/planner-text";
@@ -211,7 +211,7 @@ export function PlannerCard({
             <div className="flex max-w-full flex-wrap items-center gap-2">
               {form ? (
                 <Button
-                  size="sm"
+                  size="default"
                   variant="outline"
                   disabled={pending}
                   onClick={() => setShowForm(true)}
@@ -220,7 +220,7 @@ export function PlannerCard({
                 </Button>
               ) : null}
               <Button
-                size="sm"
+                size="default"
                 variant="outline"
                 disabled={pending}
                 onClick={() => edit({ kind: "schedule", original: null })}
@@ -228,7 +228,7 @@ export function PlannerCard({
                 {uiText("newSchedule")}
               </Button>
               <Button
-                size="sm"
+                size="default"
                 variant="outline"
                 disabled={pending}
                 onClick={() => edit({ kind: "reminder", original: null })}
@@ -253,11 +253,11 @@ export function PlannerCard({
         </CardContent>
       ) : null}
       {!showForm && planner === null ? (
-        <CardContent
-          role="status"
-          aria-label={uiText("loadingScheduleEllipsis")}
-        >
-          <Skeleton className="h-32 w-full" />
+        <CardContent>
+          <LoadingState
+            className="h-32 w-full"
+            label={uiText("loadingScheduleEllipsis")}
+          />
         </CardContent>
       ) : null}
       {!showForm && planner ? (
@@ -284,7 +284,7 @@ export function PlannerCard({
                 </h2>
                 {planner.notifications.length > 1 ? (
                   <Button
-                    size="xs"
+                    size="default"
                     variant="ghost"
                     disabled={pending}
                     onClick={() =>

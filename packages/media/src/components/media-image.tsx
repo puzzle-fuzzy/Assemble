@@ -1,5 +1,5 @@
 import { Button } from "@assemble/ui/button";
-import { Skeleton } from "@assemble/ui/skeleton";
+import { LoadingState } from "@assemble/ui/loading-state";
 import { ImageOffIcon } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useMediaTranslation } from "../i18n";
@@ -46,7 +46,7 @@ export function MediaImage({
     return () => controller.abort();
   }, [image, imageLoader, variant, key]);
   if (image && (state.key !== key || (!state.url && !state.failed)))
-    return <Skeleton className={className} aria-label={t("common.loading")} />;
+    return <LoadingState className={className} label={t("common.loading")} />;
   if (state.url && state.key === key && !state.failed)
     return (
       <img
@@ -70,7 +70,7 @@ export function MediaImage({
         {state.failed && (
           <Button
             variant="outline"
-            size="sm"
+            size="default"
             onClick={() => setAttempt((value) => value + 1)}
           >
             {t("common.retry")}

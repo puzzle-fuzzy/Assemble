@@ -126,11 +126,11 @@ export function AdminShell({
 
   return (
     // 沿用官方 sidebar-13 的内部骨架；按用户要求移出演示对话框，右侧使用整页空间。
-    <SidebarProvider className="items-start">
+    <SidebarProvider className="h-dvh min-h-0 items-stretch">
       <form ref={logout} method="post" action="/web/logout?next=/admin/" hidden>
         <input type="hidden" name="csrf" value={session.csrfToken} />
       </form>
-      <Sidebar collapsible="none" className="sticky top-0 hidden h-svh md:flex">
+      <Sidebar collapsible="none" className="hidden min-h-0 shrink-0 md:flex">
         <SidebarContent>
           <SidebarGroup>
             <SidebarGroupContent>
@@ -187,7 +187,7 @@ export function AdminShell({
           />
         </SidebarFooter>
       </Sidebar>
-      <main className="flex h-svh min-w-0 flex-1 flex-col overflow-hidden">
+      <main className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
         <header className="flex h-12 shrink-0 items-center justify-between gap-2">
           <div className="flex min-w-0 items-center gap-2 px-4">
             <DropdownMenu>
@@ -195,7 +195,7 @@ export function AdminShell({
                 <Button
                   ref={mobileMenuTrigger}
                   variant="ghost"
-                  size="icon-sm"
+                  size="icon"
                   className="md:hidden"
                   aria-label={t("navigation.openMenu")}
                 >
@@ -289,7 +289,7 @@ export function AdminShell({
           </div>
         </header>
         {/* Card 的外描边需要留在滚动区内，避免顶部贴边时被视口裁掉。 */}
-        <div className="admin-content flex min-w-0 flex-1 flex-col gap-4 overflow-y-auto p-4 pt-1 [&>*]:shrink-0">
+        <div className="admin-content flex min-h-0 min-w-0 flex-1 flex-col gap-4 overflow-y-auto overscroll-y-contain p-4 pt-1 [&>*]:shrink-0">
           {view === "overview" && (
             <OverviewPage
               key={storageFocus}

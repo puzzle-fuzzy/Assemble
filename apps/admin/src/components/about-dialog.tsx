@@ -42,7 +42,7 @@ export function AboutDialog({
           <dd className="min-w-0">
             <Button
               variant="link"
-              className="h-auto min-h-6 justify-start p-0 whitespace-normal break-all"
+              className="h-auto min-h-8 justify-start p-0 whitespace-normal break-all"
               asChild
             >
               <a href="https://as.yxswy.com" target="_blank" rel="noreferrer">

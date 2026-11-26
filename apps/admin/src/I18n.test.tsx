@@ -355,7 +355,11 @@ describe("管理端中英文与显示偏好", () => {
       return response(path);
     };
     const host = await render(<App />);
-    expect(host.textContent).toContain("Loading");
+    expect(
+      host
+        .querySelector('[data-slot="loading-state"]')
+        ?.getAttribute("aria-label"),
+    ).toContain("Loading");
     await act(async () => resolveOverview?.(json({ detail: "private" }, 503)));
     await settle();
     expect(host.textContent).toContain("Unable to load data");

@@ -59,7 +59,7 @@ export function UsersTable({
       cell: (user) => (
         <Button
           variant="link"
-          className="h-auto justify-start p-0 whitespace-normal"
+          className="h-auto min-h-8 justify-start p-0 whitespace-normal"
           onClick={() => onSelect(user.id)}
           aria-label={t("table.viewUserDetails", { name: user.displayName })}
         >

@@ -67,6 +67,8 @@ const inputGroupButtonVariants = cva(
   {
     variants: {
       size: {
+        default: "",
+        icon: "p-0 has-[>svg]:p-0",
         xs: "h-6 gap-1 rounded-[calc(var(--radius)-3px)] px-1.5 [&>svg:not([class*='size-'])]:size-3.5",
         sm: "",
         "icon-xs":
@@ -75,7 +77,7 @@ const inputGroupButtonVariants = cva(
       },
     },
     defaultVariants: {
-      size: "xs",
+      size: "default",
     },
   },
 );
@@ -84,13 +86,14 @@ function InputGroupButton({
   className,
   type = "button",
   variant = "ghost",
-  size = "xs",
+  size = "default",
   ...props
 }: Omit<React.ComponentProps<typeof Button>, "size"> &
   VariantProps<typeof inputGroupButtonVariants>) {
   return (
     <Button
       type={type}
+      size={size}
       data-size={size}
       variant={variant}
       className={cn(inputGroupButtonVariants({ size }), className)}

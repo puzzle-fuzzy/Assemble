@@ -7,7 +7,7 @@ import {
   EmptyMedia,
   EmptyTitle,
 } from "@assemble/ui/empty";
-import { Skeleton } from "@assemble/ui/skeleton";
+import { LoadingState } from "@assemble/ui/loading-state";
 import { FilmIcon, RefreshCwIcon } from "lucide-react";
 import { mediaErrorCode } from "../hooks/use-media-task";
 import { useMediaTranslation } from "../i18n";
@@ -29,7 +29,7 @@ export function MediaError({
       </AlertTitle>
       {retry && (
         <AlertDescription>
-          <Button variant="outline" size="sm" onClick={retry}>
+          <Button variant="outline" size="default" onClick={retry}>
             <RefreshCwIcon data-icon="inline-start" />
             {t("common.retry")}
           </Button>
@@ -40,17 +40,7 @@ export function MediaError({
 }
 export function MediaLoading() {
   const { t } = useMediaTranslation();
-  return (
-    <div
-      role="status"
-      aria-label={t("common.loading")}
-      className="flex flex-col gap-3"
-    >
-      <Skeleton className="h-10 w-full" />
-      <Skeleton className="h-24 w-full" />
-      <Skeleton className="h-24 w-full" />
-    </div>
-  );
+  return <LoadingState className="min-h-48" label={t("common.loading")} />;
 }
 export function MediaEmpty({
   title,
@@ -98,7 +88,7 @@ export function MediaPagination({
       <div className="flex gap-2">
         <Button
           variant="outline"
-          size="sm"
+          size="default"
           disabled={pending || page <= 1}
           onClick={() => onPage(page - 1)}
         >
@@ -106,7 +96,7 @@ export function MediaPagination({
         </Button>
         <Button
           variant="outline"
-          size="sm"
+          size="default"
           disabled={pending || page >= pages}
           onClick={() => onPage(page + 1)}
         >
