@@ -1,5 +1,6 @@
 //! 影视库：共享投影、私人所有权、资料源与持久任务在服务端统一执行。
 
+pub mod archive;
 pub mod assets;
 mod auth;
 mod catalog;

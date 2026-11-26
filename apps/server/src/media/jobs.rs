@@ -248,7 +248,20 @@ async fn run_import(
     identity: MediaIdentity,
 ) -> Result<(), ApiError> {
     let owner = auth::owner_key(job.scope, principal);
-    let details = state.media.providers.details(&identity).await?;
+    let details = if let Some(entry) = super::archive::cached(&state.pool, &identity).await? {
+        super::providers::Details {
+            candidate: super::archive::candidate(entry.clone(), identity.clone()),
+            content: entry.content,
+            cast: entry
+                .cast
+                .into_iter()
+                .map(|cast| super::providers::SourceCast { cast, photo: None })
+                .collect(),
+            poster: None,
+        }
+    } else {
+        state.media.providers.details(&identity).await?
+    };
     let total = details.cast.iter().filter(|c| c.photo.is_some()).count()
         + usize::from(details.poster.is_some());
     progress(
@@ -260,6 +273,7 @@ async fn run_import(
     )
     .await?;
     let mut entry = store::new_entry(job.scope, details.content)?;
+    entry.poster = details.candidate.poster;
     entry.identities = vec![identity.clone()];
     let mut completed = 0;
     if let Some(source) = details.poster {

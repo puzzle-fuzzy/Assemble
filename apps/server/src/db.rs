@@ -111,6 +111,11 @@ mod tests {
                 "media_entries",
                 "media_entry_assets",
                 "media_identities",
+                "media_import_asset_refs",
+                "media_import_catalog",
+                "media_import_catalog_assets",
+                "media_import_files",
+                "media_import_runs",
                 "media_jobs",
                 "media_mutations",
                 "memo_requests",
@@ -134,7 +139,7 @@ mod tests {
             .fetch_one(&again)
             .await
             .unwrap();
-        assert_eq!(applied, 9);
+        assert_eq!(applied, 10);
     }
 
     #[tokio::test]

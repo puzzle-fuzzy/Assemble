@@ -138,6 +138,9 @@ impl Catalog {
         if let Some(PureCatalog::Candidate(item)) = self.cached(state, &key).await? {
             return Ok(item);
         }
+        if let Some(entry) = super::archive::cached(&state.pool, identity).await? {
+            return Ok(super::archive::candidate(entry, identity.clone()));
+        }
         let source = Source::read(headers, state.config.client_ip_header.as_ref());
         let _permit = self.begin(&source).await?;
         let details = state.media.providers.details(identity).await?;

@@ -15,6 +15,7 @@ struct Row {
     version: i64,
     title: String,
     description: String,
+    cover_entry_id: Option<String>,
     created_at: i64,
     updated_at: i64,
 }
@@ -40,7 +41,12 @@ pub(super) async fn get(
             .map_err(|_| ApiError::internal("invalid media version"))?,
         title: row.title,
         description: row.description,
-        poster: items.iter().find_map(|e| e.poster.clone()),
+        poster: row
+            .cover_entry_id
+            .as_ref()
+            .and_then(|id| items.iter().find(|entry| &entry.id == id))
+            .and_then(|entry| entry.poster.clone())
+            .or_else(|| items.iter().find_map(|entry| entry.poster.clone())),
         items,
         created_at: super::timestamp(row.created_at),
         updated_at: super::timestamp(row.updated_at),

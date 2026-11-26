@@ -24,6 +24,12 @@ enum Command {
     Serve,
     /// 只读取配置并连接数据库，报告结果后退出。部署前用它检查环境变量。
     CheckConfig,
+    /// 核对 Jarvis 影视导出包；只有显式 apply 才连接目标并原子导入空片库。
+    ImportMediaArchive {
+        directory: std::path::PathBuf,
+        #[arg(long)]
+        apply: bool,
+    },
     /// 查看持久化的 DHT 状态与聚合计数，不返回节点、Peer 或凭据。
     DhtStatus,
     /// 请求采集、排空或停止；复用网页的配置约束与事务审计。
@@ -256,6 +262,37 @@ fn main() -> ExitCode {
         }
     };
     match cli.command {
+        Command::ImportMediaArchive { directory, apply } => {
+            let result = runtime.block_on(async {
+                if apply {
+                    let (_, pool) = assemble_server::load()
+                        .await
+                        .map_err(|_| "MEDIA_ARCHIVE_TARGET_UNAVAILABLE")?;
+                    let report = assemble_server::media::archive::import(&pool, &directory)
+                        .await
+                        .map_err(|error| error.code);
+                    pool.close().await;
+                    report
+                } else {
+                    assemble_server::media::archive::inspect(&directory)
+                        .await
+                        .map_err(|error| error.code)
+                }
+            });
+            match result {
+                Ok(report) => match serde_json::to_string(&report) {
+                    Ok(report) => {
+                        println!("{report}");
+                        ExitCode::SUCCESS
+                    }
+                    Err(_) => ExitCode::FAILURE,
+                },
+                Err(code) => {
+                    eprintln!("MEDIA_ARCHIVE_IMPORT_FAILED: {code}");
+                    ExitCode::FAILURE
+                }
+            }
+        }
         Command::DhtStatus => dht_command(&runtime, None),
         Command::DhtMode { mode } => dht_command(&runtime, Some(mode)),
         Command::GrantSuperAdmin { email } => {

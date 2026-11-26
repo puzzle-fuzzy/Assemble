@@ -78,7 +78,7 @@ docker compose exec assemble assemble-server grant-super-admin <已验证邮箱>
 
 影视业务组合、中英字典由 `packages/media` 复用，基础组件、字体、主题仍共用 `packages/ui`，不复制管理专用控件或桌面应用壳。TMDB 凭据只由 Rust 读取 `ASSEMBLE_TMDB_TOKEN` 或 `_FILE`，管理表单不提供密钥编辑。来源配置、0005 迁移、包含 SQLite 图片 BLOB 的备份与验收步骤见[影视手册](media.md)和[决策 0008](../decisions/0008-media-libraries-and-viewer.md)。
 
-影视部分 2026-11-25 已正式部署，正式容器里取 TMDB 与豆瓣的资料是通的；正式片库还是空的，维护写入、跨设备这些真人验收没有做，见[影视手册](media.md)。下方既往管理端的验收记录是当时的状态，不代表影视部分也验过。
+影视部分 2026-11-25 已正式部署，正式容器里取 TMDB 与豆瓣的资料是通的；2026-11-26 按用户授权导入 Jarvis 线上 145 条影视、16 个合集、7 条缓存和全部封面及旧影视归档，已核对完整性与读取权限。管理维护、跨设备的真人操作仍需本人验收，见[影视手册](media.md)。下方既往管理端的验收记录是当时的状态。
 
 ## 开发与发布
 

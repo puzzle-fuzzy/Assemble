@@ -14,18 +14,18 @@ use tokio::sync::Semaphore;
 
 pub const MAX_IMAGE_BYTES: usize = 12 * 1024 * 1024;
 static DECODERS: Semaphore = Semaphore::const_new(2);
-struct Variant {
-    name: &'static str,
-    mime: String,
-    sha: String,
-    bytes: Vec<u8>,
+pub(super) struct Variant {
+    pub(super) name: &'static str,
+    pub(super) mime: String,
+    pub(super) sha: String,
+    pub(super) bytes: Vec<u8>,
 }
-struct Prepared {
-    width: u32,
-    height: u32,
-    mime: String,
-    sha: String,
-    variants: Vec<Variant>,
+pub(super) struct Prepared {
+    pub(super) width: u32,
+    pub(super) height: u32,
+    pub(super) mime: String,
+    pub(super) sha: String,
+    pub(super) variants: Vec<Variant>,
 }
 fn image_error() -> ApiError {
     ApiError::invalid("image type, dimensions or content is invalid")
@@ -33,11 +33,11 @@ fn image_error() -> ApiError {
 fn digest(bytes: &[u8]) -> String {
     assemble_protocol::primitives::to_hex(&Sha256::digest(bytes))
 }
-fn prepare(bytes: Vec<u8>) -> Result<Prepared, ApiError> {
+fn decode(bytes: &[u8]) -> Result<(image::DynamicImage, String), ApiError> {
     if bytes.is_empty() || bytes.len() > MAX_IMAGE_BYTES {
         return Err(image_error());
     }
-    let format = image::guess_format(&bytes).map_err(|_| image_error())?;
+    let format = image::guess_format(bytes).map_err(|_| image_error())?;
     let mime = match format {
         ImageFormat::Jpeg => "image/jpeg",
         ImageFormat::Png => "image/png",
@@ -56,6 +56,16 @@ fn prepare(bytes: Vec<u8>) -> Result<Prepared, ApiError> {
     if width == 0 || height == 0 || u64::from(width) * u64::from(height) > 24_000_000 {
         return Err(image_error());
     }
+    Ok((image, mime))
+}
+pub(super) fn inspect(bytes: &[u8]) -> Result<(u32, u32, String), ApiError> {
+    let (image, mime) = decode(bytes)?;
+    let (width, height) = image.dimensions();
+    Ok((width, height, mime))
+}
+pub(super) fn prepare(bytes: Vec<u8>) -> Result<Prepared, ApiError> {
+    let (image, mime) = decode(&bytes)?;
+    let (width, height) = image.dimensions();
     let sha = digest(&bytes);
     let mut variants = vec![Variant {
         name: "original",
@@ -194,8 +204,8 @@ pub(super) async fn content(
         return Err(ApiError::invalid("unknown image variant"));
     }
     // 可公开引用和私人所有权都由关系表核对，资产存在本身从来不构成读取权限。
-    let allowed:bool=sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM media_entry_assets r JOIN media_entries e ON e.id = r.entry_id WHERE r.asset_id = ? AND (e.scope = 'shared' OR (e.scope = 'private' AND e.owner_id = ?))) OR EXISTS(SELECT 1 FROM media_catalog_assets WHERE asset_id = ? AND expires_at > ?)")
-        .bind(asset_id).bind(principal.map(|p|p.account_id.as_str())).bind(asset_id).bind(super::now()).fetch_one(&state.pool).await?;
+    let allowed:bool=sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM media_entry_assets r JOIN media_entries e ON e.id = r.entry_id WHERE r.asset_id = ? AND (e.scope = 'shared' OR (e.scope = 'private' AND e.owner_id = ?))) OR EXISTS(SELECT 1 FROM media_catalog_assets WHERE asset_id = ? AND expires_at > ?) OR EXISTS(SELECT 1 FROM media_import_catalog_assets WHERE asset_id = ?)")
+        .bind(asset_id).bind(principal.map(|p|p.account_id.as_str())).bind(asset_id).bind(super::now()).bind(asset_id).fetch_one(&state.pool).await?;
     if !allowed {
         return Err(ApiError::not_found());
     }
@@ -243,7 +253,7 @@ pub async fn cleanup(pool: &SqlitePool) -> Result<(), sqlx::Error> {
         .bind(super::now())
         .execute(&mut *tx)
         .await?;
-    sqlx::query("DELETE FROM media_assets WHERE created_at < ? AND NOT EXISTS(SELECT 1 FROM media_entry_assets r WHERE r.asset_id = media_assets.id) AND NOT EXISTS(SELECT 1 FROM media_catalog_assets c WHERE c.asset_id = media_assets.id)").bind(super::now()-3_600_000).execute(&mut *tx).await?;
+    sqlx::query("DELETE FROM media_assets WHERE created_at < ? AND NOT EXISTS(SELECT 1 FROM media_entry_assets r WHERE r.asset_id = media_assets.id) AND NOT EXISTS(SELECT 1 FROM media_catalog_assets c WHERE c.asset_id = media_assets.id) AND NOT EXISTS(SELECT 1 FROM media_import_asset_refs r WHERE r.asset_id = media_assets.id)").bind(super::now()-3_600_000).execute(&mut *tx).await?;
     tx.commit().await?;
     Ok(())
 }

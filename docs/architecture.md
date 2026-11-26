@@ -158,7 +158,7 @@ TMDB 凭据仅在服务端的受保护环境或文件里。豆瓣公开来源遇
 
 `0005_media.sql` 新增条目、来源身份、资产、任务、幂等记录与合集，不修改旧迁移。影视图片为 SQLite 的 `media_asset_variants.content` BLOB，备份必须包含数据库本体与已有文件目录，不能将 `blobs/` 当作全部影视资产。导入持久化真实阶段和项目数量，未知进度不造百分比；版本冲突拒绝覆盖，重试按提交结果是否已知区分幂等续查与新尝试。
 
-`apps/media-web` 构建为同源 `/movies/`，运行时默认目录 `apps/media-web/dist`，镜像 `/usr/share/assemble/movies`。它是固定第一方应用，复用本站登录并回到固定 `/movies/`，没有维护操作，也不是任意用户内容托管。Jarvis 只读参考，不迁移账号、片库或站点；用户仅授权将已有 TMDB 凭据复制到受保护的 Assemble 配置。本轮代码已实现条目、导入、图集、封面、演员、合集、统计和三端接线，完整验证、真实来源、真机与正式发布仍待实际记录。详见[决策 0008](decisions/0008-media-libraries-and-viewer.md)与[影视手册](runbooks/media.md)。
+`apps/media-web` 构建为同源 `/movies/`，运行时默认目录 `apps/media-web/dist`，镜像 `/usr/share/assemble/movies`。它是固定第一方应用，复用本站登录并回到固定 `/movies/`，没有维护操作，也不是任意用户内容托管。2026-11-26 用户另行授权从 Jarvis 线上迁入影视、缓存、封面与旧影视归档，源库与参考仓库仍只读；账号、认证关联与旧站点配置不迁移。维护命令先校验输入，目标必须是空片库，再通过单事务发布。迁移 `0010_media_archive_import.sql` 保存原始清单、逐文件 BLOB、缓存快照及保全引用；保全不等于公开授权，缓存图片另有明确公开引用。已有 TMDB 凭据只进入受保护配置。实现、发布与验收证据分别见[决策 0008](decisions/0008-media-libraries-and-viewer.md)与[影视手册](runbooks/media.md)。
 
 ## 桌面端
 
