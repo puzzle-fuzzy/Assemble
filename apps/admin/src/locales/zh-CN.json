@@ -33,10 +33,10 @@
   },
   "access": {
     "signedOutTitle": "登录管理控制台",
-    "signedOutDescription": "请使用已获授权的超级管理员账户登录，继续访问网页管理控制台。",
+    "signedOutDescription": "仅限超级管理员。",
     "signIn": "前往登录",
     "forbiddenTitle": "没有管理权限",
-    "forbiddenDescription": "当前账户不是超级管理员。如需切换账户，请在账户页退出后，使用已获授权的账户重新登录。",
+    "forbiddenDescription": "请切换到超级管理员账户。",
     "openAccount": "前往账户页"
   },
   "error": {

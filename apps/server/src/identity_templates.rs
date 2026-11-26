@@ -18,9 +18,13 @@ pub fn hidden(name: &str, value: &str) -> String {
 }
 
 pub fn email_input(value: &str) -> String {
+    email_input_labeled(value, "邮箱")
+}
+
+fn email_input_labeled(value: &str, label: &str) -> String {
     field(
         "email",
-        "邮箱",
+        label,
         &format!(
             "type=\"email\" name=\"email\" value=\"{}\" autocomplete=\"email\" autocapitalize=\"none\" spellcheck=\"false\" maxlength=\"254\" required",
             escape(value)
@@ -51,18 +55,10 @@ pub fn request_page(
     csrf: &str,
     github_enabled: bool,
 ) -> String {
-    let (title, path, explanation) = match kind {
-        "register" => ("创建账户", "/web/register", "验证邮箱后，即可设置密码。"),
-        "legacy" => (
-            "旧账户绑定邮箱",
-            "/web/legacy",
-            "使用原用户名和密码验证旧账户，再验证邮箱。原来的设备、文件与日程都会保留。",
-        ),
-        _ => (
-            "找回或设置密码",
-            "/web/forgot",
-            "填写账户已验证的邮箱。GitHub 注册的账户也可以在这里设置密码。",
-        ),
+    let (title, path) = match kind {
+        "register" => ("创建账户", "/web/register"),
+        "legacy" => ("旧账户绑定邮箱", "/web/legacy"),
+        _ => ("重置密码", "/web/forgot"),
     };
     let legacy = if kind == "legacy" {
         format!(
@@ -78,14 +74,14 @@ pub fn request_page(
         String::new()
     };
     let github = if kind == "register" && github_enabled {
-        github_option(next, "使用 GitHub 注册")
+        github_option(next, "GitHub 注册")
     } else {
         String::new()
     };
     form_page(
         title,
         title,
-        explanation,
+        "",
         &format!(
             "{github}{}<form method=\"post\" action=\"{path}\" aria-label=\"{title}\" class=\"flex flex-col gap-6\">{}{}{}{}</form><p {}><a href=\"{}\">返回登录</a></p>",
             alert(error),
@@ -103,14 +99,14 @@ pub fn verify_entry(csrf: &str, error: Option<&str>) -> String {
     form_page(
         "验证邮箱",
         "验证邮箱",
-        "输入邮件中的验证码，或打开邮件里的验证链接。",
+        "",
         &format!(
             "{}<form method=\"post\" action=\"/web/verify/prepare\" aria-label=\"验证邮箱\" class=\"flex flex-col gap-6\">{}{}{}</form><script src=\"/web/verify.js\" defer></script>",
             alert(error),
             hidden("csrf", csrf),
             fields(&field(
                 "token",
-                "邮件验证码",
+                "验证码",
                 "name=\"token\" autocomplete=\"one-time-code\" autocapitalize=\"none\" autocorrect=\"off\" spellcheck=\"false\" maxlength=\"128\" enterkeyhint=\"done\" required"
             )),
             button("继续验证", "submit", "type=\"submit\"")
@@ -131,14 +127,14 @@ pub fn verify_confirm(action: &Action, token: &str, csrf: &str, error: Option<&s
             if action.kind == "register" {
                 field(
                     "display_name",
-                    "显示名（可不填）",
+                    "显示名（选填）",
                     "name=\"display_name\" autocomplete=\"nickname\" maxlength=\"60\"",
                 )
             } else {
                 String::new()
             },
             password_input("password", "密码（至少 8 个字符）", "new-password"),
-            password_input("password2", "再输一次密码", "new-password")
+            password_input("password2", "确认密码", "new-password")
         )
     } else {
         String::new()
@@ -160,11 +156,11 @@ pub fn verify_confirm(action: &Action, token: &str, csrf: &str, error: Option<&s
             "type=\"submit\""
         )
     );
-    let email = format!("邮箱：{}", action.email);
+    let email = &action.email;
     if has_inputs {
-        form_page(title, title, &email, &form)
+        form_page(title, title, email, &form)
     } else {
-        message_with_actions(title, &escape(&email), &form, "verified")
+        message_with_actions(title, &escape(email), &form, "verified")
     }
 }
 
@@ -220,8 +216,8 @@ pub fn account_page(
             "email-title",
             "更换主邮箱",
             &format!(
-                "<p class=\"text-sm text-muted-foreground\">先向原邮箱发送确认邮件，再验证新邮箱。GitHub 身份保持绑定，不自动跟随 GitHub 邮箱变化。</p><form method=\"post\" action=\"/web/account/email\" aria-labelledby=\"email-title\" class=\"flex flex-col gap-6\">{csrf}{}{}</form>",
-                fields(&email_input("")),
+                "<p class=\"text-sm text-muted-foreground\">需验证当前邮箱和新邮箱。</p><form method=\"post\" action=\"/web/account/email\" aria-labelledby=\"email-title\" class=\"flex flex-col gap-6\">{csrf}{}{}</form>",
+                fields(&email_input_labeled("", "新邮箱")),
                 button("更换邮箱", "submit", "type=\"submit\"")
             ),
         )
@@ -233,7 +229,7 @@ pub fn account_page(
             "github-title",
             "GitHub",
             &format!(
-                "<p class=\"break-words text-sm text-muted-foreground\">GitHub：{}（已绑定）</p>",
+                "<p class=\"break-words text-sm text-muted-foreground\">{}</p>",
                 escape(login)
             ),
         ),
@@ -245,7 +241,7 @@ pub fn account_page(
                 fields(&password_input_id(
                     "current",
                     "github-current",
-                    "当前密码（绑定 GitHub 前核对）",
+                    "当前密码",
                     "current-password"
                 )),
                 button("绑定 GitHub", "submit", "type=\"submit\"")
@@ -261,27 +257,27 @@ pub fn account_page(
                 "<form method=\"post\" action=\"/web/account/password\" aria-labelledby=\"password-title\" class=\"flex flex-col gap-6\">{csrf}{}{}</form>",
                 fields(&format!(
                     "{}{}{}",
-                    password_input("current", "现在的密码", "current-password"),
+                    password_input("current", "当前密码", "current-password"),
                     password_input("password", "新密码（至少 8 个字符）", "new-password"),
-                    password_input("password2", "再输一次新密码", "new-password")
+                    password_input("password2", "确认新密码", "new-password")
                 )),
                 button("改密码", "submit", "type=\"submit\"")
             ),
         )
     } else {
-        "<p>尚未设置密码。<a href=\"/web/forgot\">通过邮箱设置密码</a></p>".to_owned()
+        "<p><a href=\"/web/forgot\">设置密码</a></p>".to_owned()
     };
     page(
         "账户 · Assemble",
         "账户",
         &format!(
-            "<div class=\"flex min-w-0 items-center gap-3\">{}<div class=\"flex min-w-0 flex-col gap-1\"><p class=\"break-words font-medium\">{}</p><p class=\"break-words text-sm text-muted-foreground\">主邮箱：{}</p></div></div>{}{}{}{}{}<div {}></div><p class=\"text-sm text-muted-foreground\">修改密码只在网页进行。电脑与助手使用各自的设备凭据。</p><form method=\"post\" action=\"/web/logout\" aria-label=\"退出登录\">{}</form>",
+            "<div class=\"flex min-w-0 items-center gap-3\">{}<div class=\"flex min-w-0 flex-col gap-1\"><p class=\"break-words font-medium\">{}</p><p class=\"break-words text-sm text-muted-foreground\">主邮箱：{}</p></div></div>{}{}{}{}{}<div {}></div><form method=\"post\" action=\"/web/logout\" aria-label=\"退出登录\">{}</form>",
             avatar(account),
             escape(&account.display_name),
             escape(email),
             alert(error),
             if changed {
-                status("密码已改好。别处的网页登录状态已退出；电脑与助手不受影响。")
+                status("密码已改好，其他网页登录已退出。")
             } else {
                 String::new()
             },
@@ -297,15 +293,15 @@ pub fn account_page(
 pub fn github_profile(csrf: &str, email: &str, name: &str, error: Option<&str>) -> String {
     form_page(
         "完成 GitHub 注册",
-        "选择账户主邮箱",
-        "GitHub 已验证的邮箱可直接使用；填写其他邮箱时，我们会发邮件验证。邮箱相同的已有账户不会自动合并，请先登录原账户，再绑定 GitHub。",
+        "完成注册",
+        "",
         &format!(
             "{}<form method=\"post\" action=\"/web/github/profile\" aria-label=\"完成 GitHub 注册\" class=\"flex flex-col gap-6\">{}{}{}</form><p {}><a href=\"/web/login\">登录已有账户</a></p>",
             alert(error),
             hidden("csrf", csrf),
             fields(&format!(
                 "{}{}",
-                email_input(email),
+                email_input_labeled(email, "主邮箱"),
                 field(
                     "display_name",
                     "显示名",

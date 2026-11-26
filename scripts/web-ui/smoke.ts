@@ -207,11 +207,11 @@ try {
   await screenshot("login-error");
   await open(`${origin}/web/register`, "创建账户");
   await screenshot("register");
-  await open(`${origin}/web/forgot`, "找回或设置密码");
+  await open(`${origin}/web/forgot`, "重置密码");
   await open(`${origin}/web/verify`, "验证邮箱");
   await open(`${origin}/__preview/page/verify-confirm`, "验证邮箱并注册");
   await screenshot("verify-confirm");
-  await open(`${origin}/__preview/page/github`, "选择账户主邮箱");
+  await open(`${origin}/__preview/page/github`, "完成注册");
   await open(`${origin}/__preview/page/login-github`, "登录");
   await screenshot("login-github");
   await open(`${origin}/__preview/page/success`, "密码已更新");

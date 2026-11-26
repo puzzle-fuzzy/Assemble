@@ -133,7 +133,7 @@ describe("管理端真实数据和访问权限", () => {
     expect(host.textContent).toContain("没有管理权限");
     expect(host.querySelector('nav[aria-label="管理功能"]')).toBeNull();
     expect(host.querySelector("a")?.getAttribute("href")).toBe("/web/account");
-    expect(host.textContent).toContain("请在账户页退出后");
+    expect(host.textContent).toContain("请切换到超级管理员账户");
   });
 
   test("会话失败显示通用错误，点击重试重新核验身份", async () => {

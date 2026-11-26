@@ -147,7 +147,7 @@ const markup = {
     createElement(
       FieldSeparator,
       { className: "*:data-[slot=field-separator-content]:bg-card" },
-      "或使用邮箱继续",
+      "或",
     ),
   ),
 };

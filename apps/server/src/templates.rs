@@ -134,17 +134,21 @@ pub(crate) fn message_with_actions(title: &str, body: &str, actions: &str, icon:
     } else {
         format!("<div {}>{actions}</div>", attrs("empty_content"))
     };
+    let description = if body.is_empty() {
+        String::new()
+    } else {
+        format!("<div {}>{body}</div>", attrs("empty_description"))
+    };
     document(
         title,
         &format!(
-            "<main class=\"flex min-h-svh items-center justify-center bg-background p-6 md:p-10\"><div class=\"w-full max-w-md\"><div {}><div {}><div {}>{}</div><div {}><h1>{}</h1></div><div {}>{body}</div></div>{actions}</div></div></main>",
+            "<main class=\"flex min-h-svh items-center justify-center bg-background p-6 md:p-10\"><div class=\"w-full max-w-md\"><div {}><div {}><div {}>{}</div><div {}><h1>{}</h1></div>{description}</div>{actions}</div></div></main>",
             attrs("empty"),
             attrs("empty_header"),
             attrs("empty_media"),
             markup(icon),
             attrs("empty_title"),
-            escape(title),
-            attrs("empty_description")
+            escape(title)
         ),
     )
 }
@@ -153,11 +157,11 @@ pub(crate) fn message_with_actions(title: &str, body: &str, actions: &str, icon:
 pub fn signed_out_page() -> String {
     message_with_actions(
         "已退出",
-        "你已退出当前网页账户。",
+        "",
         &format!(
             "{}{}",
-            link_button("重新登录账户", "/web/login?next=%2Fweb%2Faccount", "button"),
-            link_button("登录管理控制台", "/web/login?next=%2Fadmin%2F", "outline")
+            link_button("重新登录", "/web/login?next=%2Fweb%2Faccount", "button"),
+            link_button("管理控制台", "/web/login?next=%2Fadmin%2F", "outline")
         ),
         "logout",
     )
@@ -243,34 +247,26 @@ pub(crate) fn github_option(next: &str, label: &str) -> String {
 /// 邮箱登录始终提供公开注册；GitHub 入口只在凭据配置完整后显示。
 pub fn login_page(error: Option<&str>, next: &str, csrf: &str, github_enabled: bool) -> String {
     let admin = matches!(next, "/admin" | "/admin/");
-    let (title, heading, hint) = if admin {
-        (
-            "登录管理控制台 · Assemble",
-            "登录管理控制台",
-            "请使用已获授权的超级管理员账户。登录后会直接进入网页管理控制台。",
-        )
+    let (title, heading) = if admin {
+        ("登录管理控制台 · Assemble", "登录管理控制台")
     } else {
-        ("登录 · Assemble", "登录", "使用邮箱或 GitHub 账户登录")
+        ("登录 · Assemble", "登录")
     };
     let github = if github_enabled {
-        github_option(next, "使用 GitHub 登录")
+        github_option(next, "GitHub 登录")
     } else {
         String::new()
     };
     form_page(
         title,
         heading,
-        if admin || github_enabled {
-            hint
-        } else {
-            "使用邮箱和密码登录"
-        },
+        "",
         &format!(
-            "{github}<form method=\"post\" action=\"/web/login\" aria-label=\"邮箱登录\" class=\"flex flex-col gap-6\"><input type=\"hidden\" name=\"csrf\" value=\"{}\"><input type=\"hidden\" name=\"next\" value=\"{}\">{}{}</form><p {}>还没有账户？ <a href=\"{}\">注册账户</a></p>",
+            "{github}<form method=\"post\" action=\"/web/login\" aria-label=\"邮箱登录\" class=\"flex flex-col gap-6\"><input type=\"hidden\" name=\"csrf\" value=\"{}\"><input type=\"hidden\" name=\"next\" value=\"{}\">{}{}</form><p {}><a href=\"{}\">创建账户</a></p>",
             escape(csrf),
             escape(next),
             fields(&format!(
-                "{}{}<div {}><div class=\"flex items-center justify-between gap-3\"><label for=\"password\" {}>密码</label><a class=\"text-sm\" href=\"{}\">忘记密码？</a></div><input id=\"password\" {} type=\"password\" name=\"password\" autocomplete=\"current-password\" maxlength=\"1024\" enterkeyhint=\"done\" required></div>",
+                "{}{}<div {}><div class=\"flex items-center justify-between gap-3\"><label for=\"password\" {}>密码</label><a class=\"text-sm\" href=\"{}\">忘记密码</a></div><input id=\"password\" {} type=\"password\" name=\"password\" autocomplete=\"current-password\" maxlength=\"1024\" enterkeyhint=\"done\" required></div>",
                 alert(error),
                 field(
                     "email",
@@ -300,7 +296,7 @@ pub fn authorize_page(
     message_with_actions(
         "确认登录",
         &format!(
-            "<p><strong>{}</strong>（{}）正在请求登录。</p><p>当前账户：<strong>{}</strong>。</p><p>确认后可收发文件、使用云盘、管理日程与提醒。</p>",
+            "<p><strong>{}</strong>（{}）</p><p>{}</p><p>允许收发文件、使用云盘和日程。</p>",
             escape(device_name),
             escape(platform_label),
             escape(account)
@@ -309,7 +305,7 @@ pub fn authorize_page(
             "<form method=\"post\" action=\"/desktop/authorize\" aria-label=\"设备登录授权\" class=\"flex flex-wrap justify-center gap-2\">\
 <input type=\"hidden\" name=\"csrf\" value=\"{}\">\
 <input type=\"hidden\" name=\"request\" value=\"{}\">\
-{}{}</form><p class=\"text-xs text-muted-foreground\">不是你本人在操作的话，请点\"取消\"。</p>",
+{}{}</form>",
             escape(csrf),
             escape(request),
             button(
