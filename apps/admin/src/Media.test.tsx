@@ -20,6 +20,7 @@ import {
   render,
   search,
   settle,
+  waitForText,
 } from "./test-support/dom";
 
 const entry: MediaEntry = {
@@ -236,7 +237,7 @@ describe("影视业务界面与权限", () => {
         : response(path);
     const host = await render(<App />);
     await navigate(host, "media");
-    expect(host.textContent).toContain("真实片名");
+    await waitForText(host, "真实片名");
     expect(document.title).toContain("影视片库");
     await click(button(host, "查看 真实片名 的详情"));
     await click(button(host, "编辑"));
@@ -267,7 +268,7 @@ describe("影视业务界面与权限", () => {
   test("失效会话清除管理内容，来源错误正文不进入页面", async () => {
     const host = await render(<App />);
     await navigate(host, "media");
-    expect(host.textContent).toContain(entry.title);
+    await waitForText(host, entry.title);
     handle = (path) =>
       path.startsWith("/v1/media/shared/entries?")
         ? json({ code: "HTTP_401", message: "secret diagnostics" }, 401)

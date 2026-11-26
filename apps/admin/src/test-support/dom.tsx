@@ -47,6 +47,35 @@ export async function navigate(host: HTMLElement, view: string) {
   );
   if (!link) throw new Error(`找不到管理菜单：${view}`);
   await click(link);
+  await untilPageSettles(host);
+}
+
+/// 等到条件成立为止；等不到就如实失败，不让后面的断言去猜。
+///
+/// 点完导航、刷新或搜索，这一页的数据是稍后才到的。点完立刻去断言，就是和加载赛跑：
+/// 2026-11-26 持续集成的两栏同时输过一次（页面还停在"正在加载"）。
+export async function waitFor(ready: () => boolean, what: string) {
+  const deadline = Date.now() + 5_000;
+  while (!ready()) {
+    if (Date.now() > deadline) throw new Error(`等不到：${what}`);
+    await settle();
+  }
+}
+
+/// 等到页面里出现这段文字。
+export async function waitForText(host: HTMLElement, text: string) {
+  await waitFor(() => (host.textContent ?? "").includes(text), text);
+}
+
+/// 等到页面的文字不再变化：连着两次读到的一样，而且不再是"正在加载"。
+export async function untilPageSettles(host: HTMLElement) {
+  let previous: string | null = null;
+  for (let calm = 0; calm < 3; ) {
+    await settle();
+    const current = host.textContent ?? "";
+    calm = current === previous ? calm + 1 : 0;
+    previous = current;
+  }
 }
 
 export async function search(host: HTMLElement, value: string) {
