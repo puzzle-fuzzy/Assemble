@@ -3,7 +3,10 @@
 use crate::accounts::AccountRow;
 use crate::auth::WebSession;
 use crate::email_identity::Action;
-use crate::templates::{alert, button, carry_next, escape, field, fields, page, status};
+use crate::templates::{
+    alert, button, carry_next, escape, field, fields, form_page, github_option,
+    message_with_actions, page, status,
+};
 use crate::web_ui::attrs;
 
 pub fn hidden(name: &str, value: &str) -> String {
@@ -41,13 +44,15 @@ fn password_input_id(name: &str, id: &str, label: &str, autocomplete: &str) -> S
     )
 }
 
-pub fn request_page(kind: &str, error: Option<&str>, next: &str, csrf: &str) -> String {
+pub fn request_page(
+    kind: &str,
+    error: Option<&str>,
+    next: &str,
+    csrf: &str,
+    github_enabled: bool,
+) -> String {
     let (title, path, explanation) = match kind {
-        "register" => (
-            "注册 Assemble",
-            "/web/register",
-            "所有人都可以注册。先验证邮箱，再设置密码。",
-        ),
+        "register" => ("创建账户", "/web/register", "验证邮箱后，即可设置密码。"),
         "legacy" => (
             "旧账户绑定邮箱",
             "/web/legacy",
@@ -72,33 +77,41 @@ pub fn request_page(kind: &str, error: Option<&str>, next: &str, csrf: &str) -> 
     } else {
         String::new()
     };
-    page(
+    let github = if kind == "register" && github_enabled {
+        github_option(next, "使用 GitHub 注册")
+    } else {
+        String::new()
+    };
+    form_page(
         title,
         title,
+        explanation,
         &format!(
-            "<p class=\"text-sm text-muted-foreground\">{explanation}</p>{}<form method=\"post\" action=\"{path}\" class=\"flex flex-col gap-6\">{}{}{}{}</form><p class=\"text-center text-sm\"><a href=\"{}\">返回登录</a></p>",
+            "{github}{}<form method=\"post\" action=\"{path}\" aria-label=\"{title}\" class=\"flex flex-col gap-6\">{}{}{}{}</form><p {}><a href=\"{}\">返回登录</a></p>",
             alert(error),
             hidden("csrf", csrf),
             hidden("next", next),
             fields(&format!("{legacy}{}", email_input(""))),
             button("发送验证邮件", "submit", "type=\"submit\""),
+            attrs("field_description"),
             escape(&carry_next("/web/login", next))
         ),
     )
 }
 
 pub fn verify_entry(csrf: &str, error: Option<&str>) -> String {
-    page(
+    form_page(
         "验证邮箱",
         "验证邮箱",
+        "输入邮件中的验证码，或打开邮件里的验证链接。",
         &format!(
-            "{}<p class=\"text-sm text-muted-foreground\">请从邮件中复制验证码，或打开邮件里的验证链接。</p><form method=\"post\" action=\"/web/verify/prepare\" class=\"flex flex-col gap-6\">{}{}{}</form><script src=\"/web/verify.js\" defer></script>",
+            "{}<form method=\"post\" action=\"/web/verify/prepare\" aria-label=\"验证邮箱\" class=\"flex flex-col gap-6\">{}{}{}</form><script src=\"/web/verify.js\" defer></script>",
             alert(error),
             hidden("csrf", csrf),
             fields(&field(
                 "token",
                 "邮件验证码",
-                "name=\"token\" autocomplete=\"one-time-code\" autocapitalize=\"none\" spellcheck=\"false\" maxlength=\"128\" required"
+                "name=\"token\" autocomplete=\"one-time-code\" autocapitalize=\"none\" autocorrect=\"off\" spellcheck=\"false\" maxlength=\"128\" enterkeyhint=\"done\" required"
             )),
             button("继续验证", "submit", "type=\"submit\"")
         ),
@@ -130,19 +143,29 @@ pub fn verify_confirm(action: &Action, token: &str, csrf: &str, error: Option<&s
     } else {
         String::new()
     };
-    page(
-        title,
-        title,
-        &format!(
-            "<p class=\"break-words text-sm text-muted-foreground\">邮箱：{}</p>{}<form method=\"post\" action=\"/web/verify\" class=\"flex flex-col gap-6\">{}{}{}{}</form>",
-            escape(&action.email),
-            alert(error),
-            hidden("csrf", csrf),
-            hidden("token", token),
-            fields(&inputs),
-            button(button_label, "submit", "type=\"submit\"")
-        ),
-    )
+    let has_inputs = !inputs.is_empty();
+    let form = format!(
+        "{}<form method=\"post\" action=\"/web/verify\" aria-label=\"{title}\" class=\"flex flex-col gap-6\">{}{}{}{}</form>",
+        alert(error),
+        hidden("csrf", csrf),
+        hidden("token", token),
+        if has_inputs {
+            fields(&inputs)
+        } else {
+            String::new()
+        },
+        button(
+            button_label,
+            if has_inputs { "submit" } else { "button" },
+            "type=\"submit\""
+        )
+    );
+    let email = format!("邮箱：{}", action.email);
+    if has_inputs {
+        form_page(title, title, &email, &form)
+    } else {
+        message_with_actions(title, &escape(&email), &form, "verified")
+    }
 }
 
 pub fn avatar(account: &AccountRow) -> String {
@@ -272,11 +295,12 @@ pub fn account_page(
 }
 
 pub fn github_profile(csrf: &str, email: &str, name: &str, error: Option<&str>) -> String {
-    page(
+    form_page(
         "完成 GitHub 注册",
         "选择账户主邮箱",
+        "GitHub 已验证的邮箱可直接使用；填写其他邮箱时，我们会发邮件验证。邮箱相同的已有账户不会自动合并，请先登录原账户，再绑定 GitHub。",
         &format!(
-            "<p class=\"text-sm text-muted-foreground\">GitHub 已验证的邮箱可直接使用；填写其他邮箱时，我们会发邮件验证。邮箱相同的已有账户不会自动合并，请先登录原账户，再绑定 GitHub。</p>{}<form method=\"post\" action=\"/web/github/profile\" class=\"flex flex-col gap-6\">{}{}{}</form><p class=\"flex flex-wrap justify-center gap-x-4 gap-y-2 text-sm\"><a href=\"/web/login\">登录已有账户</a><a href=\"/web/legacy\">旧用户名账户先绑定邮箱</a></p>",
+            "{}<form method=\"post\" action=\"/web/github/profile\" aria-label=\"完成 GitHub 注册\" class=\"flex flex-col gap-6\">{}{}{}</form><p {}><a href=\"/web/login\">登录已有账户</a></p>",
             alert(error),
             hidden("csrf", csrf),
             fields(&format!(
@@ -291,7 +315,8 @@ pub fn github_profile(csrf: &str, email: &str, name: &str, error: Option<&str>) 
                     )
                 )
             )),
-            button("完成注册", "submit", "type=\"submit\"")
+            button("完成注册", "submit", "type=\"submit\""),
+            attrs("field_description")
         ),
     )
 }

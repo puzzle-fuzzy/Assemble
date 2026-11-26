@@ -19,6 +19,17 @@ static ATTRIBUTES: LazyLock<HashMap<String, String>> = LazyLock::new(|| {
     serde_json::from_str(include_str!("web_ui/generated/attributes.json"))
         .expect("bundled server UI attributes must be valid")
 });
+static MARKUP: LazyLock<HashMap<String, String>> = LazyLock::new(|| {
+    serde_json::from_str(include_str!("web_ui/generated/markup.json"))
+        .expect("bundled server UI markup must be valid")
+});
+
+/// 仅返回构建时由共享组件生成的固定结构，不接受来自请求的 HTML。
+pub(crate) fn markup(component: &str) -> &'static str {
+    MARKUP
+        .get(component)
+        .expect("server UI markup must be exported")
+}
 
 pub(crate) fn attrs(component: &str) -> &'static str {
     ATTRIBUTES

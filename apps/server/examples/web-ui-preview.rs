@@ -85,6 +85,19 @@ fn preview_page(Path(kind): Path<String>) -> Response {
             None,
         ),
         "login-github" => templates::login_page(None, "", "preview-only", true),
+        "register-github" => {
+            identity_templates::request_page("register", None, "", "preview-only", true)
+        }
+        "verify-email" => identity_templates::verify_confirm(
+            &assemble_server::email_identity::Action::new(
+                "change_new",
+                "preview@example.test".into(),
+                String::new(),
+            ),
+            "preview-only",
+            "preview-only",
+            None,
+        ),
         "success" => templates::message_page(
             "密码已更新",
             "其他网页登录状态已退出，请使用新密码重新登录。",

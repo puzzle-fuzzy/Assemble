@@ -5,6 +5,16 @@ import { mkdir } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import tailwind from "@tailwindcss/vite";
+import {
+  CircleCheck,
+  GalleryVerticalEnd,
+  GitFork,
+  Info,
+  LogIn,
+  LogOut,
+  Mail,
+  ShieldCheck,
+} from "lucide-react";
 import { createElement, type ReactElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { build } from "vite";
@@ -14,10 +24,25 @@ import { Button } from "../src/components/button";
 import {
   Card,
   CardContent,
+  CardDescription,
   CardHeader,
   CardTitle,
 } from "../src/components/card";
-import { Field, FieldGroup, FieldLabel } from "../src/components/field";
+import {
+  Empty,
+  EmptyContent,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+} from "../src/components/empty";
+import {
+  Field,
+  FieldDescription,
+  FieldGroup,
+  FieldLabel,
+  FieldSeparator,
+} from "../src/components/field";
 import { Input } from "../src/components/input";
 import { Separator } from "../src/components/separator";
 
@@ -25,16 +50,33 @@ const root = fileURLToPath(new URL("..", import.meta.url));
 const destination = join(root, "../../apps/server/src/web_ui/generated");
 const check = Bun.argv.includes("--check");
 const samples: Record<string, ReactElement> = {
-  card: createElement(Card),
+  card: createElement(Card, { className: "[--card-spacing:--spacing(6)]" }),
   header: createElement(CardHeader),
+  auth_header: createElement(CardHeader, { className: "text-center" }),
+  description: createElement(CardDescription),
   title: createElement(CardTitle),
   content: createElement(CardContent, { className: "flex flex-col gap-6" }),
   group: createElement(FieldGroup),
   field: createElement(Field),
   label: createElement(FieldLabel),
-  input: createElement(Input),
+  input: createElement(Input, { className: "h-10" }),
   button: createElement(Button),
-  submit: createElement(Button, { className: "w-full" }),
+  submit: createElement(Button, { className: "h-10 w-full" }),
+  auth_outline: createElement(Button, {
+    variant: "outline",
+    className: "h-10 w-full",
+  }),
+  field_description: createElement(FieldDescription, {
+    className: "text-center",
+  }),
+  empty: createElement(Empty, { className: "flex-none" }),
+  empty_header: createElement(EmptyHeader),
+  empty_media: createElement(EmptyMedia, { variant: "icon" }),
+  empty_title: createElement(EmptyTitle),
+  empty_description: createElement(EmptyDescription, {
+    className: "break-words",
+  }),
+  empty_content: createElement(EmptyContent),
   outline: createElement(Button, { variant: "outline" }),
   outline_full: createElement(Button, {
     variant: "outline",
@@ -78,6 +120,41 @@ const result = await build({
 if (Array.isArray(result) || !("output" in result))
   throw new Error("Unexpected server UI build output");
 const files = new Map<string, Uint8Array>();
+const markup = {
+  brand: renderToStaticMarkup(
+    createElement(GalleryVerticalEnd, {
+      className: "size-4",
+      "aria-hidden": true,
+    }),
+  ),
+  github: renderToStaticMarkup(
+    createElement(GitFork, {
+      ...{ "data-icon": "inline-start" },
+      "aria-hidden": true,
+    }),
+  ),
+  info: renderToStaticMarkup(createElement(Info, { "aria-hidden": true })),
+  login: renderToStaticMarkup(createElement(LogIn, { "aria-hidden": true })),
+  logout: renderToStaticMarkup(createElement(LogOut, { "aria-hidden": true })),
+  mail: renderToStaticMarkup(createElement(Mail, { "aria-hidden": true })),
+  verified: renderToStaticMarkup(
+    createElement(ShieldCheck, { "aria-hidden": true }),
+  ),
+  success: renderToStaticMarkup(
+    createElement(CircleCheck, { "aria-hidden": true }),
+  ),
+  email_separator: renderToStaticMarkup(
+    createElement(
+      FieldSeparator,
+      { className: "*:data-[slot=field-separator-content]:bg-card" },
+      "或使用邮箱继续",
+    ),
+  ),
+};
+files.set(
+  "markup.json",
+  new TextEncoder().encode(`${JSON.stringify(markup, null, 2)}\n`),
+);
 files.set(
   "attributes.json",
   new TextEncoder().encode(`${JSON.stringify(attributes, null, 2)}\n`),

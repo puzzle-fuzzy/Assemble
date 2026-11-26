@@ -81,7 +81,13 @@ fn form_page(state: &Shared, kind: &str, uri: &Uri) -> Response {
     with_cookies(
         page(
             StatusCode::OK,
-            view::request_page(kind, None, &next, csrf.expose()),
+            view::request_page(
+                kind,
+                None,
+                &next,
+                csrf.expose(),
+                state.config.github.is_some(),
+            ),
         ),
         [web::csrf_cookie(
             state.config.public_origin.is_secure(),
@@ -128,7 +134,12 @@ async fn legacy_submit(
 fn sent() -> Response {
     page(
         StatusCode::OK,
-        templates::message_page("请查收验证邮件", SENT),
+        templates::message_with_actions(
+            "请查收验证邮件",
+            &templates::escape(SENT),
+            &templates::link_button("前往验证邮箱", "/web/verify", "button"),
+            "mail",
+        ),
     )
 }
 
@@ -511,13 +522,11 @@ async fn verify_submit(
         );
         return page(
             StatusCode::OK,
-            templates::page(
+            templates::message_with_actions(
                 "密码已更新",
-                "密码已更新",
-                &format!(
-                    "<p class=\"text-sm text-muted-foreground\">其他网页登录状态已退出，请使用新密码重新登录。</p>{}",
-                    templates::link_button("重新登录", &login, "submit")
-                ),
+                "其他网页登录状态已退出，请使用新密码重新登录。",
+                &templates::link_button("重新登录", &login, "button"),
+                "success",
             ),
         );
     }

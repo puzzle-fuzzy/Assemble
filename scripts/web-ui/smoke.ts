@@ -205,7 +205,7 @@ try {
     ),
   );
   await screenshot("login-error");
-  await open(`${origin}/web/register`, "注册 Assemble");
+  await open(`${origin}/web/register`, "创建账户");
   await screenshot("register");
   await open(`${origin}/web/forgot`, "找回或设置密码");
   await open(`${origin}/web/verify`, "验证邮箱");
