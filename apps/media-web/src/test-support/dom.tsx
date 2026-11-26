@@ -26,6 +26,16 @@ export async function settle() {
   });
 }
 
+export async function waitFor<T>(read: () => T | null | undefined) {
+  const deadline = Date.now() + 2_000;
+  for (;;) {
+    const value = read();
+    if (value !== null && value !== undefined) return value;
+    if (Date.now() >= deadline) throw new Error("UI_WAIT_TIMED_OUT");
+    await settle();
+  }
+}
+
 export function button(host: HTMLElement, name: string) {
   const found = [...host.querySelectorAll<HTMLButtonElement>("button")].find(
     (item) =>

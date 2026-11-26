@@ -48,4 +48,6 @@ bunx lighthouse 'https://as.yxswy.com/movies/?plannedPage=4' \
 
 初次 `bun run verify` 在 Biome 阶段被并行开发的 iPhone 生成物与 JSON 样本格式挡住，当时其余检查分别执行。该项工作完成独立提交、重新生成样本并排除生成物后，2026-11-27 提交前重跑完整 `bun run verify`，全部通过，用时 56.9 秒；没有将 iPhone 的未提交改动混入影视提交。
 
+首次推送后 macOS CI 通过，Windows CI 暴露了详情首次分块加载的测试竞争：点击作品后只等固定 5ms 就查找返回链接，分块尚未加载完时会误报缺少链接。回归改为在明确时限内等待实际返回入口出现，保留原有返回 URL 断言，不改变产品行为，也不跳过测试；修复后本机完整验证再次通过，用时 57.0 秒。
+
 另用空的一次性数据目录实际启动 Rust 服务，核对 `/healthz`、静态页面、带指纹 JS、外观脚本、favicon、缺失资源与共享 API。指纹 JS 返回一年 `immutable`，HTML/API/错误维持 `no-store`。Rust HTTP 测试额外覆盖 HEAD、304、206 与缓存排除规则。没有启动或替换桌面安装版，也没有做 Windows 真机验收。

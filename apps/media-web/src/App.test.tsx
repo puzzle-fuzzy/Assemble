@@ -6,7 +6,14 @@ import { App } from "./App";
 import { discardHomePreload, preloadAnonymousHome } from "./lib/home-preload";
 import { mediaSiteResources } from "./lib/i18n";
 import { navigate, readRoute, wallPath } from "./lib/navigation";
-import { button, cleanup, click, render, settle } from "./test-support/dom";
+import {
+  button,
+  cleanup,
+  click,
+  render,
+  settle,
+  waitFor,
+} from "./test-support/dom";
 
 const entry: MediaEntry = {
   id: "film-1",
@@ -291,10 +298,12 @@ describe("影视展示端", () => {
     const link = planned.querySelector<HTMLAnchorElement>("h3 a");
     if (!link) throw new Error("FILM_LINK_MISSING");
     await click(link);
-    const back = host.querySelector<HTMLAnchorElement>(
-      'a[href="/movies/?mediaType=tv&plannedPage=2"]',
+    // 详情分块首次加载是异步的；Windows 不能依赖一次固定延时恰好足够。
+    const back = await waitFor(() =>
+      host.querySelector<HTMLAnchorElement>(
+        'a[href="/movies/?mediaType=tv&plannedPage=2"]',
+      ),
     );
-    if (!back) throw new Error("BACK_LINK_MISSING");
     await click(back);
     expect(window.location.search).toBe("?mediaType=tv&plannedPage=2");
   });
