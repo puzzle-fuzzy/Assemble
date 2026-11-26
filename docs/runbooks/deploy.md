@@ -2,6 +2,8 @@
 
 正式服务在 2026-11-24 第一次部署上线：<https://as.yxswy.com>。下面"第一次部署"写的就是照着做过的步骤；哪些真的验过、哪些还没有，分别在最后两节里如实列出。用的是 Docker Compose 加 nginx。
 
+最新发布（2026-11-27 01:32）：影视翻页、详情预览与性能调整已部署为 `ghcr.io/puzzle-fuzzy/assemble-server:c79edf032e08`，双平台验证、镜像构建和隔离容器运行通过。备份位于 `/var/backups/assemble/20261127-013204-media-c79edf032e08/`，旧迁移校验一致，启动新增迁移 11，原账户和业务计数不变；共用 nginx 与密钥配置保持原样。正式 Lighthouse 移动三次 98、桌面三次 100，其他三类均 100，CLS 为 0。完整发布、备份权限和证据边界见[本轮记录](../reports/2026-11-27-media-web-performance.md#正式发布与-https-复测)。
+
 ## 材料在 `deploy/` 里
 
 | 文件                   | 用途                                                                                                                    |
