@@ -67,15 +67,17 @@ export async function waitForText(host: HTMLElement, text: string) {
   await waitFor(() => (host.textContent ?? "").includes(text), text);
 }
 
-/// 等到页面的文字不再变化：连着两次读到的一样，而且不再是"正在加载"。
+/// 加载指示前 200ms 没有文字，必须同时核对忙碌状态，不能把空白的懒加载页面判为就绪。
 export async function untilPageSettles(host: HTMLElement) {
   let previous: string | null = null;
-  for (let calm = 0; calm < 3; ) {
-    await settle();
+  let calm = 0;
+  await waitFor(() => {
     const current = host.textContent ?? "";
-    calm = current === previous ? calm + 1 : 0;
+    const busy = host.querySelector('[aria-busy="true"]') !== null;
+    calm = !busy && current === previous ? calm + 1 : 0;
     previous = current;
-  }
+    return calm >= 3;
+  }, "页面加载完成并稳定");
 }
 
 export async function search(host: HTMLElement, value: string) {
