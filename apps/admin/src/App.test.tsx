@@ -17,6 +17,8 @@ import {
   render,
   search,
   settle,
+  waitFor,
+  waitForText,
 } from "./test-support/dom";
 
 const session: AdminSession = {
@@ -213,13 +215,13 @@ describe("管理端真实数据和访问权限", () => {
   test("管理数据请求失去权限时立即移除旧账户数据", async () => {
     const host = await render(<App />);
     await navigate(host, "users");
-    expect(host.textContent).toContain("zhang@example.test");
+    await waitForText(host, "zhang@example.test");
     handle = (path) =>
       path.startsWith("/v1/admin/devices")
         ? json({}, 401)
         : defaultResponse(path);
     await navigate(host, "devices");
-    expect(host.textContent).toContain("登录管理控制台");
+    await waitForText(host, "登录管理控制台");
     expect(host.textContent).not.toContain(user.email);
     expect(host.textContent).not.toContain(session.account.displayName);
   });
@@ -272,7 +274,7 @@ describe("用户、设备和登录记录的交互", () => {
     };
     const host = await render(<App />);
     await navigate(host, "users");
-    expect(host.textContent).toContain("未记录");
+    await waitForText(host, "未记录");
     expect(host.textContent).toContain("2 台 / 1 在线");
     expect(host.querySelector("time")?.getAttribute("datetime")).toBe(
       user.createdAt,
@@ -316,7 +318,10 @@ describe("用户、设备和登录记录的交互", () => {
         : defaultResponse(path);
     const host = await render(<App />);
     await navigate(host, "users");
-    expect(host.querySelector('[role="alert"]')).not.toBeNull();
+    await waitFor(
+      () => host.querySelector('[role="alert"]') !== null,
+      "出错提示",
+    );
     expect(host.textContent).not.toContain("private");
     failed = false;
     await click(button(host, "重试"));
@@ -357,7 +362,7 @@ describe("用户、设备和登录记录的交互", () => {
       };
       const host = await render(<App />);
       await navigate(host, view);
-      expect(host.textContent).toContain("未绑定邮箱");
+      await waitForText(host, "未绑定邮箱");
       expect(host.textContent).toContain(
         view === "devices" ? "离线" : "邮箱密码",
       );
@@ -427,7 +432,7 @@ describe("用户、设备和登录记录的交互", () => {
     const host = await render(<App />);
     await navigate(host, "users");
     await click(button(host, "查看 张三 的详情"));
-    expect(host.textContent).toContain("找不到这位用户");
+    await waitForText(host, "找不到这位用户");
     await click(button(host, "返回用户列表"));
     missing = false;
     await click(button(host, "查看 张三 的详情"));
