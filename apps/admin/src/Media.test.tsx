@@ -207,6 +207,119 @@ afterEach(async () => {
 });
 
 describe("影视业务界面与权限", () => {
+  test("筛选位于表头，搜索仅用占位文字，输入框清空图标重置全部条件并保留焦点和分页条数", async () => {
+    const host = await render(
+      <MediaWorkspace
+        client={createBrowserMediaClient("shared")}
+        imageLoader={browserImageLoader}
+        canEdit={false}
+        accountKey="filters"
+      />,
+    );
+    const form = host.querySelector<HTMLFormElement>(
+      'form[aria-label="搜索片库"]',
+    );
+    if (!form) throw new Error("Library filters missing");
+    expect(
+      [...form.querySelectorAll("label")].map((label) => label.textContent),
+    ).toEqual(["搜索片库"]);
+    expect(form.querySelector("label")?.classList.contains("sr-only")).toBe(
+      true,
+    );
+    expect(form.querySelectorAll('[role="combobox"]')).toHaveLength(0);
+    expect(host.textContent).not.toContain("共享条目由管理员维护");
+    const trigger = button(host, "作品类型: 全部类型");
+    expect(trigger.closest("th")).not.toBeNull();
+    expect(button(host, "观看状态: 全部状态").closest("th")).not.toBeNull();
+    await act(async () => {
+      trigger.focus();
+      trigger.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }),
+      );
+    });
+    await settle();
+    const option = [
+      ...document.querySelectorAll<HTMLElement>('[role="menuitemradio"]'),
+    ].find((item) => item.textContent === "剧集");
+    if (!option) throw new Error("TV option missing");
+    await click(option);
+    await act(async () => {
+      const status = button(host, "观看状态: 全部状态");
+      status.focus();
+      status.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }),
+      );
+    });
+    await settle();
+    const watching = [
+      ...document.querySelectorAll<HTMLElement>('[role="menuitemradio"]'),
+    ].find((item) => item.textContent === "在看");
+    if (!watching) throw new Error("Viewing status option missing");
+    await click(watching);
+    await change(field(host, "搜索片库"), " 星球 ");
+    await click(button(host, "搜索"));
+    const path = [...requests]
+      .reverse()
+      .find((request) => request.path.includes("/entries?"))?.path;
+    const query = new URL(path ?? "", "http://localhost").searchParams;
+    expect(query.get("mediaType")).toBe("tv");
+    expect(query.get("status")).toBe("watching");
+    expect(query.get("q")).toBe("星球");
+    expect(query.get("page")).toBe("1");
+    expect(query.has("genre")).toBe(false);
+    expect(query.has("year")).toBe(false);
+    const requestCount = requests.length;
+    await act(async () => setLanguage("en"));
+    expect(requests).toHaveLength(requestCount);
+    expect(button(host, "Type: TV series").closest("th")).not.toBeNull();
+    expect(
+      button(host, "Viewing status: Watching").closest("th"),
+    ).not.toBeNull();
+    const clear = button(host, "Clear filters");
+    expect(
+      clear
+        .closest('[data-slot="input-group-addon"]')
+        ?.getAttribute("data-align"),
+    ).toBe("inline-end");
+    expect(clear.textContent).toBe("");
+    await click(clear);
+    expect(document.activeElement).toBe(
+      host.querySelector('input[type="search"]'),
+    );
+    expect(
+      (host.querySelector('input[type="search"]') as HTMLInputElement).value,
+    ).toBe("");
+    const cleared = [...requests]
+      .reverse()
+      .find((request) => request.path.includes("/entries?"))?.path;
+    const reset = new URL(cleared ?? "", "http://localhost").searchParams;
+    expect(reset.has("mediaType")).toBe(false);
+    expect(reset.has("status")).toBe(false);
+    expect(reset.has("q")).toBe(false);
+    expect(reset.get("pageSize")).toBe(query.get("pageSize"));
+  });
+
+  test("空表格仅显示本地化文字，不显示空态图标", async () => {
+    handle = (path) =>
+      path.startsWith("/v1/media/shared/entries?")
+        ? json(list([]))
+        : response(path);
+    const host = await render(
+      <MediaWorkspace
+        client={createBrowserMediaClient("shared")}
+        imageLoader={browserImageLoader}
+        canEdit={false}
+        accountKey="empty"
+      />,
+    );
+    const body = host.querySelector("tbody");
+    expect(body?.textContent).toBe("还没有条目");
+    expect(body?.querySelector("svg")).toBeNull();
+    await act(async () => setLanguage("en"));
+    expect(body?.textContent).toBe("No entries yet");
+    expect(body?.querySelector("svg")).toBeNull();
+  });
+
   test("详情中的刷新返回最新列表，不保留已过期的详情版本", async () => {
     const client = createBrowserMediaClient("shared");
     const host = await render(
@@ -577,7 +690,7 @@ describe("影视业务界面与权限", () => {
     await change(field(host, "搜索片库"), "typed draft");
     const count = requests.length;
     await act(async () => setLanguage("en"));
-    expect(host.textContent).toContain("Shared library");
+    expect(host.textContent).toContain("Search library");
     expect(field(host, "Search library").value).toBe("typed draft");
     expect(requests).toHaveLength(count);
     await click(button(host, "View details for 真实片名"));

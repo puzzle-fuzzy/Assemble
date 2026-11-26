@@ -87,7 +87,7 @@ function response(path: string): Response {
     items,
     total: 1234,
     page: Number(url.searchParams.get("page") ?? "1"),
-    pageSize: 20,
+    pageSize: Number(url.searchParams.get("pageSize") ?? "20"),
   });
 }
 
@@ -240,13 +240,14 @@ describe("管理端中英文与显示偏好", () => {
     expect(host.textContent).toContain("zhang@example.test");
     expect(host.textContent).toContain("Not recorded");
     expect(host.textContent).toContain("2 devices / 1 online");
-    expect(host.textContent).toContain("1,234 results · Page 1 of 62");
+    expect(host.textContent).toContain("0 of 1234 rows selected.");
+    expect(host.textContent).toContain("Page 1 of 124");
     expect(host.querySelector("time")?.getAttribute("datetime")).toBe(
       createdAt,
     );
     expect(host.querySelector("time")?.textContent).toContain("09:02:03");
     expect(host.querySelector("time")?.title).toBe("Beijing time (UTC+8)");
-    await click(button(host, "Next"));
+    await click(button(host, "Next page"));
     const parameters = new URL(requested.at(-1) ?? "", "http://localhost")
       .searchParams;
     expect(parameters.get("page")).toBe("2");
@@ -274,10 +275,11 @@ describe("管理端中英文与显示偏好", () => {
     expect(
       host.querySelector<HTMLInputElement>('input[type="search"]')?.value,
     ).toBe("张三");
-    expect(host.textContent).toContain("Page 2 of 62");
+    expect(host.textContent).toContain("Page 2 of 124");
     await changeLanguage("zh-CN");
     expect(host.textContent).toContain("2 台 / 1 在线");
-    expect(host.textContent).toContain("共 1,234 条 · 第 2 / 62 页");
+    expect(host.textContent).toContain("已选 0 条，共 1234 条");
+    expect(host.textContent).toContain("第 2 页，共 124 页");
     expect(document.title).toBe("用户 · Assemble 管理控制台");
   });
 
@@ -310,7 +312,7 @@ describe("管理端中英文与显示偏好", () => {
         host.querySelector('nav[aria-label="Administration"]'),
       ).not.toBeNull();
       expect(
-        host.querySelector('nav[aria-label="List pagination"]'),
+        host.querySelector('nav[aria-label="Table pagination"]'),
       ).not.toBeNull();
       expect(
         host
@@ -327,7 +329,7 @@ describe("管理端中英文与显示偏好", () => {
         expect(host.textContent).toContain("Offline");
         expect(host.textContent).toContain("工作电脑");
       } else expect(host.textContent).toContain("No linked email");
-      await click(button(host, "Next"));
+      await click(button(host, "Next page"));
       await search(host, "张三");
       const parameters = new URL(requested.at(-1) ?? "", "http://localhost")
         .searchParams;
@@ -360,10 +362,11 @@ describe("管理端中英文与显示偏好", () => {
     expect(host.textContent).toContain("Registered users");
     await navigate(host, "users");
     expect(host.textContent).toContain("No registered users yet");
-    expect(host.textContent).toContain("0 results · Page 1 of 1");
+    expect(host.textContent).toContain("0 of 0 rows selected.");
+    expect(host.textContent).toContain("Page 1 of 1");
     await search(host, "nobody");
     expect(host.textContent).toContain("No matching results");
-    expect(button(host, "Next").disabled).toBe(true);
+    expect(button(host, "Next page").disabled).toBe(true);
     await changeLanguage("zh-CN");
     expect(host.textContent).toContain("没有匹配的结果");
     expect(button(host, "下一页").disabled).toBe(true);

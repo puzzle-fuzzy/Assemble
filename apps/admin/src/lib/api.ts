@@ -100,11 +100,12 @@ export function listPath(
   name: "users" | "devices" | "logins",
   query: string,
   page: number,
+  pageSize = 20,
 ) {
   const parameters = new URLSearchParams({
     q: query,
     page: String(page),
-    pageSize: "20",
+    pageSize: String(pageSize),
   });
   return `/v1/admin/${name}?${parameters}`;
 }

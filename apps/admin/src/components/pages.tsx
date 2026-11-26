@@ -26,10 +26,11 @@ import {
   AccountIdentity,
   DevicesTable,
   LoginsTable,
+  type TableOptions,
   UsersTable,
 } from "./data-tables";
 import { LoadingContent, NoResults, RequestError } from "./feedback";
-import { PageControls, SearchForm, useListQuery } from "./list-controls";
+import { SearchForm, useListQuery } from "./list-controls";
 
 interface AccessProps {
   onAccessFailure: (failure: AccessFailure) => void;
@@ -114,9 +115,10 @@ interface CollectionProps<T> extends AccessProps {
   emptyTitle: string;
   emptyDescription: string;
   queryState: ReturnType<typeof useListQuery>;
-  renderItems: (items: T[]) => ReactNode;
+  renderItems: (items: T[], options: TableOptions) => ReactNode;
 }
 
+const EMPTY_ROWS: never[] = [];
 function Collection<T>({
   name,
   searchLabel,
@@ -129,39 +131,37 @@ function Collection<T>({
 }: CollectionProps<T>) {
   const { t } = useAdminTranslation();
   const { resource, retry } = useResource<AdminPage<T>>(
-    listPath(name, queryState.query, queryState.page),
+    listPath(name, queryState.query, queryState.page, queryState.pageSize),
     onAccessFailure,
   );
-  return (
-    <>
-      <SearchForm
-        label={searchLabel}
-        placeholder={placeholder}
-        {...queryState}
-      />
-      {resource.phase === "loading" ? (
-        <LoadingContent />
-      ) : resource.phase === "error" ? (
-        <RequestError failure={resource.failure} retry={retry} />
-      ) : (
-        <>
-          {resource.value.items.length === 0 ? (
-            <NoResults
-              title={queryState.query ? t("empty.noMatchesTitle") : emptyTitle}
-              description={
-                queryState.query
-                  ? t("empty.noMatchesDescription")
-                  : emptyDescription
-              }
-            />
-          ) : (
-            renderItems(resource.value.items)
-          )}
-          <PageControls {...resource.value} setPage={queryState.setPage} />
-        </>
-      )}
-    </>
+  const page = resource.phase === "ready" ? resource.value : null;
+  const toolbar = (
+    <SearchForm label={searchLabel} placeholder={placeholder} {...queryState} />
   );
+  const emptyState =
+    resource.phase === "loading" ? (
+      <LoadingContent />
+    ) : resource.phase === "error" ? (
+      <RequestError failure={resource.failure} retry={retry} />
+    ) : (
+      <NoResults
+        title={queryState.query ? t("empty.noMatchesTitle") : emptyTitle}
+        description={
+          queryState.query ? t("empty.noMatchesDescription") : emptyDescription
+        }
+      />
+    );
+  return renderItems(page?.items ?? EMPTY_ROWS, {
+    toolbar,
+    emptyState,
+    pagination: {
+      page: page?.page ?? queryState.page,
+      pageSize: page?.pageSize ?? queryState.pageSize,
+      total: page?.total ?? 0,
+      pending: resource.phase === "loading",
+      onChange: queryState.setPagination,
+    },
+  });
 }
 
 export function UsersPage({
@@ -193,8 +193,8 @@ export function UsersPage({
         emptyDescription={t("empty.usersDescription")}
         queryState={queryState}
         onAccessFailure={onAccessFailure}
-        renderItems={(items) => (
-          <UsersTable users={items} onSelect={setSelected} />
+        renderItems={(items, options) => (
+          <UsersTable {...options} users={items} onSelect={setSelected} />
         )}
       />
     </div>
@@ -213,7 +213,9 @@ export function DevicesPage({ onAccessFailure }: AccessProps) {
       emptyDescription={t("empty.devicesDescription")}
       queryState={queryState}
       onAccessFailure={onAccessFailure}
-      renderItems={(items) => <DevicesTable devices={items} />}
+      renderItems={(items, options) => (
+        <DevicesTable {...options} devices={items} />
+      )}
     />
   );
 }
@@ -230,7 +232,9 @@ export function LoginsPage({ onAccessFailure }: AccessProps) {
       emptyDescription={t("empty.loginsDescription")}
       queryState={queryState}
       onAccessFailure={onAccessFailure}
-      renderItems={(items) => <LoginsTable logins={items} />}
+      renderItems={(items, options) => (
+        <LoginsTable {...options} logins={items} />
+      )}
     />
   );
 }

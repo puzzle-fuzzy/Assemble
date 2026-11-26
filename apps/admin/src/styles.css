@@ -2,29 +2,6 @@
 @source "./";
 @source "../../../packages/media/src";
 
-/* 表格由组件负责外观；窄内容区保持列宽并允许键盘横向滚动。 */
-.admin-table-region {
-  min-inline-size: 0;
-  max-inline-size: 100%;
-  max-block-size: min(36rem, 70svh);
-  overflow: auto;
-}
-
-.admin-table-region [data-slot="table-header"] {
-  position: sticky;
-  inset-block-start: 0;
-  background: var(--background);
-}
-
-.admin-table-region [data-slot="table-container"] {
-  overflow: visible;
-}
-
-.admin-table-region:focus-visible {
-  outline: 2px solid var(--ring);
-  outline-offset: 2px;
-}
-
 .admin-content {
   overflow-wrap: anywhere;
 }

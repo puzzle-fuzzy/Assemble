@@ -25,6 +25,7 @@
     "create": "Add manually",
     "import": "Search and import",
     "details": "View details for {{title}}",
+    "viewDetails": "View details",
     "unknown": "Not recorded",
     "previous": "Previous",
     "next": "Next",

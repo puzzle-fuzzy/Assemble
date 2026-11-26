@@ -9,12 +9,7 @@ import {
   EmptyTitle,
 } from "@assemble/ui/empty";
 import { Skeleton } from "@assemble/ui/skeleton";
-import {
-  AlertCircleIcon,
-  InboxIcon,
-  LogInIcon,
-  ShieldXIcon,
-} from "lucide-react";
+import { AlertCircleIcon, LogInIcon, ShieldXIcon } from "lucide-react";
 import type { AccessFailure, RequestFailure } from "../lib/api";
 import { useAdminTranslation } from "../lib/i18n";
 
@@ -74,9 +69,6 @@ export function NoResults({
   return (
     <Empty>
       <EmptyHeader>
-        <EmptyMedia variant="icon">
-          <InboxIcon aria-hidden="true" />
-        </EmptyMedia>
         <EmptyTitle>{title}</EmptyTitle>
         <EmptyDescription>{description}</EmptyDescription>
       </EmptyHeader>

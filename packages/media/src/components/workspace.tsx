@@ -10,13 +10,12 @@ import {
 } from "@assemble/ui/alert-dialog";
 import { Badge } from "@assemble/ui/badge";
 import { Button } from "@assemble/ui/button";
+import { Card, CardContent, CardHeader } from "@assemble/ui/card";
 import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@assemble/ui/card";
+  DataTable,
+  type DataTableColumn,
+  DataTableColumnFilter,
+} from "@assemble/ui/data-table";
 import {
   Dialog,
   DialogContent,
@@ -25,27 +24,27 @@ import {
   DialogTitle,
 } from "@assemble/ui/dialog";
 import { Field, FieldGroup, FieldLabel } from "@assemble/ui/field";
-import { Input } from "@assemble/ui/input";
-import { Select } from "@assemble/ui/select";
 import {
-  Table,
-  TableBody,
-  TableCaption,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@assemble/ui/table";
+  InputGroup,
+  InputGroupAddon,
+  InputGroupButton,
+  InputGroupInput,
+} from "@assemble/ui/input-group";
+
 import {
   ArrowLeftIcon,
+  CircleCheckIcon,
+  CircleDashedIcon,
   ImageIcon,
+  LoaderCircleIcon,
   PencilIcon,
   PlusIcon,
   RefreshCwIcon,
   SearchIcon,
   TrashIcon,
+  XIcon,
 } from "lucide-react";
-import { useEffect, useId, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import type { MediaClient } from "../client";
 import { type MediaAccessFailure, useMediaTask } from "../hooks/use-media-task";
 import { useMediaTranslation } from "../i18n";
@@ -59,16 +58,13 @@ import type {
   MediaQuery,
 } from "../model";
 import { MediaEditor } from "./editor";
-import {
-  MediaEmpty,
-  MediaError,
-  MediaLoading,
-  MediaPagination,
-} from "./feedback";
+import { MediaEmpty, MediaError, MediaLoading } from "./feedback";
 import { MediaGalleryEditor } from "./gallery";
 import { MediaImport } from "./import";
 import { MediaDetails } from "./media-details";
 import { MediaImage } from "./media-image";
+
+const EMPTY_ENTRIES: MediaEntry[] = [];
 
 export interface MediaWorkspaceProps {
   client: MediaClient;
@@ -97,14 +93,13 @@ function WorkspaceContent({
 }: MediaWorkspaceProps) {
   const { t } = useMediaTranslation();
   const prefix = useId();
+  const searchInput = useRef<HTMLInputElement>(null);
   const [query, setQuery] = useState<MediaQuery>({
     page: 1,
-    pageSize: 20,
+    pageSize: 10,
     sort: "updated",
   });
   const [q, setQ] = useState("");
-  const [genre, setGenre] = useState("");
-  const [year, setYear] = useState("");
   const [list, setList] = useState<MediaList | null>(null);
   const [capabilities, setCapabilities] = useState<MediaCapabilities | null>(
     null,
@@ -159,9 +154,21 @@ function WorkspaceContent({
     setImporting(false);
     setRevision((value) => value + 1);
   }
-  function openEntry(id: string) {
+  function openEntry(
+    id: string,
+    action: "view" | "edit" | "gallery" | "remove" = "view",
+  ) {
     setSelected(null);
-    void detailTask.run((signal) => client.get(id, signal), setSelected);
+    void detailTask.run(
+      (signal) => client.get(id, signal),
+      (entry) => {
+        setSelected(entry);
+        if (!allowed) return;
+        if (action === "edit") setEditor(entry);
+        if (action === "gallery") setGallery(true);
+        if (action === "remove") setRemoving(true);
+      },
+    );
   }
   function showActor(identity: MediaPersonIdentity, name: string) {
     setActor({ identity, name });
@@ -172,31 +179,272 @@ function WorkspaceContent({
       setCredits,
     );
   }
+  const columns: DataTableColumn<MediaEntry>[] = [
+    {
+      id: "title",
+      label: t("entry.title"),
+      hideable: false,
+      className: "min-w-52 max-w-96 whitespace-normal",
+      cell: (entry) => (
+        <>
+          <Button
+            variant="link"
+            className="h-auto justify-start whitespace-normal p-0 text-left wrap-anywhere"
+            aria-label={t("common.details", { title: entry.title })}
+            onClick={() => openEntry(entry.id)}
+          >
+            {entry.title}
+          </Button>
+          {entry.originalTitle && entry.originalTitle !== entry.title && (
+            <p className="text-xs text-muted-foreground">
+              {entry.originalTitle}
+            </p>
+          )}
+        </>
+      ),
+    },
+    {
+      id: "type",
+      label: t("entry.mediaType"),
+      header: (
+        <DataTableColumnFilter
+          label={t("entry.mediaType")}
+          value={query.mediaType ?? "all"}
+          options={(["all", "movie", "tv"] as const).map((value) => ({
+            value,
+            label: t(`type.${value}`),
+          }))}
+          onValueChange={(value) => {
+            if (value !== "all" && value !== "movie" && value !== "tv") return;
+            setQuery((previous) => ({
+              ...previous,
+              mediaType: value === "all" ? undefined : value,
+              page: 1,
+            }));
+          }}
+        />
+      ),
+      cell: (entry) => (
+        <Badge variant="outline" className="px-1.5 text-muted-foreground">
+          {t(`type.${entry.mediaType}`)}
+        </Badge>
+      ),
+    },
+    {
+      id: "year",
+      label: t("entry.year"),
+      cell: (entry) => entry.year ?? t("common.unknown"),
+    },
+    {
+      id: "status",
+      label: t("entry.status"),
+      header: (
+        <DataTableColumnFilter
+          label={t("entry.status")}
+          value={query.status ?? "all"}
+          options={(["all", "planned", "watching", "completed"] as const).map(
+            (value) => ({ value, label: t(`status.${value}`) }),
+          )}
+          onValueChange={(value) => {
+            if (
+              value !== "all" &&
+              value !== "planned" &&
+              value !== "watching" &&
+              value !== "completed"
+            )
+              return;
+            setQuery((previous) => ({
+              ...previous,
+              status: value === "all" ? undefined : value,
+              page: 1,
+            }));
+          }}
+        />
+      ),
+      cell: (entry) => (
+        <Badge variant="outline" className="px-1.5 text-muted-foreground">
+          {entry.status === "completed" ? (
+            <CircleCheckIcon
+              className="fill-success text-background"
+              aria-hidden="true"
+            />
+          ) : entry.status === "watching" ? (
+            <LoaderCircleIcon aria-hidden="true" />
+          ) : (
+            <CircleDashedIcon aria-hidden="true" />
+          )}
+          {t(`status.${entry.status}`)}
+        </Badge>
+      ),
+    },
+    {
+      id: "watchedAt",
+      label: t("entry.watchedAt"),
+      cell: (entry) => entry.watchedAt ?? t("common.unknown"),
+    },
+  ];
   return (
     <div className="@container/media flex min-w-0 flex-col gap-4">
-      <Card>
-        <CardHeader>
-          <CardTitle>{t(`scope.${client.scope}`)}</CardTitle>
-          <CardDescription>{t(`scope.${client.scope}Hint`)}</CardDescription>
-        </CardHeader>
-        <CardContent className="flex flex-col gap-4">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div className="flex flex-wrap gap-2">
-              {list &&
-                (["all", "planned", "watching", "completed"] as const).map(
-                  (status) => (
-                    <Badge variant="secondary" key={status}>
-                      {t("list.count", {
-                        status: t(
-                          status === "all" ? "list.all" : `status.${status}`,
-                        ),
-                        count: list.counts[status],
-                      })}
-                    </Badge>
-                  ),
+      <MediaError error={detailTask.error} />
+      {selected ? (
+        <Card>
+          <CardHeader>
+            <div className="flex flex-wrap justify-between gap-2">
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setSelected(null)}
+              >
+                <ArrowLeftIcon data-icon="inline-start" />
+                {t("common.back")}
+              </Button>
+              <div className="flex max-w-full flex-wrap gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={listTask.pending}
+                  onClick={() => {
+                    detailTask.cancel();
+                    setSelected(null);
+                    setRevision((value) => value + 1);
+                  }}
+                >
+                  <RefreshCwIcon data-icon="inline-start" />
+                  {t("common.refresh")}
+                </Button>
+                {allowed && (
+                  <>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setEditor(selected)}
+                    >
+                      <PencilIcon data-icon="inline-start" />
+                      {t("common.edit")}
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setGallery(true)}
+                    >
+                      <ImageIcon data-icon="inline-start" />
+                      {t("entry.gallery")}
+                    </Button>
+                    <Button
+                      variant="destructive"
+                      size="sm"
+                      onClick={() => setRemoving(true)}
+                    >
+                      <TrashIcon data-icon="inline-start" />
+                      {t("common.remove")}
+                    </Button>
+                  </>
                 )}
+              </div>
             </div>
-            <div className="flex flex-wrap gap-2">
+          </CardHeader>
+          <CardContent>
+            <MediaDetails
+              key={`${selected.id}:${selected.version}`}
+              entry={selected}
+              imageLoader={imageLoader}
+              onActor={showActor}
+              onCopyMagnet={onCopyMagnet}
+              onSignIn={onSignIn}
+            />
+          </CardContent>
+        </Card>
+      ) : (
+        <DataTable
+          label={t("list.showing")}
+          data={
+            listTask.pending || detailTask.pending
+              ? EMPTY_ENTRIES
+              : (list?.items ?? EMPTY_ENTRIES)
+          }
+          columns={columns}
+          getRowLabel={(entry) => entry.title}
+          pagination={{
+            page: list?.page ?? query.page ?? 1,
+            pageSize: list?.pageSize ?? query.pageSize ?? 10,
+            total: list?.total ?? 0,
+            pending: listTask.pending || detailTask.pending,
+            onChange: (page, pageSize) =>
+              setQuery((previous) => ({ ...previous, page, pageSize })),
+          }}
+          toolbar={
+            <search aria-label={t("list.query")} className="w-full max-w-sm">
+              <form
+                aria-label={t("list.query")}
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  setSelected(null);
+                  setQuery((previous) => ({
+                    ...previous,
+                    q: q.trim() || undefined,
+                    page: 1,
+                  }));
+                }}
+              >
+                <FieldGroup>
+                  <Field>
+                    <FieldLabel htmlFor={`${prefix}-q`} className="sr-only">
+                      {t("list.query")}
+                    </FieldLabel>
+                    <div className="flex items-center gap-2">
+                      <InputGroup>
+                        <InputGroupInput
+                          ref={searchInput}
+                          id={`${prefix}-q`}
+                          type="search"
+                          name="q"
+                          placeholder={t("list.placeholder")}
+                          value={q}
+                          maxLength={300}
+                          autoCorrect="off"
+                          autoCapitalize="none"
+                          spellCheck={false}
+                          enterKeyHint="search"
+                          className="[&::-webkit-search-cancel-button]:appearance-none"
+                          onChange={(event) => setQ(event.target.value)}
+                        />
+                        {(q || query.q || query.mediaType || query.status) && (
+                          <InputGroupAddon align="inline-end">
+                            <InputGroupButton
+                              size="icon-xs"
+                              aria-label={t("list.reset")}
+                              title={t("list.reset")}
+                              onClick={() => {
+                                setQ("");
+                                setSelected(null);
+                                setQuery((previous) => ({
+                                  page: 1,
+                                  pageSize: previous.pageSize ?? 10,
+                                  sort: "updated",
+                                }));
+                                searchInput.current?.focus();
+                              }}
+                            >
+                              <XIcon aria-hidden="true" />
+                            </InputGroupButton>
+                          </InputGroupAddon>
+                        )}
+                      </InputGroup>
+                      <Button type="submit" size="sm">
+                        <SearchIcon
+                          data-icon="inline-start"
+                          aria-hidden="true"
+                        />
+                        {t("common.search")}
+                      </Button>
+                    </div>
+                  </Field>
+                </FieldGroup>
+              </form>
+            </search>
+          }
+          actions={
+            <>
               <Button
                 variant="outline"
                 size="sm"
@@ -220,311 +468,59 @@ function WorkspaceContent({
                     <PlusIcon data-icon="inline-start" />
                     {t("common.create")}
                   </Button>
-                  <Button size="sm" onClick={() => setImporting(true)}>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setImporting(true)}
+                  >
                     <SearchIcon data-icon="inline-start" />
                     {t("common.import")}
                   </Button>
                 </>
               )}
-            </div>
-          </div>
-          <form
-            className="flex flex-col gap-3"
-            onSubmit={(event) => {
-              event.preventDefault();
-              setSelected(null);
-              setQuery((previous) => ({
-                ...previous,
-                q: q.trim() || undefined,
-                genre: genre.trim() || undefined,
-                year: year ? Number(year) : undefined,
-                page: 1,
-              }));
-            }}
-          >
-            <FieldGroup className="grid grid-cols-2 @xl/media:grid-cols-4 @5xl/media:grid-cols-6">
-              <Field className="col-span-2">
-                <FieldLabel htmlFor={`${prefix}-q`}>
-                  {t("list.query")}
-                </FieldLabel>
-                <Input
-                  id={`${prefix}-q`}
-                  type="search"
-                  placeholder={t("list.placeholder")}
-                  value={q}
-                  maxLength={300}
-                  onChange={(event) => setQ(event.target.value)}
-                />
-              </Field>
-              <Field>
-                <FieldLabel htmlFor={`${prefix}-type`}>
-                  {t("entry.mediaType")}
-                </FieldLabel>
-                <Select
-                  id={`${prefix}-type`}
-                  value={query.mediaType ?? "all"}
-                  onChange={(event) => {
-                    setSelected(null);
-                    setQuery((previous) => ({
-                      ...previous,
-                      mediaType:
-                        event.target.value === "all"
-                          ? undefined
-                          : (event.target.value as MediaQuery["mediaType"]),
-                      page: 1,
-                    }));
-                  }}
-                >
-                  <option value="all">{t("type.all")}</option>
-                  <option value="movie">{t("type.movie")}</option>
-                  <option value="tv">{t("type.tv")}</option>
-                </Select>
-              </Field>
-              <Field>
-                <FieldLabel htmlFor={`${prefix}-status`}>
-                  {t("entry.status")}
-                </FieldLabel>
-                <Select
-                  id={`${prefix}-status`}
-                  value={query.status ?? "all"}
-                  onChange={(event) => {
-                    setSelected(null);
-                    setQuery((previous) => ({
-                      ...previous,
-                      status:
-                        event.target.value === "all"
-                          ? undefined
-                          : (event.target.value as MediaQuery["status"]),
-                      page: 1,
-                    }));
-                  }}
-                >
-                  <option value="all">{t("status.all")}</option>
-                  {(["planned", "watching", "completed"] as const).map(
-                    (status) => (
-                      <option key={status} value={status}>
-                        {t(`status.${status}`)}
-                      </option>
-                    ),
-                  )}
-                </Select>
-              </Field>
-              <Field>
-                <FieldLabel htmlFor={`${prefix}-genre`}>
-                  {t("list.genre")}
-                </FieldLabel>
-                <Input
-                  id={`${prefix}-genre`}
-                  value={genre}
-                  maxLength={100}
-                  onChange={(event) => setGenre(event.target.value)}
-                />
-              </Field>
-              <Field>
-                <FieldLabel htmlFor={`${prefix}-year`}>
-                  {t("list.year")}
-                </FieldLabel>
-                <Input
-                  id={`${prefix}-year`}
-                  type="number"
-                  min={1800}
-                  max={9999}
-                  value={year}
-                  onChange={(event) => setYear(event.target.value)}
-                />
-              </Field>
-              <Field>
-                <FieldLabel htmlFor={`${prefix}-sort`}>
-                  {t("list.sort")}
-                </FieldLabel>
-                <Select
-                  id={`${prefix}-sort`}
-                  value={query.sort}
-                  onChange={(event) =>
-                    setQuery((previous) => ({
-                      ...previous,
-                      sort: event.target.value as MediaQuery["sort"],
-                      page: 1,
-                    }))
-                  }
-                >
-                  {(["updated", "title", "year", "watched"] as const).map(
-                    (sort) => (
-                      <option key={sort} value={sort}>
-                        {t(`list.${sort === "year" ? "yearSort" : sort}`)}
-                      </option>
-                    ),
-                  )}
-                </Select>
-              </Field>
-            </FieldGroup>
-            <div className="flex flex-wrap gap-2">
-              <Button type="submit" size="sm">
-                <SearchIcon data-icon="inline-start" />
-                {t("common.search")}
-              </Button>
-              <Button
-                variant="ghost"
-                size="sm"
-                type="button"
-                onClick={() => {
-                  setQ("");
-                  setGenre("");
-                  setYear("");
-                  setSelected(null);
-                  setQuery({ page: 1, pageSize: 20, sort: "updated" });
-                }}
-              >
-                {t("list.reset")}
-              </Button>
-            </div>
-          </form>
-        </CardContent>
-      </Card>
-      <MediaError
-        error={listTask.error}
-        retry={() => setRevision((value) => value + 1)}
-      />
-      <MediaError error={detailTask.error} />
-      {selected ? (
-        <Card>
-          <CardHeader>
-            <div className="flex flex-wrap justify-between gap-2">
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => setSelected(null)}
-              >
-                <ArrowLeftIcon data-icon="inline-start" />
-                {t("common.back")}
-              </Button>
-              {allowed && (
-                <div className="flex flex-wrap gap-2">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => setEditor(selected)}
-                  >
-                    <PencilIcon data-icon="inline-start" />
-                    {t("common.edit")}
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => setGallery(true)}
-                  >
-                    <ImageIcon data-icon="inline-start" />
-                    {t("entry.gallery")}
-                  </Button>
-                  <Button
-                    variant="destructive"
-                    size="sm"
-                    onClick={() => setRemoving(true)}
-                  >
-                    <TrashIcon data-icon="inline-start" />
-                    {t("common.remove")}
-                  </Button>
-                </div>
-              )}
-            </div>
-          </CardHeader>
-          <CardContent>
-            <MediaDetails
-              key={`${selected.id}:${selected.version}`}
-              entry={selected}
-              imageLoader={imageLoader}
-              onActor={showActor}
-              onCopyMagnet={onCopyMagnet}
-              onSignIn={onSignIn}
-            />
-          </CardContent>
-        </Card>
-      ) : listTask.pending || detailTask.pending ? (
-        <MediaLoading />
-      ) : list && list.items.length === 0 ? (
-        <MediaEmpty
-          title={t(
-            query.q ||
-              query.mediaType ||
-              query.status ||
-              query.genre ||
-              query.year
-              ? "common.noMatches"
-              : "common.empty",
-          )}
-          description={
-            query.q ||
-            query.mediaType ||
-            query.status ||
-            query.genre ||
-            query.year
-              ? t("common.noMatchesHint")
-              : allowed
-                ? t("common.emptyHint")
-                : undefined
+            </>
           }
-        />
-      ) : (
-        list && (
-          <Card>
-            <CardContent>
-              <Table>
-                <TableCaption>{t("list.showing")}</TableCaption>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>{t("entry.title")}</TableHead>
-                    <TableHead>{t("entry.mediaType")}</TableHead>
-                    <TableHead>{t("entry.year")}</TableHead>
-                    <TableHead>{t("entry.status")}</TableHead>
-                    <TableHead>{t("entry.watchedAt")}</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {list.items.map((entry) => (
-                    <TableRow key={entry.id}>
-                      <TableCell>
-                        <Button
-                          variant="link"
-                          className="h-auto max-w-80 justify-start whitespace-normal p-0 text-left"
-                          aria-label={t("common.details", {
-                            title: entry.title,
-                          })}
-                          onClick={() => openEntry(entry.id)}
-                        >
-                          {entry.title}
-                        </Button>
-                        {entry.originalTitle &&
-                          entry.originalTitle !== entry.title && (
-                            <p className="max-w-80 truncate text-xs text-muted-foreground">
-                              {entry.originalTitle}
-                            </p>
-                          )}
-                      </TableCell>
-                      <TableCell>{t(`type.${entry.mediaType}`)}</TableCell>
-                      <TableCell>{entry.year ?? t("common.unknown")}</TableCell>
-                      <TableCell>
-                        <Badge variant="secondary">
-                          {t(`status.${entry.status}`)}
-                        </Badge>
-                      </TableCell>
-                      <TableCell>
-                        {entry.watchedAt ?? t("common.unknown")}
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </CardContent>
-          </Card>
-        )
-      )}
-      {!selected && list && (
-        <MediaPagination
-          total={list.total}
-          page={list.page}
-          pageSize={list.pageSize}
-          pending={listTask.pending}
-          onPage={(page) => setQuery((previous) => ({ ...previous, page }))}
+          rowActions={(entry) => [
+            {
+              label: t("common.viewDetails"),
+              onSelect: () => openEntry(entry.id),
+            },
+            ...(allowed
+              ? [
+                  {
+                    label: t("common.edit"),
+                    onSelect: () => openEntry(entry.id, "edit"),
+                  },
+                  {
+                    label: t("entry.gallery"),
+                    onSelect: () => openEntry(entry.id, "gallery"),
+                  },
+                  {
+                    label: t("common.remove"),
+                    destructive: true,
+                    onSelect: () => openEntry(entry.id, "remove"),
+                  },
+                ]
+              : []),
+          ]}
+          emptyState={
+            listTask.pending || detailTask.pending ? (
+              <MediaLoading />
+            ) : listTask.error ? (
+              <MediaError
+                error={listTask.error}
+                retry={() => setRevision((value) => value + 1)}
+              />
+            ) : (
+              <p className="text-sm text-muted-foreground">
+                {t(
+                  query.q || query.mediaType || query.status
+                    ? "common.noMatches"
+                    : "common.empty",
+                )}
+              </p>
+            )
+          }
         />
       )}
       {editor && allowed && (

@@ -1,18 +1,24 @@
 import { Button } from "@assemble/ui/button";
 import { Field, FieldGroup, FieldLabel } from "@assemble/ui/field";
 import { Input } from "@assemble/ui/input";
-import { ChevronLeftIcon, ChevronRightIcon, SearchIcon } from "lucide-react";
+import { SearchIcon } from "lucide-react";
 import { useId, useState } from "react";
 import { useAdminTranslation } from "../lib/i18n";
 
 export function useListQuery() {
-  const [search, setSearch] = useState({ draft: "", query: "", page: 1 });
+  const [search, setSearch] = useState({
+    draft: "",
+    query: "",
+    page: 1,
+    pageSize: 10,
+  });
   return {
     ...search,
     setDraft: (draft: string) => setSearch((state) => ({ ...state, draft })),
     submit: () =>
       setSearch((state) => ({ ...state, query: state.draft.trim(), page: 1 })),
-    setPage: (page: number) => setSearch((state) => ({ ...state, page })),
+    setPagination: (page: number, pageSize: number) =>
+      setSearch((state) => ({ ...state, page, pageSize })),
   };
 }
 
@@ -32,7 +38,7 @@ export function SearchForm({
   const { t } = useAdminTranslation();
   const id = useId();
   return (
-    <search aria-label={label}>
+    <search aria-label={label} className="w-full max-w-sm">
       <form
         onSubmit={(event) => {
           event.preventDefault();
@@ -62,51 +68,5 @@ export function SearchForm({
         </FieldGroup>
       </form>
     </search>
-  );
-}
-
-export function PageControls({
-  page,
-  pageSize,
-  total,
-  setPage,
-}: {
-  page: number;
-  pageSize: number;
-  total: number;
-  setPage: (page: number) => void;
-}) {
-  const { t } = useAdminTranslation();
-  const pages = Math.max(1, Math.ceil(total / pageSize));
-  return (
-    <div className="flex flex-wrap items-center justify-between gap-2">
-      <p
-        className="text-sm text-muted-foreground"
-        aria-live="polite"
-        aria-atomic="true"
-      >
-        {t("pagination.summary", { count: total, page, pages })}
-      </p>
-      <nav aria-label={t("pagination.label")} className="flex gap-2">
-        <Button
-          variant="outline"
-          size="sm"
-          disabled={page <= 1}
-          onClick={() => setPage(page - 1)}
-        >
-          <ChevronLeftIcon data-icon="inline-start" aria-hidden="true" />
-          {t("pagination.previous")}
-        </Button>
-        <Button
-          variant="outline"
-          size="sm"
-          disabled={page >= pages}
-          onClick={() => setPage(page + 1)}
-        >
-          {t("pagination.next")}
-          <ChevronRightIcon data-icon="inline-end" aria-hidden="true" />
-        </Button>
-      </nav>
-    </div>
   );
 }
