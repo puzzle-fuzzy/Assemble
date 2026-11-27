@@ -10,6 +10,7 @@ import type {
   AdminUser,
 } from "./lib/api";
 import {
+  adminLocation,
   button,
   cleanup,
   click,
@@ -64,6 +65,7 @@ const login: AdminLogin = {
 };
 
 const originalFetch = globalThis.fetch;
+let restoreLocation: () => void;
 const requests: { path: string; init: RequestInit | undefined }[] = [];
 let handle: (path: string, init?: RequestInit) => Response | Promise<Response>;
 
@@ -98,7 +100,7 @@ function defaultResponse(path: string): Response {
 beforeEach(() => {
   setLanguage("zh-CN");
   document.body.replaceChildren();
-  window.history.replaceState(null, "", "/admin/");
+  restoreLocation = adminLocation();
   requests.length = 0;
   handle = defaultResponse;
   globalThis.fetch = mock((input: RequestInfo | URL, init?: RequestInit) => {
@@ -110,6 +112,7 @@ beforeEach(() => {
 
 afterEach(async () => {
   await cleanup();
+  restoreLocation();
   globalThis.fetch = originalFetch;
 });
 
@@ -162,7 +165,9 @@ describe("管理端真实数据和访问权限", () => {
       await settle();
       expect(document.body.querySelector('[role="dialog"]')).toBeNull();
       expect(document.activeElement === trigger).toBe(true);
-      expect(window.location.hash).toBe("#users");
+      expect(window.location.hash).toBe(
+        `#users?q=${encodeURIComponent("张三")}`,
+      );
       expect(
         host.querySelector<HTMLInputElement>('input[type="search"]')?.value,
       ).toBe("张三");
@@ -384,7 +389,9 @@ describe("用户、设备和登录记录的交互", () => {
     expect(dialog?.textContent).toContain("工作电脑");
     expect(dialog?.textContent).toContain("GitHub");
     expect(dialog?.contains(document.activeElement)).toBe(true);
-    expect(window.location.hash).toBe("#users");
+    expect(
+      new URLSearchParams(window.location.hash.split("?")[1]).get("q"),
+    ).toBe("张三+工作@example.test");
     expect(host.querySelector("tbody")).not.toBeNull();
     await click(button(document.body, "关闭"));
     expect(document.body.querySelector('[role="dialog"]')).toBeNull();

@@ -1,5 +1,6 @@
 import { Button } from "@assemble/ui/button";
 import { DataTable, type DataTableColumn } from "@assemble/ui/data-table";
+import { usePageCorrection } from "@assemble/ui/hooks/use-url-state";
 import { useUiTranslation } from "@assemble/ui/lib/i18n";
 import { useState } from "react";
 import {
@@ -69,7 +70,7 @@ export function DrivePage({
   onAccessFailure: (failure: AccessFailure) => void;
 }) {
   const { t, i18n } = useAdminTranslation();
-  const query = useListQuery();
+  const query = useListQuery("drive");
   const files = useResource<AdminPage<AdminDriveFile>>(
     listPath("drive/files", query.query, query.page, query.pageSize),
     onAccessFailure,
@@ -82,6 +83,7 @@ export function DrivePage({
   const [preview, setPreview] = useState<AdminDriveFile | null>(null);
   const { t: sharedText } = useUiTranslation();
   const page = files.resource.phase === "ready" ? files.resource.value : null;
+  usePageCorrection(page, query.correctPage);
   const format = (bytes: number) =>
     storageBytes(bytes, i18n.resolvedLanguage || i18n.language);
   const columns: DataTableColumn<AdminDriveFile>[] = [

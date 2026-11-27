@@ -26,18 +26,25 @@ import {
   DialogTitle,
 } from "@assemble/ui/dialog";
 import { Field, FieldGroup, FieldLabel } from "@assemble/ui/field";
+import {
+  usePageCorrection,
+  useUrlState,
+} from "@assemble/ui/hooks/use-url-state";
 import { Input } from "@assemble/ui/input";
 import { Textarea } from "@assemble/ui/textarea";
 import { PlusIcon, RefreshCwIcon } from "lucide-react";
 import {
   type ReactNode,
+  useCallback,
   useEffect,
   useId,
   useLayoutEffect,
+  useMemo,
   useRef,
   useState,
 } from "react";
 import type { MediaClient, MediaCollectionsClient } from "../client";
+import { collectionQueryCodec } from "../hooks/list-location";
 import {
   type MediaAccessFailure,
   mediaErrorCode,
@@ -62,6 +69,7 @@ import { MediaImage } from "./media-image";
 import { MediaRecordedTime } from "./recorded-time";
 
 export interface MediaCollectionsManagerProps {
+  listLocation?: string;
   presentation?: "default" | "management";
   toolbarActions?: ReactNode;
   client: MediaCollectionsClient;
@@ -76,6 +84,7 @@ export function MediaCollectionsManager(props: MediaCollectionsManagerProps) {
   return <CollectionsContent key={props.accountKey} {...props} />;
 }
 function CollectionsContent({
+  listLocation,
   presentation = "default",
   toolbarActions,
   client,
@@ -86,12 +95,22 @@ function CollectionsContent({
   onCopyMagnet,
 }: MediaCollectionsManagerProps) {
   const { t } = useMediaTranslation();
-  const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(
-    presentation === "management" ? 20 : 12,
+  const defaultPageSize = presentation === "management" ? 20 : 12;
+  const codec = useMemo(
+    () => collectionQueryCodec(defaultPageSize),
+    [defaultPageSize],
   );
+  const [query, setQuery] = useUrlState(codec, listLocation);
+  const { page, pageSize } = query;
+  const setPage = (page: number) =>
+    setQuery((previous) => ({ ...previous, page }));
   const [revision, setRevision] = useState(0);
   const [list, setList] = useState<MediaCollectionList | null>(null);
+  const correctPage = useCallback(
+    (page: number, pageSize: number) => setQuery({ page, pageSize }, true),
+    [setQuery],
+  );
+  usePageCorrection(list, correctPage);
   const [editing, setEditing] = useState<MediaCollection | "new" | null>(null);
   const [removing, setRemoving] = useState<MediaCollection | null>(null);
   const [selected, setSelected] = useState<MediaEntry | null>(null);
@@ -161,8 +180,10 @@ function CollectionsContent({
             total: list?.total ?? 0,
             pending: task.pending,
             onChange: (nextPage, nextSize) => {
-              setPage(nextPage);
-              setPageSize(nextSize);
+              setQuery({
+                page: nextSize === pageSize ? nextPage : 1,
+                pageSize: nextSize,
+              });
             },
           }}
           actions={

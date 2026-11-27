@@ -25,6 +25,10 @@ import {
 } from "@assemble/ui/dialog";
 import { Field, FieldGroup, FieldLabel } from "@assemble/ui/field";
 import {
+  usePageCorrection,
+  useUrlState,
+} from "@assemble/ui/hooks/use-url-state";
+import {
   InputGroup,
   InputGroupAddon,
   InputGroupButton,
@@ -49,10 +53,12 @@ import {
   useCallback,
   useEffect,
   useId,
+  useMemo,
   useRef,
   useState,
 } from "react";
 import type { MediaClient } from "../client";
+import { mediaQueryCodec } from "../hooks/list-location";
 import { type MediaAccessFailure, useMediaTask } from "../hooks/use-media-task";
 import { useMediaTranslation } from "../i18n";
 import type {
@@ -62,7 +68,6 @@ import type {
   MediaEntry,
   MediaList,
   MediaPersonIdentity,
-  MediaQuery,
   MediaType,
 } from "../model";
 import { MediaEditor } from "./editor";
@@ -88,6 +93,7 @@ export interface MediaPageLocation {
 }
 
 export interface MediaWorkspaceProps {
+  listLocation?: string;
   presentation?: "default" | "management";
   toolbarActions?: ReactNode;
   client: MediaClient;
@@ -108,6 +114,7 @@ export function MediaWorkspace(props: MediaWorkspaceProps) {
   );
 }
 function WorkspaceContent({
+  listLocation,
   presentation = "default",
   toolbarActions,
   client,
@@ -123,13 +130,20 @@ function WorkspaceContent({
   const prefix = useId();
   const searchInput = useRef<HTMLInputElement>(null);
   const defaultPageSize = presentation === "management" ? 20 : 10;
-  const [query, setQuery] = useState<MediaQuery>({
-    page: 1,
-    pageSize: defaultPageSize,
-    sort: "updated",
-  });
-  const [q, setQ] = useState("");
+  const codec = useMemo(
+    () => mediaQueryCodec(defaultPageSize),
+    [defaultPageSize],
+  );
+  const [query, setQuery] = useUrlState(codec, listLocation);
+  const [q, setQ] = useState(query.q ?? "");
+  useEffect(() => setQ(query.q ?? ""), [query.q]);
   const [list, setList] = useState<MediaList | null>(null);
+  const correctPage = useCallback(
+    (page: number, pageSize: number) =>
+      setQuery((previous) => ({ ...previous, page, pageSize }), true),
+    [setQuery],
+  );
+  usePageCorrection(list, correctPage);
   const [capabilities, setCapabilities] = useState<MediaCapabilities | null>(
     null,
   );
@@ -513,7 +527,11 @@ function WorkspaceContent({
             total: list?.total ?? 0,
             pending: listTask.pending || detailTask.pending,
             onChange: (page, pageSize) =>
-              setQuery((previous) => ({ ...previous, page, pageSize })),
+              setQuery((previous) => ({
+                ...previous,
+                page: pageSize === previous.pageSize ? page : 1,
+                pageSize,
+              })),
           }}
           toolbar={
             <search

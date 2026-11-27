@@ -13,6 +13,7 @@ import {
   DropdownMenuTrigger,
 } from "@assemble/ui/dropdown-menu";
 import { Field, FieldError, FieldLabel } from "@assemble/ui/field";
+import { usePageCorrection } from "@assemble/ui/hooks/use-url-state";
 import { Input } from "@assemble/ui/input";
 import {
   Tooltip,
@@ -46,6 +47,10 @@ import { SearchForm, useListQuery } from "./list-controls";
 import { storageBytes } from "./storage-overview";
 
 const EMPTY_ROWS: DhtObservation[] = [];
+const LIST_FILTERS = {
+  status: ["verified", "all", ...metadataStatuses],
+  source: ["all", "announce", "sample", "query"],
+};
 const ERROR_CODES = new Set([
   "DHT_UNAVAILABLE",
   "DHT_RETRY_COOLDOWN",
@@ -78,9 +83,8 @@ export function DhtPage({
   onAccessFailure: (failure: AccessFailure) => void;
 }) {
   const { t } = useDhtTranslation();
-  const query = useListQuery();
-  const [statusFilter, setStatusFilter] = useState("verified");
-  const [sourceFilter, setSourceFilter] = useState("all");
+  const query = useListQuery("dht", LIST_FILTERS);
+  const { status: statusFilter, source: sourceFilter } = query.filters;
   const queryId = useId();
   const [runtimeOpen, setRuntimeOpen] = useState(false);
   const [selected, setSelected] = useState<string | null>(null);
@@ -107,6 +111,7 @@ export function DhtPage({
     onAccessFailure,
   );
   const page = list.resource.phase === "ready" ? list.resource.value : null;
+  usePageCorrection(page, query.correctPage);
   const runtime =
     status.resource.phase === "ready" ? status.resource.value : null;
 
@@ -173,9 +178,7 @@ export function DhtPage({
     }
   }
   function filter(kind: "status" | "source", value: string) {
-    if (kind === "status") setStatusFilter(value);
-    else setSourceFilter(value);
-    query.setPagination(1, query.pageSize);
+    query.setFilter(kind, value);
   }
   const columns: DataTableColumn<DhtObservation>[] = [
     {

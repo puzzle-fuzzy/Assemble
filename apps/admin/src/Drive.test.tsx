@@ -5,6 +5,7 @@ import { App } from "./App";
 import type { AdminDriveFile, AdminStorage } from "./lib/api";
 import { adminDriveDownloadPath } from "./lib/api";
 import {
+  adminLocation,
   button,
   cleanup,
   click,
@@ -49,6 +50,7 @@ const files: AdminDriveFile[] = [
   },
 ];
 const originalFetch = globalThis.fetch;
+let restoreLocation: () => void;
 const requests: { path: string; init?: RequestInit }[] = [];
 let handle: (path: string, init?: RequestInit) => Response | Promise<Response>;
 const json = (value: unknown, status = 200) => Response.json(value, { status });
@@ -87,7 +89,7 @@ function response(path: string): Response {
 beforeEach(() => {
   setLanguage("zh-CN");
   document.body.replaceChildren();
-  window.history.replaceState(null, "", "/admin/");
+  restoreLocation = adminLocation();
   requests.length = 0;
   handle = response;
   globalThis.fetch = mock((input: RequestInfo | URL, init?: RequestInit) => {
@@ -98,6 +100,7 @@ beforeEach(() => {
 });
 afterEach(async () => {
   await cleanup();
+  restoreLocation();
   globalThis.fetch = originalFetch;
   setLanguage("zh-CN");
 });
@@ -160,7 +163,9 @@ test("云盘显示全站文件与真实容量，搜索分页、详情弹窗和�
   expect(dialog?.textContent).toContain("文件详情");
   expect(dialog?.textContent).toContain("application/pdf");
   expect(host.querySelector("tbody")?.textContent).toContain(files[0].name);
-  expect(window.location.hash).toBe("#drive");
+  expect(new URLSearchParams(window.location.hash.split("?")[1]).get("q")).toBe(
+    "报表+第一版@example.test",
+  );
   const before = requests.length;
   await act(async () => setLanguage("en"));
   expect(dialog?.textContent).toContain("File details");

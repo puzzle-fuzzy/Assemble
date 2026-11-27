@@ -10,11 +10,21 @@ import { MediaWorkspace } from "@assemble/media/components/workspace";
 import { useMediaTranslation } from "@assemble/media/i18n";
 import type { MediaEntry } from "@assemble/media/model";
 import { Button } from "@assemble/ui/button";
+import { setUrlParameter, useUrlState } from "@assemble/ui/hooks/use-url-state";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@assemble/ui/tabs";
 import { ExternalLinkIcon } from "lucide-react";
 import { useEffect, useMemo, useRef } from "react";
 import type { AccessFailure, AdminSession } from "../lib/api";
 import { useAdminTranslation } from "../lib/i18n";
+
+const tabCodec = {
+  read: (params: URLSearchParams) =>
+    ["library", "collections", "statistics"].find(
+      (tab) => tab === params.get("tab"),
+    ) ?? "library",
+  write: (params: URLSearchParams, tab: string) =>
+    setUrlParameter(params, "tab", tab, "library"),
+};
 
 function PublicPageLink({ href, label }: { href: string; label: string }) {
   const { t } = useAdminTranslation();
@@ -42,6 +52,7 @@ export function MediaPage({
 }) {
   const { t } = useMediaTranslation();
   const { t: adminT } = useAdminTranslation();
+  const [tab, setTab] = useUrlState(tabCodec, "media");
   const copyScope = useRef<{
     owner: string;
     csrf: string;
@@ -84,7 +95,7 @@ export function MediaPage({
     await navigator.clipboard.writeText(current.magnetUri);
   }
   return (
-    <Tabs defaultValue="library">
+    <Tabs value={tab} onValueChange={setTab}>
       <TabsList>
         <TabsTrigger value="library">
           {t("publication.allLibraries")}
@@ -94,6 +105,7 @@ export function MediaPage({
       </TabsList>
       <TabsContent value="library">
         <MediaWorkspace
+          listLocation="media"
           presentation="management"
           toolbarActions={
             <PublicPageLink
@@ -111,6 +123,7 @@ export function MediaPage({
       </TabsContent>
       <TabsContent value="collections">
         <MediaCollectionsManager
+          listLocation="media"
           presentation="management"
           toolbarActions={
             <PublicPageLink

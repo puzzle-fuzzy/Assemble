@@ -693,7 +693,9 @@ describe("影视业务界面与权限", () => {
     expect(
       host.querySelector<HTMLInputElement>('input[type="search"]')?.value,
     ).toBe("真实");
-    expect(window.location.hash).toBe("#media");
+    expect(
+      new URLSearchParams(window.location.hash.split("?")[1]).get("q"),
+    ).toBe("真实");
     expect(host.querySelector('thead [role="checkbox"]')).not.toBeNull();
     expect(host.querySelector('th[data-table-column="drag"]')).not.toBeNull();
     await click(button(document.body, "关闭"));

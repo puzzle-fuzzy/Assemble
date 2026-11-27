@@ -90,6 +90,10 @@ docker compose exec assemble assemble-server grant-super-admin <已验证邮箱>
 
 ## 开发与发布
 
+2026-11-27 用户反馈 DHT 翻页后刷新会回到第一页，并要求状态保存在地址栏。管理端的用户、设备、云盘、登录记录、DHT、影视片库和合集已统一按网址恢复分页；例如 `/admin/#dht?page=3&pageSize=50&status=all&source=sample&q=example`。页码、每页条数、已提交的搜索及列筛选进入哈希参数，刷新首次请求就使用这些值；浏览器前进、后退同步表格与搜索框，不写 localStorage。搜索和筛选变化回到第一页，每页条数变化也回到第一页；服务端返回的总数不足时，替换当前地址退到有效末页，避免后退循环。
+
+影视页用 `tab=collections` 或 `tab=statistics` 保留页签；片库的 `page/pageSize` 与合集的 `collectionPage/collectionPageSize` 独立保存，切换页签不相互覆盖。没有参数的旧书签仍按原默认值打开（每页 20 条、DHT 默认已验证），非法参数按有效默认值处理。只保存列表浏览条件；编辑弹窗草稿、账号凭据和 CSRF 不由此机制写入网址。桌面端共用的影视组件只有网页显式启用时才读取、更新网址。
+
 ```sh
 bun install --frozen-lockfile
 bun run admin:dev       # 127.0.0.1:1421/admin/，代理到 127.0.0.1:8787

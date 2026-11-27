@@ -64,7 +64,7 @@ const navigation = [
 type View = (typeof navigation)[number]["key"];
 
 function currentView(): View {
-  const hash = window.location.hash.slice(1);
+  const hash = window.location.hash.slice(1).split("?")[0];
   return navigation.find((item) => item.key === hash)?.key ?? "overview";
 }
 

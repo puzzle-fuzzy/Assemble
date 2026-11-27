@@ -4,6 +4,16 @@ import { adminText } from "../lib/i18n";
 
 const mounted: { host: HTMLElement; root: Root }[] = [];
 
+/** about:blank 不支持同源历史导航，网址相关测试必须先设置真实的测试源。 */
+export function adminLocation(path = "/admin/") {
+  const previous = window.location.href;
+  const dom = (
+    window as unknown as { happyDOM: { setURL: (url: string) => void } }
+  ).happyDOM;
+  dom.setURL(new URL(path, "http://localhost").href);
+  return () => dom.setURL(previous);
+}
+
 export async function render(ui: ReactElement) {
   const host = document.createElement("div");
   document.body.append(host);

@@ -1,6 +1,7 @@
 import { Badge } from "@assemble/ui/badge";
 import { Button } from "@assemble/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@assemble/ui/card";
+import { usePageCorrection } from "@assemble/ui/hooks/use-url-state";
 import { RefreshCwIcon } from "lucide-react";
 import { type ReactNode, useEffect, useState } from "react";
 import {
@@ -150,6 +151,7 @@ function Collection<T>({
     onAccessFailure,
   );
   const page = resource.phase === "ready" ? resource.value : null;
+  usePageCorrection(page, queryState.correctPage);
   const toolbar = (
     <SearchForm label={searchLabel} placeholder={placeholder} {...queryState} />
   );
@@ -198,7 +200,7 @@ export function UsersPage({
   onAccessFailure,
 }: AccessProps & { session: AdminSession }) {
   const { t } = useAdminTranslation();
-  const queryState = useListQuery();
+  const queryState = useListQuery("users");
   const [selected, setSelected] = useState<string | null>(null);
   return (
     <div className="flex min-w-0 flex-col gap-4">
@@ -243,7 +245,7 @@ export function UsersPage({
 
 export function DevicesPage({ onAccessFailure }: AccessProps) {
   const { t } = useAdminTranslation();
-  const queryState = useListQuery();
+  const queryState = useListQuery("devices");
   return (
     <Collection<AdminDevice>
       name="devices"
@@ -262,7 +264,7 @@ export function DevicesPage({ onAccessFailure }: AccessProps) {
 
 export function LoginsPage({ onAccessFailure }: AccessProps) {
   const { t } = useAdminTranslation();
-  const queryState = useListQuery();
+  const queryState = useListQuery("logins");
   return (
     <Collection<AdminLogin>
       name="logins"

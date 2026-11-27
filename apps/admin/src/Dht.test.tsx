@@ -8,6 +8,7 @@ import type { DhtDetails, DhtStatus } from "./lib/dht-api";
 import en from "./locales/dht.en.json";
 import zh from "./locales/dht.zh-CN.json";
 import {
+  adminLocation,
   button,
   cleanup,
   click,
@@ -28,6 +29,7 @@ const session: AdminSession = {
   csrfToken: "synthetic-csrf",
 };
 const originalFetch = globalThis.fetch;
+let restoreLocation: () => void;
 const requests: { path: string; init?: RequestInit }[] = [];
 let handle: (path: string, init?: RequestInit) => Response | Promise<Response>;
 function json(value: unknown, status = 200) {
@@ -70,6 +72,7 @@ async function chooseMode(host: HTMLElement, current: string, action: string) {
   await click(option);
 }
 beforeEach(async () => {
+  restoreLocation = adminLocation("/admin/#dht");
   requests.length = 0;
   handle = normal;
   await setLanguage("zh-CN");
@@ -83,6 +86,7 @@ beforeEach(async () => {
 });
 afterEach(async () => {
   await cleanup();
+  restoreLocation();
   globalThis.fetch = originalFetch;
 });
 
