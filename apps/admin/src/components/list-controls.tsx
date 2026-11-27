@@ -19,7 +19,7 @@ import { useAdminTranslation } from "../lib/i18n";
 const NO_FILTERS: Record<string, readonly string[]> = {};
 
 export function useListQuery(
-  route: string,
+  route?: string,
   filters: Record<string, readonly string[]> = NO_FILTERS,
 ) {
   const codec = useMemo(

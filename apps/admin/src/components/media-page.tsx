@@ -17,14 +17,16 @@ import { useEffect, useMemo, useRef } from "react";
 import type { AccessFailure, AdminSession } from "../lib/api";
 import { useAdminTranslation } from "../lib/i18n";
 
-const tabCodec = {
-  read: (params: URLSearchParams) =>
-    ["library", "collections", "statistics"].find(
-      (tab) => tab === params.get("tab"),
-    ) ?? "library",
-  write: (params: URLSearchParams, tab: string) =>
-    setUrlParameter(params, "tab", tab, "library"),
-};
+function mediaTabCodec(defaultTab: string) {
+  return {
+    read: (params: URLSearchParams) =>
+      ["library", "collections", "statistics"].find(
+        (tab) => tab === params.get("tab"),
+      ) ?? defaultTab,
+    write: (params: URLSearchParams, tab: string) =>
+      setUrlParameter(params, "tab", tab, defaultTab),
+  };
+}
 
 function PublicPageLink({ href, label }: { href: string; label: string }) {
   const { t } = useAdminTranslation();
@@ -44,14 +46,22 @@ function PublicPageLink({ href, label }: { href: string; label: string }) {
 }
 
 export function MediaPage({
+  focusEntryId,
+  focusCollectionId,
   session,
   onAccessFailure,
 }: {
+  focusEntryId?: string | null;
+  focusCollectionId?: string | null;
   session: AdminSession;
   onAccessFailure: (failure: AccessFailure) => void;
 }) {
   const { t } = useMediaTranslation();
   const { t: adminT } = useAdminTranslation();
+  const tabCodec = useMemo(
+    () => mediaTabCodec(focusCollectionId ? "collections" : "library"),
+    [focusCollectionId],
+  );
   const [tab, setTab] = useUrlState(tabCodec, "media");
   const copyScope = useRef<{
     owner: string;
@@ -106,6 +116,7 @@ export function MediaPage({
       <TabsContent value="library">
         <MediaWorkspace
           listLocation="media"
+          focusEntryId={focusEntryId}
           presentation="management"
           toolbarActions={
             <PublicPageLink
@@ -124,6 +135,7 @@ export function MediaPage({
       <TabsContent value="collections">
         <MediaCollectionsManager
           listLocation="media"
+          focusCollectionId={focusCollectionId}
           presentation="management"
           toolbarActions={
             <PublicPageLink

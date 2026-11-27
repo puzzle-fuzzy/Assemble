@@ -5,11 +5,20 @@
 import { useDisplayPreferences } from "@assemble/display";
 import type { MediaPageLocation } from "@assemble/media/components/workspace";
 import { Alert, AlertAction, AlertDescription } from "@assemble/ui/alert";
+import type { DriveTreeLocation } from "@assemble/ui/drive-tree-browser";
 import { FieldError } from "@assemble/ui/field";
 import { LoadingState } from "@assemble/ui/loading-state";
 import { PageBreadcrumbs } from "@assemble/ui/page-breadcrumbs";
 import { ArrowDownToLine, ArrowUpToLine, UserRound } from "lucide-react";
-import { Fragment, lazy, Suspense, useEffect, useRef, useState } from "react";
+import {
+  Fragment,
+  lazy,
+  Suspense,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 import { toast } from "sonner";
 import { AssistantDownloadsSetting } from "@/AssistantDownloadsSetting";
 import {
@@ -47,6 +56,7 @@ import { Switch } from "@/components/ui/switch";
 import { DownloadsPage } from "@/DownloadsPage";
 import { DrivePreviewAction } from "@/DrivePreview";
 import { DriveRenameAction } from "@/DriveRenameDialog";
+import { DriveWorkspace } from "@/DriveWorkspace";
 import { useSnapshot } from "@/hooks/use-snapshot";
 import {
   type Bridge,
@@ -127,6 +137,10 @@ export function App({
   const [mediaLocation, setMediaLocation] = useState<MediaPageLocation | null>(
     null,
   );
+  const [driveLocation, setDriveLocation] = useState<{
+    accountKey: string | null;
+    location: DriveTreeLocation | null;
+  } | null>(null);
   const [queries, setQueries] = useState<Partial<Record<Section, string>>>({});
   const contentHeading = useRef<HTMLSpanElement>(null);
   const [systemFocus, setSystemFocus] = useState<{
@@ -149,6 +163,15 @@ export function App({
     section === "media" && mediaLocation?.accountKey === accountId
       ? mediaLocation
       : null;
+  const currentDriveLocation =
+    section === "drive" && driveLocation?.accountKey === accountId
+      ? driveLocation.location
+      : null;
+  const updateDriveLocation = useCallback(
+    (location: DriveTreeLocation | null) =>
+      setDriveLocation({ accountKey: accountId, location }),
+    [accountId],
+  );
   const previousAccount = useRef(accountId);
   const previousSection = useRef(section);
   const compose = snapshot?.planner?.compose ?? null;
@@ -178,11 +201,23 @@ export function App({
   }, [focused]);
 
   const sectionLabel = SECTIONS().find((item) => item.id === section)?.label;
+  const driveFocusKey = currentDriveLocation?.currentId ?? null;
+  const previousDriveFocus = useRef<string | null>(null);
   useEffect(() => {
-    document.title = `${currentMediaLocation ? `${currentMediaLocation.title} · ` : ""}${sectionLabel} · Assemble`;
+    if (driveFocusKey !== previousDriveFocus.current && driveFocusKey !== null)
+      contentHeading.current?.focus();
+    previousDriveFocus.current = driveFocusKey;
+  }, [driveFocusKey]);
+  useEffect(() => {
+    const folderTitle =
+      currentDriveLocation?.currentId === "root"
+        ? undefined
+        : currentDriveLocation?.current;
+    const title = folderTitle ?? currentMediaLocation?.title;
+    document.title = `${title ? `${title} · ` : ""}${sectionLabel} · Assemble`;
     if (previousSection.current !== section) contentHeading.current?.focus();
     previousSection.current = section;
-  }, [section, sectionLabel, currentMediaLocation]);
+  }, [section, sectionLabel, currentMediaLocation, currentDriveLocation]);
 
   function navigate(next: Section) {
     setSection(next);
@@ -280,8 +315,14 @@ export function App({
                         },
                       ]
                     : []),
+                  ...(currentDriveLocation?.ancestors ?? []),
                 ]}
-                current={currentMediaLocation?.title ?? sectionLabel ?? ""}
+                current={
+                  currentDriveLocation?.current ??
+                  currentMediaLocation?.title ??
+                  sectionLabel ??
+                  ""
+                }
                 currentRef={contentHeading}
               />
             </div>
@@ -411,14 +452,41 @@ export function App({
                 aria-label={uiText("cloudDrive")}
                 hidden={section !== "drive"}
               >
-                <DriveCard
+                <DriveWorkspace
                   key={accountId ?? "signedOut"}
                   source={source}
                   snapshot={snapshot}
-                  onError={setActionError}
-                  query={queries.drive ?? ""}
-                  onQueryChange={(value) =>
-                    setQueries((previous) => ({ ...previous, drive: value }))
+                  onLocationChange={updateDriveLocation}
+                  progress={snapshot?.transfers
+                    .filter(
+                      (item) =>
+                        item.target === "drive" &&
+                        item.direction === "out" &&
+                        ["queued", "inProgress", "failed"].includes(item.phase),
+                    )
+                    .map((transfer) => (
+                      <TransferRow
+                        key={transfer.id}
+                        source={source}
+                        transfer={transfer}
+                        onError={setActionError}
+                        showPeer={false}
+                      />
+                    ))}
+                  legacy={
+                    <DriveCard
+                      key={accountId ?? "signedOut"}
+                      source={source}
+                      snapshot={snapshot}
+                      onError={setActionError}
+                      query={queries.drive ?? ""}
+                      onQueryChange={(value) =>
+                        setQueries((previous) => ({
+                          ...previous,
+                          drive: value,
+                        }))
+                      }
+                    />
                   }
                 />
               </section>

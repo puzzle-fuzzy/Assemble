@@ -1,5 +1,6 @@
 import { Button } from "@assemble/ui/button";
 import { DisplayPreferencesItems } from "@assemble/ui/display-preferences";
+import type { DriveTreeLocation } from "@assemble/ui/drive-tree-browser";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -25,6 +26,7 @@ import {
 import { SidebarAccountMenu } from "@assemble/ui/sidebar-account-menu";
 import {
   ChartNoAxesCombinedIcon,
+  ClipboardListIcon,
   CloudIcon,
   FilmIcon,
   InfoIcon,
@@ -36,9 +38,11 @@ import {
   UsersIcon,
 } from "lucide-react";
 import { lazy, Suspense, useEffect, useRef, useState } from "react";
+import { readActivityTarget } from "../lib/activity-api";
 import type { AccessFailure, AdminSession } from "../lib/api";
 import { useAdminTranslation } from "../lib/i18n";
 import { AboutDialog } from "./about-dialog";
+import { ActivityFileFocus } from "./activity-file-focus";
 import { DrivePage } from "./drive-page";
 import { LoadingContent } from "./feedback";
 import { DevicesPage, LoginsPage, OverviewPage, UsersPage } from "./pages";
@@ -50,6 +54,9 @@ const MediaPage = lazy(async () => ({
 const DhtPage = lazy(async () => ({
   default: (await import("./dht-page")).DhtPage,
 }));
+const ActivityPage = lazy(async () => ({
+  default: (await import("./activity-page")).ActivityPage,
+}));
 
 const navigation = [
   { key: "overview", icon: ChartNoAxesCombinedIcon },
@@ -57,6 +64,7 @@ const navigation = [
   { key: "devices", icon: MonitorIcon },
   { key: "drive", icon: CloudIcon },
   { key: "logins", icon: LogsIcon },
+  { key: "activity", icon: ClipboardListIcon },
   { key: "media", icon: FilmIcon },
   { key: "dht", icon: RadioTowerIcon },
 ] as const;
@@ -64,7 +72,7 @@ const navigation = [
 type View = (typeof navigation)[number]["key"];
 
 function currentView(): View {
-  const hash = window.location.hash.slice(1).split("?")[0];
+  const hash = window.location.hash.slice(1).split(/[/?]/)[0];
   return navigation.find((item) => item.key === hash)?.key ?? "overview";
 }
 
@@ -77,6 +85,11 @@ export function AdminShell({
 }) {
   const { t } = useAdminTranslation();
   const [view, setView] = useState<View>(currentView);
+  const [location, setLocation] = useState(() => window.location.hash.slice(1));
+  const parameters = new URLSearchParams(location.split("?")[1] ?? "");
+  const [driveLocation, setDriveLocation] = useState<DriveTreeLocation | null>(
+    null,
+  );
   const [aboutOpen, setAboutOpen] = useState(false);
   const [storageFocus, setStorageFocus] = useState(0);
   const accountFooter = useRef<HTMLDivElement>(null);
@@ -89,7 +102,10 @@ export function AdminShell({
     navigation.find((item) => item.key === view) ?? navigation[0];
 
   useEffect(() => {
-    const update = () => setView(currentView());
+    const update = () => {
+      setView(currentView());
+      setLocation(window.location.hash.slice(1));
+    };
     window.addEventListener("hashchange", update);
     window.addEventListener("popstate", update);
     return () => {
@@ -101,7 +117,8 @@ export function AdminShell({
   useEffect(() => {
     document.title = t("app.documentTitle", { page: pageName });
   }, [pageName, t]);
-  const focusKey = view;
+  const focusKey =
+    view === "drive" ? `${view}:${driveLocation?.currentId ?? "root"}` : view;
   const previousFocusKey = useRef(focusKey);
   useEffect(() => {
     // 切换语言只更新文案，不把焦点从偏好菜单或搜索框抢到页面标题。
@@ -112,9 +129,10 @@ export function AdminShell({
   }, [focusKey]);
 
   function navigate(next: View) {
-    if (next === view) return;
+    if (next === view && location === next) return;
     window.history.pushState(null, "", `#${next}`);
     setView(next);
+    setLocation(next);
   }
 
   return (
@@ -251,8 +269,13 @@ export function AdminShell({
                   onNavigate: () => navigate("overview"),
                   hideOnNarrow: true,
                 },
+                ...(view === "drive" ? (driveLocation?.ancestors ?? []) : []),
               ]}
-              current={pageName}
+              current={
+                view === "drive" && driveLocation
+                  ? driveLocation.current
+                  : pageName
+              }
               currentRef={pageHeading}
             />
           </div>
@@ -283,13 +306,42 @@ export function AdminShell({
           {view === "devices" && (
             <DevicesPage onAccessFailure={onAccessFailure} />
           )}
-          {view === "drive" && <DrivePage onAccessFailure={onAccessFailure} />}
+          {view === "drive" && (
+            <DrivePage
+              onAccessFailure={onAccessFailure}
+              onLocationChange={setDriveLocation}
+            />
+          )}
           {view === "logins" && (
             <LoginsPage onAccessFailure={onAccessFailure} />
           )}
+          {view === "activity" && (
+            <Suspense fallback={<LoadingContent />}>
+              <ActivityPage
+                target={readActivityTarget(location)}
+                onAccessFailure={onAccessFailure}
+              />
+            </Suspense>
+          )}
+          {view === "drive" && parameters.get("file") && (
+            <ActivityFileFocus
+              key={parameters.get("file")}
+              id={parameters.get("file") ?? ""}
+              onClose={() => {
+                window.history.replaceState(null, "", "#drive");
+                setLocation("drive");
+              }}
+              onAccessFailure={onAccessFailure}
+            />
+          )}
           {view === "media" && (
             <Suspense fallback={<LoadingContent />}>
-              <MediaPage session={session} onAccessFailure={onAccessFailure} />
+              <MediaPage
+                session={session}
+                onAccessFailure={onAccessFailure}
+                focusEntryId={parameters.get("entry")}
+                focusCollectionId={parameters.get("collection")}
+              />
             </Suspense>
           )}
           {view === "dht" && (

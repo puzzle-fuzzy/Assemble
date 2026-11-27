@@ -70,6 +70,7 @@ import { MediaRecordedTime } from "./recorded-time";
 
 export interface MediaCollectionsManagerProps {
   listLocation?: string;
+  focusCollectionId?: string | null;
   presentation?: "default" | "management";
   toolbarActions?: ReactNode;
   client: MediaCollectionsClient;
@@ -85,6 +86,7 @@ export function MediaCollectionsManager(props: MediaCollectionsManagerProps) {
 }
 function CollectionsContent({
   listLocation,
+  focusCollectionId,
   presentation = "default",
   toolbarActions,
   client,
@@ -127,6 +129,16 @@ function CollectionsContent({
     setList(null);
     void task.run((signal) => client.list({ page, pageSize }, signal), setList);
   }, [client, page, pageSize, revision, task.run]);
+  useEffect(() => {
+    if (!focusCollectionId) return;
+    setCollectionDetails(null);
+    setDetailsOpen(true);
+    void collectionTask.run(
+      (signal) => client.get(focusCollectionId, signal),
+      setCollectionDetails,
+    );
+    return () => collectionTask.cancel();
+  }, [focusCollectionId, client, collectionTask.run, collectionTask.cancel]);
   function showCollection(collection: MediaCollection) {
     detailTrigger.current =
       document.activeElement instanceof HTMLElement

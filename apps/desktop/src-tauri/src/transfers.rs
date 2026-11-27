@@ -502,6 +502,17 @@ async fn send<R: tauri::Runtime>(state: &AppState<R>, id: &str) {
             )
             .await
             .map(|_| Delivered::ToDrive),
+        Destination::DriveFolder(parent) => state
+            .client
+            .drive_tree_upload(
+                parent,
+                &outgoing.file.name(),
+                &outgoing.file,
+                options,
+                Some(&mut report),
+            )
+            .await
+            .map(|_| Delivered::ToDrive),
     };
     let uploaded = match uploaded {
         Ok(uploaded) => uploaded,

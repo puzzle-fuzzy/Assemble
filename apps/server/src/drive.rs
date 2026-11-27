@@ -1,4 +1,4 @@
-//! 云盘：账户在服务端的一份文件。第一版是平铺的一层，没有文件夹。
+//! 云盘内容与兼容旧端的平铺接口；目录组织由 `drive_tree` 提供。
 //!
 //! - **内容按摘要存放、按引用计数**（见 `blobs`）：同一个文件存两回，磁盘上只有一份；
 //!   删掉其中一个，另一个照常能下载。
@@ -42,7 +42,7 @@ pub struct DriveRow {
 }
 
 impl DriveRow {
-    fn view(&self) -> DriveFile {
+    pub(crate) fn view(&self) -> DriveFile {
         DriveFile {
             id: self.id.clone(),
             name: self.name.clone(),
@@ -58,15 +58,15 @@ impl DriveRow {
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct NewDriveFile {
-    name: String,
-    size: u64,
-    sha256: String,
+    pub(crate) name: String,
+    pub(crate) size: u64,
+    pub(crate) sha256: String,
     #[serde(default)]
-    mime_type: Option<String>,
+    pub(crate) mime_type: Option<String>,
 }
 
 /// 这个账户的云盘已经占了多少字节。
-async fn used_bytes<'e, E>(executor: E, account_id: &str) -> Result<u64, sqlx::Error>
+pub(crate) async fn used_bytes<'e, E>(executor: E, account_id: &str) -> Result<u64, sqlx::Error>
 where
     E: sqlx::Executor<'e, Database = sqlx::Sqlite>,
 {
@@ -152,14 +152,30 @@ pub async fn upload(
 ) -> Result<Response, ApiError> {
     let Query(input) = query
         .map_err(|_| ApiError::invalid("the query string is not a valid drive upload request"))?;
+    let row = upload_at(&state, &identity, &input, None, request).await?;
+    Ok((StatusCode::CREATED, Json(row.view())).into_response())
+}
+
+pub(crate) async fn upload_at(
+    state: &Shared,
+    identity: &Identity,
+    input: &NewDriveFile,
+    parent: Option<&str>,
+    request: Request,
+) -> Result<DriveRow, ApiError> {
     let (parts, body) = request.into_parts();
-    let name = check_new_file(&input, &parts.headers);
+    let name = check_new_file(input, &parts.headers);
 
     // 这几项检查不用看正文。拒绝之前要让对方把话说完，见 [`http::refuse_upload`]。
     let limit = state.config.drive_quota_bytes;
     let admitted = match name {
         Ok(name) => {
             // 先按"收下之后会不会超"拒绝，免得白收一遍。
+            if let Err(error) =
+                crate::drive_tree::check_parent(&state.pool, &identity.account_id, parent).await
+            {
+                return Err(http::refuse_upload(body, error).await);
+            }
             let used = used_bytes(&state.pool, &identity.account_id).await?;
             // 全站的总量也先看一眼，免得白收一遍。作数的是入库时事务里的那一次。
             let full = blobs::over_budget(
@@ -192,7 +208,7 @@ pub async fn upload(
         .await
         .map_err(|error| rejected(&error))?;
 
-    match record_file(&state, &identity, &input, name).await {
+    match record_file(state, identity, input, name, parent).await {
         Ok(row) => {
             audit::record(
                 &state.pool,
@@ -203,7 +219,7 @@ pub async fn upload(
             )
             .await;
             tracing::info!(file = %row.id, size = row.size, "file stored in the drive");
-            Ok((StatusCode::CREATED, Json(row.view())).into_response())
+            Ok(row)
         }
         // 内容收下了，记录却没记上：内容不能留着没人认。
         Err(error) => {
@@ -219,11 +235,14 @@ async fn record_file(
     identity: &Identity,
     input: &NewDriveFile,
     name: String,
+    parent: Option<&str>,
 ) -> Result<DriveRow, ApiError> {
     let id = crate::secrets::random_id().map_err(|error| ApiError::internal(error.to_string()))?;
     let size = i64::try_from(input.size).map_err(|_| ApiError::invalid("the file is too large"))?;
     let now = Timestamp::now().as_millis();
     let mut tx = state.pool.begin_with("BEGIN IMMEDIATE").await?;
+    crate::drive_tree::revalidate(&mut tx, identity).await?;
+    crate::drive_tree::check_parent(&mut *tx, &identity.account_id, parent).await?;
     // 上传可能花了一阵子，这期间别的文件也占了地方：以事务里看到的为准。
     let used = used_bytes(&mut *tx, &identity.account_id).await?;
     if used.saturating_add(input.size) > state.config.drive_quota_bytes {
@@ -244,8 +263,8 @@ async fn record_file(
     }
     blobs::retain(&mut *tx, &input.sha256, input.size).await?;
     sqlx::query(
-        "INSERT INTO drive_files (id, account_id, name, size, mime_type, sha256, created_at) \
-         VALUES (?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO drive_files (id, account_id, name, size, mime_type, sha256, created_at, parent_id) \
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(&id)
     .bind(&identity.account_id)
@@ -254,6 +273,7 @@ async fn record_file(
     .bind(&input.mime_type)
     .bind(&input.sha256)
     .bind(now)
+    .bind(parent)
     .execute(&mut *tx)
     .await?;
     tx.commit().await?;
@@ -330,12 +350,13 @@ pub async fn rename(
     let Some(name) = input.clean_name() else {
         return Err(ApiError::invalid("the file name is not acceptable"));
     };
-    let row = load(&state.pool, &identity.account_id, &id).await?;
-    sqlx::query("UPDATE drive_files SET name = ? WHERE id = ?")
+    let row: DriveRow = sqlx::query_as("UPDATE drive_files SET name = ?, version = version + 1, updated_at = ? WHERE account_id = ? AND id = ? RETURNING *")
         .bind(name)
-        .bind(&row.id)
-        .execute(&state.pool)
-        .await?;
+        .bind(Timestamp::now().as_millis())
+        .bind(&identity.account_id)
+        .bind(&id)
+        .fetch_optional(&state.pool)
+        .await?.ok_or_else(ApiError::not_found)?;
     audit::record(
         &state.pool,
         Some(&identity.account_id),

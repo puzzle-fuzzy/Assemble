@@ -14,6 +14,12 @@ import {
   isMediaList,
 } from "@assemble/media/guard";
 import {
+  type DriveTreeSource,
+  isDriveEntry,
+  isDriveFolder,
+  isDriveTreeListing,
+} from "@assemble/ui/lib/drive-tree";
+import {
   isFilePreview,
   type PreviewResource,
 } from "@assemble/ui/lib/file-preview";
@@ -59,6 +65,7 @@ export class BridgeError extends Error {
 }
 
 export interface Bridge {
+  driveTree: DriveTreeSource;
   systemNotificationsRefresh(): Promise<Snapshot>;
   systemNotificationsRead(
     items: import("@assemble/ui/lib/system-notifications").SystemNotificationRead[],
@@ -171,6 +178,37 @@ export interface Bridge {
 }
 
 export const bridge: Bridge = {
+  driveTree: {
+    list: async (query, signal, remember = false) => {
+      if (signal?.aborted)
+        throw new BridgeError("CANCELLED", "drive query cancelled");
+      const requestId = crypto.randomUUID();
+      const close = () => {
+        void invoke("drive_tree_cancel", { requestId }).catch(() => {});
+      };
+      signal?.addEventListener("abort", close, { once: true });
+      try {
+        return await mediaInvoke(
+          "drive_tree_list",
+          { query, remember, requestId },
+          isDriveTreeListing,
+          signal,
+        );
+      } finally {
+        signal?.removeEventListener("abort", close);
+        close();
+      }
+    },
+    create: (input) =>
+      mediaInvoke("drive_folder_create", { input }, isDriveFolder),
+    rename: (kind, id, input) =>
+      mediaInvoke("drive_tree_rename", { kind, id, input }, isDriveEntry),
+    move: (input) => mediaInvoke("drive_tree_move", { input }, isDriveEntry),
+    remove: (kind, id, version) =>
+      run(() => invoke<void>("drive_tree_delete", { kind, id, version })),
+    upload: (parentId) =>
+      checked(() => invoke<unknown>("drive_tree_upload", { parentId })),
+  },
   downloadPrepare: async (input) =>
     requireDownloadPreview(
       await invoke<unknown>("download_prepare", { input }),

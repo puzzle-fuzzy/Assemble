@@ -111,6 +111,65 @@ async function renderDrive() {
   return host;
 }
 
+test("管理员通过所属账户浏览目录，面包屑负责返回，写操作始终不出现", async () => {
+  const folder = {
+    id: "folder-1",
+    parentId: null,
+    name: "资料<中文>",
+    version: 1,
+    createdAt: "2026-11-27T01:00:00Z",
+    updatedAt: "2026-11-27T01:00:00Z",
+  };
+  handle = (path) => {
+    if (path.startsWith("/v1/admin/drive/tree?")) {
+      const query = new URL(path, "http://localhost").searchParams;
+      const inside = query.get("parentId") === folder.id;
+      return json({
+        current: inside ? folder : null,
+        ancestors: [],
+        items: inside ? [] : [{ kind: "folder", ...folder }],
+        total: inside ? 0 : 1,
+        page: 1,
+        pageSize: 20,
+        usedBytes: 0,
+        limitBytes: 1024,
+      });
+    }
+    return response(path);
+  };
+  const host = await renderDrive();
+  await click(button(host, files[0].accountDisplayName));
+  await settle();
+  const queried = requests.find((request) =>
+    request.path.startsWith("/v1/admin/drive/tree?"),
+  );
+  expect(queried?.path).toContain("accountId=owner-1");
+  expect(queried?.path).toContain("pageSize=20");
+  expect(host.querySelector('[data-slot="breadcrumb-page"]')?.textContent).toBe(
+    files[0].accountDisplayName,
+  );
+  expect(
+    [...host.querySelectorAll("button")].some((item) =>
+      ["新建文件夹", "上传"].includes(item.textContent?.trim() ?? ""),
+    ),
+  ).toBe(false);
+  await click(button(host, folder.name));
+  await settle();
+  expect(host.querySelector('[data-slot="breadcrumb-page"]')?.textContent).toBe(
+    folder.name,
+  );
+  expect(host.querySelector("tbody svg")).toBeNull();
+  const root = [
+    ...host.querySelectorAll<HTMLAnchorElement>(
+      '[data-slot="breadcrumb-link"]',
+    ),
+  ].find((link) => link.textContent === "云盘");
+  if (!root) throw new Error("root breadcrumb missing");
+  await click(root);
+  await settle();
+  expect(host.querySelector("tbody")?.textContent).toContain(files[0].name);
+});
+
 test("云盘显示全站文件与真实容量，搜索分页、详情弹窗和双语切换保持列表", async () => {
   const host = await renderDrive();
   const initialRequest = requests.find((request) =>

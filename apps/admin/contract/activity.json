@@ -1,0 +1,380 @@
+{
+  "events": [
+    {
+      "id": "1",
+      "actor": {
+        "accountId": "account-1",
+        "name": "测试账户",
+        "deviceId": "device-1",
+        "deviceName": "Windows"
+      },
+      "action": "drive.created",
+      "category": "files",
+      "occurredAt": "2026-11-27T08:00:00.000Z",
+      "subject": {
+        "kind": "file",
+        "id": "object-1",
+        "name": "合同.txt",
+        "ownerId": "account-1",
+        "available": true
+      },
+      "snapshot": {
+        "kind": "file",
+        "name": "合同.txt",
+        "size": 20,
+        "mimeType": "text/plain"
+      }
+    },
+    {
+      "id": "2",
+      "actor": {
+        "accountId": "account-1",
+        "name": "测试账户",
+        "deviceId": "device-1",
+        "deviceName": "Windows"
+      },
+      "action": "send.accepted",
+      "category": "transfers",
+      "occurredAt": "2026-11-27T08:00:00.000Z",
+      "subject": {
+        "kind": "transfer",
+        "id": "object-2",
+        "name": "周报.txt",
+        "ownerId": "account-1",
+        "available": true
+      },
+      "snapshot": {
+        "kind": "transfer",
+        "name": "周报.txt",
+        "size": 20,
+        "fromDeviceId": "device-1",
+        "fromDeviceName": "Windows",
+        "toDeviceId": "device-2",
+        "toDeviceName": "Mac",
+        "state": "delivered",
+        "failure": null
+      }
+    },
+    {
+      "id": "3",
+      "actor": {
+        "accountId": "account-1",
+        "name": "测试账户",
+        "deviceId": null,
+        "deviceName": null
+      },
+      "action": "media.updated",
+      "category": "media",
+      "occurredAt": "2026-11-27T08:00:00.000Z",
+      "subject": {
+        "kind": "media",
+        "id": "object-3",
+        "name": "影片",
+        "ownerId": "account-1",
+        "available": true
+      },
+      "snapshot": {
+        "kind": "media",
+        "title": "影片",
+        "scope": "private"
+      }
+    },
+    {
+      "id": "4",
+      "actor": {
+        "accountId": "account-1",
+        "name": "测试账户",
+        "deviceId": null,
+        "deviceName": null
+      },
+      "action": "media.collection.updated",
+      "category": "media",
+      "occurredAt": "2026-11-27T08:00:00.000Z",
+      "subject": {
+        "kind": "collection",
+        "id": "object-4",
+        "name": "专题",
+        "ownerId": null,
+        "available": true
+      },
+      "snapshot": {
+        "kind": "collection",
+        "title": "专题"
+      }
+    },
+    {
+      "id": "5",
+      "actor": {
+        "accountId": "account-1",
+        "name": "测试账户",
+        "deviceId": "device-1",
+        "deviceName": "Windows"
+      },
+      "action": "remote.ended",
+      "category": "remote",
+      "occurredAt": "2026-11-27T08:00:00.000Z",
+      "subject": {
+        "kind": "remote",
+        "id": "object-5",
+        "name": "Windows → Mac",
+        "ownerId": "account-1",
+        "available": true
+      },
+      "snapshot": {
+        "kind": "remote",
+        "controllerId": "device-1",
+        "controllerName": "Windows",
+        "hostId": "device-2",
+        "hostName": "Mac",
+        "phase": "ended",
+        "endReason": "stopped"
+      }
+    },
+    {
+      "id": "6",
+      "actor": {
+        "accountId": null,
+        "name": null,
+        "deviceId": null,
+        "deviceName": null
+      },
+      "action": "drive.deleted",
+      "category": "files",
+      "occurredAt": "2026-11-27T08:00:00.000Z",
+      "subject": null,
+      "snapshot": null
+    }
+  ],
+  "targets": [
+    {
+      "subject": {
+        "kind": "file",
+        "id": "object-1",
+        "name": "合同.txt",
+        "ownerId": "account-1",
+        "available": true
+      },
+      "snapshot": {
+        "kind": "file",
+        "name": "合同.txt",
+        "size": 20,
+        "mimeType": "text/plain"
+      },
+      "createdAt": "2026-11-27T08:00:00.000Z",
+      "updatedAt": "2026-11-27T08:00:00.000Z",
+      "events": [
+        {
+          "id": "1",
+          "actor": {
+            "accountId": "account-1",
+            "name": "测试账户",
+            "deviceId": "device-1",
+            "deviceName": "Windows"
+          },
+          "action": "drive.created",
+          "category": "files",
+          "occurredAt": "2026-11-27T08:00:00.000Z",
+          "subject": {
+            "kind": "file",
+            "id": "object-1",
+            "name": "合同.txt",
+            "ownerId": "account-1",
+            "available": true
+          },
+          "snapshot": {
+            "kind": "file",
+            "name": "合同.txt",
+            "size": 20,
+            "mimeType": "text/plain"
+          }
+        }
+      ]
+    },
+    {
+      "subject": {
+        "kind": "transfer",
+        "id": "object-2",
+        "name": "周报.txt",
+        "ownerId": "account-1",
+        "available": true
+      },
+      "snapshot": {
+        "kind": "transfer",
+        "name": "周报.txt",
+        "size": 20,
+        "fromDeviceId": "device-1",
+        "fromDeviceName": "Windows",
+        "toDeviceId": "device-2",
+        "toDeviceName": "Mac",
+        "state": "delivered",
+        "failure": null
+      },
+      "createdAt": "2026-11-27T08:00:00.000Z",
+      "updatedAt": "2026-11-27T08:00:00.000Z",
+      "events": [
+        {
+          "id": "2",
+          "actor": {
+            "accountId": "account-1",
+            "name": "测试账户",
+            "deviceId": "device-1",
+            "deviceName": "Windows"
+          },
+          "action": "send.accepted",
+          "category": "transfers",
+          "occurredAt": "2026-11-27T08:00:00.000Z",
+          "subject": {
+            "kind": "transfer",
+            "id": "object-2",
+            "name": "周报.txt",
+            "ownerId": "account-1",
+            "available": true
+          },
+          "snapshot": {
+            "kind": "transfer",
+            "name": "周报.txt",
+            "size": 20,
+            "fromDeviceId": "device-1",
+            "fromDeviceName": "Windows",
+            "toDeviceId": "device-2",
+            "toDeviceName": "Mac",
+            "state": "delivered",
+            "failure": null
+          }
+        }
+      ]
+    },
+    {
+      "subject": {
+        "kind": "media",
+        "id": "object-3",
+        "name": "影片",
+        "ownerId": "account-1",
+        "available": true
+      },
+      "snapshot": {
+        "kind": "media",
+        "title": "影片",
+        "scope": "private"
+      },
+      "createdAt": "2026-11-27T08:00:00.000Z",
+      "updatedAt": "2026-11-27T08:00:00.000Z",
+      "events": [
+        {
+          "id": "3",
+          "actor": {
+            "accountId": "account-1",
+            "name": "测试账户",
+            "deviceId": null,
+            "deviceName": null
+          },
+          "action": "media.updated",
+          "category": "media",
+          "occurredAt": "2026-11-27T08:00:00.000Z",
+          "subject": {
+            "kind": "media",
+            "id": "object-3",
+            "name": "影片",
+            "ownerId": "account-1",
+            "available": true
+          },
+          "snapshot": {
+            "kind": "media",
+            "title": "影片",
+            "scope": "private"
+          }
+        }
+      ]
+    },
+    {
+      "subject": {
+        "kind": "collection",
+        "id": "object-4",
+        "name": "专题",
+        "ownerId": null,
+        "available": true
+      },
+      "snapshot": {
+        "kind": "collection",
+        "title": "专题"
+      },
+      "createdAt": "2026-11-27T08:00:00.000Z",
+      "updatedAt": "2026-11-27T08:00:00.000Z",
+      "events": [
+        {
+          "id": "4",
+          "actor": {
+            "accountId": "account-1",
+            "name": "测试账户",
+            "deviceId": null,
+            "deviceName": null
+          },
+          "action": "media.collection.updated",
+          "category": "media",
+          "occurredAt": "2026-11-27T08:00:00.000Z",
+          "subject": {
+            "kind": "collection",
+            "id": "object-4",
+            "name": "专题",
+            "ownerId": null,
+            "available": true
+          },
+          "snapshot": {
+            "kind": "collection",
+            "title": "专题"
+          }
+        }
+      ]
+    },
+    {
+      "subject": {
+        "kind": "remote",
+        "id": "object-5",
+        "name": "Windows → Mac",
+        "ownerId": "account-1",
+        "available": true
+      },
+      "snapshot": {
+        "kind": "remote",
+        "controllerId": "device-1",
+        "controllerName": "Windows",
+        "hostId": "device-2",
+        "hostName": "Mac",
+        "phase": "ended",
+        "endReason": "stopped"
+      },
+      "createdAt": "2026-11-27T08:00:00.000Z",
+      "updatedAt": "2026-11-27T08:00:00.000Z",
+      "events": [
+        {
+          "id": "5",
+          "actor": {
+            "accountId": "account-1",
+            "name": "测试账户",
+            "deviceId": "device-1",
+            "deviceName": "Windows"
+          },
+          "action": "remote.ended",
+          "category": "remote",
+          "occurredAt": "2026-11-27T08:00:00.000Z",
+          "subject": {
+            "kind": "remote",
+            "id": "object-5",
+            "name": "Windows → Mac",
+            "ownerId": "account-1",
+            "available": true
+          },
+          "snapshot": {
+            "kind": "remote",
+            "controllerId": "device-1",
+            "controllerName": "Windows",
+            "hostId": "device-2",
+            "hostName": "Mac",
+            "phase": "ended",
+            "endReason": "stopped"
+          }
+        }
+      ]
+    }
+  ]
+}

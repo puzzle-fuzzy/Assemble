@@ -165,6 +165,7 @@ pub(super) async fn create(
         &id,
     )
     .await?;
+    audit_collection(&mut tx, principal, "media.collection.created", &id).await?;
     tx.commit().await?;
     get(pool, Some(principal), &id).await
 }
@@ -190,6 +191,7 @@ pub(super) async fn update(
     }
     sqlx::query("UPDATE media_collections SET version = version + 1,title = ?,description = ?,updated_at = ? WHERE id = ?").bind(input.title).bind(input.description).bind(super::now()).bind(id).execute(&mut *tx).await?;
     replace_entries(&mut tx, id, &input.entry_ids).await?;
+    audit_collection(&mut tx, principal, "media.collection.updated", id).await?;
     tx.commit().await?;
     get(pool, Some(principal), id).await
 }
@@ -216,6 +218,7 @@ pub(super) async fn remove(
         .bind(id)
         .execute(&mut *tx)
         .await?;
+    audit_collection(&mut tx, principal, "media.collection.deleted", id).await?;
     tx.commit().await?;
     Ok(())
 }
@@ -264,4 +267,27 @@ pub(super) async fn statistics(pool: &SqlitePool) -> Result<MediaStatistics, Api
         .map(|(month, count)| MediaMonthCount { month, count })
         .collect();
     Ok(stats)
+}
+
+async fn audit_collection(
+    tx: &mut Transaction<'_, Sqlite>,
+    principal: &Principal,
+    action: &str,
+    id: &str,
+) -> Result<(), ApiError> {
+    sqlx::query(
+        "INSERT INTO audit_log(account_id,device_id,action,target,created_at) VALUES(?,?,?,?,?)",
+    )
+    .bind(&principal.account_id)
+    .bind(if principal.credential_kind == "device" {
+        Some(principal.credential_id.as_str())
+    } else {
+        None
+    })
+    .bind(action)
+    .bind(id)
+    .bind(super::now())
+    .execute(&mut **tx)
+    .await?;
+    Ok(())
 }

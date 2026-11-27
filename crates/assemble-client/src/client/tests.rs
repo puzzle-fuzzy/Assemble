@@ -28,6 +28,70 @@ use assemble_protocol::login::MeResponse;
 use assemble_protocol::primitives::Platform;
 use assemble_protocol::sends::{Direction, FailReason, SendState};
 
+#[tokio::test]
+async fn drive_tree_uses_a_separate_namespace_and_never_falls_back_for_writes() {
+    use assemble_protocol::drive_tree::{Create, Query, ROOT};
+    let server = Server::start(with(|_| {
+        json_response(
+            StatusCode::NOT_FOUND,
+            json!({"error":{"code":"NOT_FOUND","message":"old server"}}),
+        )
+    }))
+    .await;
+    let client = server.client();
+    client.set_bearer(Some(SecretString::new("test-directory-only")));
+    let cancel = CancellationToken::new();
+    let options = RequestOptions::new(&cancel);
+    let error = client
+        .drive_tree(
+            &Query {
+                q: "中文%_".into(),
+                page_size: 1,
+                ..Query::default()
+            },
+            &options,
+        )
+        .await
+        .unwrap_err();
+    assert!(matches!(error, ClientError::Http { status: 404, .. }));
+    let requests = server.requests(1).await;
+    assert_eq!(requests[0].path, "/v1/drive/tree");
+    assert_eq!(requests[0].params()["q"], "中文%_");
+    assert!(
+        client
+            .drive_folder_create(
+                &Create {
+                    request_id: "key".into(),
+                    parent_id: ROOT.into(),
+                    name: "新文件夹".into()
+                },
+                &options
+            )
+            .await
+            .is_err()
+    );
+    assert_eq!(server.requests(2).await[1].path, "/v1/drive/tree/folders");
+    assert!(
+        client
+            .drive_tree(
+                &Query {
+                    page_size: 101,
+                    ..Query::default()
+                },
+                &options
+            )
+            .await
+            .is_err()
+    );
+    assert_eq!(server.received(), 2);
+    cancel.cancel();
+    assert!(matches!(
+        client.drive_tree(&Query::default(), &options).await,
+        Err(ClientError::Cancelled)
+    ));
+    assert_eq!(server.received(), 2);
+}
+
 /// 服务端收到的一个请求。
 #[derive(Debug, Clone)]
 struct Captured {

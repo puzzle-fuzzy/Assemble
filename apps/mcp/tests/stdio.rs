@@ -20,7 +20,12 @@ use tokio_util::sync::CancellationToken;
 
 use support::*;
 
-const TOOLS: [&str; 20] = [
+const TOOLS: [&str; 25] = [
+    "assemble_drive_list",
+    "assemble_drive_folder_create",
+    "assemble_drive_folder_delete",
+    "assemble_drive_move",
+    "assemble_drive_rename",
     "assemble_drive_preview",
     "assemble_remote_devices",
     "assemble_download_preview",
@@ -174,6 +179,15 @@ async fn the_client_is_told_what_this_is_and_which_tools_exist() {
         )
     };
     assert_eq!(hint("assemble_planner"), (Some(true), None, None));
+    assert_eq!(hint("assemble_drive_list"), (Some(true), None, None));
+    assert_eq!(
+        hint("assemble_drive_folder_delete"),
+        (Some(false), Some(true), None)
+    );
+    assert_eq!(
+        hint("assemble_drive_folder_create"),
+        (Some(false), Some(false), Some(true))
+    );
     assert_eq!(
         hint("assemble_schedule_create"),
         (Some(false), Some(false), None)

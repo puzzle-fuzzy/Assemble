@@ -92,6 +92,7 @@ mod tests {
             vec![
                 "_sqlx_migrations",
                 "accounts",
+                "activity_subjects",
                 "audit_log",
                 "blobs",
                 "desktop_auth_codes",
@@ -100,6 +101,8 @@ mod tests {
                 "dht_control",
                 "dht_observations",
                 "drive_files",
+                "drive_folder_requests",
+                "drive_folders",
                 "email_actions",
                 "email_rate_limits",
                 "github_identities",
@@ -143,7 +146,10 @@ mod tests {
             .fetch_one(&again)
             .await
             .unwrap();
-        assert_eq!(applied, 13);
+        assert_eq!(
+            applied,
+            sqlx::migrate!("./migrations").migrations.len() as i64
+        );
     }
 
     #[tokio::test]
@@ -210,6 +216,95 @@ mod tests {
         std::fs::write(&blocked, b"x").unwrap();
         let error = open(&blocked.join("nested")).await.unwrap_err();
         assert!(matches!(error, DbError::Directory(_)), "{error}");
+    }
+
+    #[tokio::test]
+    async fn folder_upgrade_preserves_existing_files_order_timestamps_and_blob_references() {
+        let dir = tempfile::tempdir().unwrap();
+        let options = SqliteConnectOptions::new()
+            .filename(dir.path().join(DATABASE_FILE))
+            .create_if_missing(true)
+            .foreign_keys(true);
+        let old = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect_with(options)
+            .await
+            .unwrap();
+        let preceding = sqlx::migrate::Migrator {
+            migrations: std::borrow::Cow::Owned(
+                sqlx::migrate!("./migrations")
+                    .migrations
+                    .iter()
+                    .filter(|migration| migration.version < 14)
+                    .cloned()
+                    .collect(),
+            ),
+            ..sqlx::migrate::Migrator::DEFAULT
+        };
+        preceding.run(&old).await.unwrap();
+        sqlx::query("INSERT INTO accounts(id,username,display_name,password_hash,created_at) VALUES('a1','owner','Owner','test-hash',123)").execute(&old).await.unwrap();
+        let sha = "a".repeat(64);
+        sqlx::query("INSERT INTO blobs(sha256,size,refcount,created_at) VALUES(?,0,2,123)")
+            .bind(&sha)
+            .execute(&old)
+            .await
+            .unwrap();
+        for id in ["z-file", "a-file"] {
+            sqlx::query("INSERT INTO drive_files(id,account_id,name,size,mime_type,sha256,created_at) VALUES(?,'a1','同名<文件>',0,NULL,?,123)").bind(id).bind(&sha).execute(&old).await.unwrap();
+        }
+        old.close().await;
+        let new = open(dir.path()).await.unwrap();
+        type FileState = (
+            String,
+            String,
+            i64,
+            Option<String>,
+            String,
+            i64,
+            Option<String>,
+            i64,
+            Option<i64>,
+        );
+        let files:Vec<FileState>=sqlx::query_as("SELECT id,name,size,mime_type,sha256,created_at,parent_id,version,updated_at FROM drive_files ORDER BY rowid").fetch_all(&new).await.unwrap();
+        assert_eq!(
+            files,
+            vec![
+                (
+                    "z-file".into(),
+                    "同名<文件>".into(),
+                    0,
+                    None,
+                    sha.clone(),
+                    123,
+                    None,
+                    1,
+                    None
+                ),
+                (
+                    "a-file".into(),
+                    "同名<文件>".into(),
+                    0,
+                    None,
+                    sha.clone(),
+                    123,
+                    None,
+                    1,
+                    None
+                )
+            ]
+        );
+        let blob: (i64, i64, i64) =
+            sqlx::query_as("SELECT size,refcount,created_at FROM blobs WHERE sha256=?")
+                .bind(sha)
+                .fetch_one(&new)
+                .await
+                .unwrap();
+        assert_eq!(blob, (0, 2, 123));
+        let violations: Vec<sqlx::sqlite::SqliteRow> = sqlx::query("PRAGMA foreign_key_check")
+            .fetch_all(&new)
+            .await
+            .unwrap();
+        assert!(violations.is_empty());
     }
 
     #[cfg(unix)]

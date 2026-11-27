@@ -1395,6 +1395,74 @@ async fn a_draft_sent_to_the_drive_is_stored_and_the_listing_shows_it() {
 }
 
 #[tokio::test]
+async fn queued_folder_upload_keeps_its_target_and_session_cleanup_clears_the_tree() {
+    use assemble_protocol::drive_tree::{Create, Query, ROOT};
+    let f = fixture().await;
+    let folder = f
+        .sender
+        .drive_folder_create(
+            &Create {
+                request_id: "folder-test".into(),
+                parent_id: ROOT.into(),
+                name: "云端资料".into(),
+            },
+            &RequestOptions::new(&f.hold),
+        )
+        .await
+        .unwrap();
+    let bytes = payload(120_000);
+    let file = pick(&f.dir, "file.txt", &bytes).await;
+    let ids = f
+        .state()
+        .queue_files(Destination::DriveFolder(folder.id.clone()), vec![file]);
+    // 浏览根目录不改变已排队的目的地。
+    let remembered = f
+        .sender
+        .drive_tree(&Query::default(), &RequestOptions::new(&f.hold))
+        .await
+        .unwrap();
+    let epoch = *f.state().session_changes().borrow();
+    let session = f.state().session_cancel();
+    assert!(
+        f.state()
+            .remember_drive_tree(remembered.clone(), epoch, &session)
+    );
+    f.start_receiving();
+    until("folder upload to finish", || {
+        view_of(&f, &ids[0]).phase == TransferPhase::Complete
+    })
+    .await;
+    let listing = f
+        .sender
+        .drive_tree(
+            &Query {
+                parent_id: folder.id,
+                ..Query::default()
+            },
+            &RequestOptions::new(&f.hold),
+        )
+        .await
+        .unwrap();
+    assert_eq!(listing.total, 1);
+    let assemble_protocol::drive_tree::Entry::File(file) = &listing.items[0] else {
+        panic!("uploaded file")
+    };
+    assert_eq!(on_the_drive(&f, &file.file.id).await, bytes);
+    f.state().end_session();
+    assert!(f.state().snapshot().drive_tree.is_none());
+    assert!(
+        !f.state()
+            .remember_drive_tree(remembered.clone(), epoch, &session)
+    );
+    assert!(
+        !f.state()
+            .remember_drive_tree(remembered, epoch, &CancellationToken::new())
+    );
+    assert!(f.state().snapshot().drive_tree.is_none());
+    f.finish().await;
+}
+
+#[tokio::test]
 async fn a_drive_file_fetched_here_lands_in_the_inbox_like_any_other_delivery() {
     let f = fixture().await;
     // 另一台设备先把文件存进了云盘。

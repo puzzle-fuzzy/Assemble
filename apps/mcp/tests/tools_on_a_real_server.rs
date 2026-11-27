@@ -577,3 +577,112 @@ async fn private_memo_tools_preserve_text_and_use_versions_and_retry_keys() {
             .contains("备忘录")
     );
 }
+
+#[tokio::test]
+#[allow(clippy::too_many_lines)]
+async fn drive_tools_use_stable_ids_versions_and_safe_owner_only_projections() {
+    use assemble_mcp::drive;
+    let world = world().await;
+    let call = world.call();
+    let input = drive::Create {
+        request_id: "drive-tool".into(),
+        parent_id: "root".into(),
+        name: "资料<原文>".into(),
+    };
+    let created = drive::create(&call, &input).await.unwrap();
+    assert_eq!(drive::create(&call, &input).await.unwrap(), created);
+    let folder: assemble_protocol::drive_tree::Folder = serde_json::from_str(&created).unwrap();
+    let listing = drive::list(
+        &call,
+        &drive::List {
+            parent_id: "root".into(),
+            q: String::new(),
+            page: 1,
+        },
+    )
+    .await
+    .unwrap();
+    assert!(listing.contains(&folder.id));
+    for forbidden in ["token", "password", "sha256", "path", "authorization"] {
+        assert!(!listing.contains(forbidden));
+    }
+    let renamed = drive::rename(
+        &call,
+        &drive::Rename {
+            kind: drive::Kind::Folder,
+            id: folder.id.clone(),
+            version: 1,
+            name: "新名字".into(),
+        },
+    )
+    .await
+    .unwrap();
+    assert!(renamed.contains("新名字"));
+    assert!(
+        drive::rename(
+            &call,
+            &drive::Rename {
+                kind: drive::Kind::Folder,
+                id: folder.id.clone(),
+                version: 1,
+                name: "覆盖".into()
+            }
+        )
+        .await
+        .is_err()
+    );
+    let child: assemble_protocol::drive_tree::Folder = serde_json::from_str(
+        &drive::create(
+            &call,
+            &drive::Create {
+                parent_id: folder.id.clone(),
+                request_id: "drive-child".into(),
+                name: "子目录".into(),
+            },
+        )
+        .await
+        .unwrap(),
+    )
+    .unwrap();
+    assert!(
+        drive::delete(
+            &call,
+            &drive::Delete {
+                id: folder.id.clone(),
+                version: 2
+            }
+        )
+        .await
+        .is_err()
+    );
+    drive::move_entry(
+        &call,
+        &drive::Move {
+            kind: drive::Kind::Folder,
+            id: child.id.clone(),
+            version: 1,
+            parent_id: "root".into(),
+        },
+    )
+    .await
+    .unwrap();
+    drive::delete(
+        &call,
+        &drive::Delete {
+            id: folder.id,
+            version: 2,
+        },
+    )
+    .await
+    .unwrap();
+    drive::delete(
+        &call,
+        &drive::Delete {
+            id: child.id,
+            version: 2,
+        },
+    )
+    .await
+    .unwrap();
+    assert!(drive::create(&call, &input).await.is_err());
+}

@@ -71,7 +71,12 @@ async fn planner_hotfix_can_later_accept_the_pending_media_migration() {
             .fetch_all(&pool)
             .await
             .unwrap();
-    assert_eq!(versions, (1..=13).collect::<Vec<_>>());
+    let expected: Vec<i64> = sqlx::migrate!("./migrations")
+        .migrations
+        .iter()
+        .map(|migration| migration.version)
+        .collect();
+    assert_eq!(versions, expected);
     pool.close().await;
 }
 

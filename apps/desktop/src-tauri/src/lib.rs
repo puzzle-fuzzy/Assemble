@@ -13,6 +13,7 @@
 
 mod commands;
 mod drive_preview;
+mod drive_tree;
 mod launch;
 mod notify;
 mod planner;
@@ -206,6 +207,13 @@ fn handlers() -> impl Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool + Send + Sync +
         commands::send_to_device,
         commands::send_to_drive,
         commands::drive_refresh,
+        commands::drive_tree_list,
+        commands::drive_tree_cancel,
+        commands::drive_folder_create,
+        commands::drive_tree_rename,
+        commands::drive_tree_move,
+        commands::drive_tree_delete,
+        commands::drive_tree_upload,
         commands::drive_upload,
         commands::drive_download,
         commands::drive_preview_open,

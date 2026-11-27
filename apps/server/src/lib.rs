@@ -8,6 +8,7 @@
 
 pub mod account;
 pub mod accounts;
+pub mod activity;
 pub mod admin;
 pub mod admin_assets;
 pub mod audit;
@@ -20,6 +21,7 @@ pub mod devices;
 pub mod dht;
 pub mod drive;
 pub mod drive_preview;
+pub mod drive_tree;
 pub mod email_identity;
 pub mod error;
 pub mod events;
@@ -80,6 +82,9 @@ pub async fn load() -> Result<(Config, SqlitePool), StartupError> {
 /// `serve`：一直运行到收到退出信号。
 pub async fn run_server() -> Result<(), StartupError> {
     let (config, pool) = load().await?;
+    activity::recover_remote(&pool)
+        .await
+        .map_err(db::DbError::from)?;
     tracing::info!(
         address = %config.addr,
         origin = %config.public_origin,

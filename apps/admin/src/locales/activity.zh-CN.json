@@ -1,0 +1,117 @@
+{
+  "title": "操作日志",
+  "search": "搜索日志",
+  "searchPlaceholder": "用户、设备或对象名称",
+  "category": "操作类型",
+  "from": "开始日期",
+  "through": "结束日期",
+  "apply": "筛选",
+  "refresh": "刷新",
+  "reset": "重置",
+  "time": "时间",
+  "actor": "操作人",
+  "device": "设备",
+  "action": "操作",
+  "subject": "对象",
+  "view": "查看记录",
+  "back": "返回日志",
+  "empty": "暂无记录",
+  "noMatches": "没有匹配记录",
+  "unknown": "未记录",
+  "unknownUser": "未知用户",
+  "system": "系统",
+  "owner": "所属账户",
+  "id": "编号",
+  "created": "创建时间",
+  "updated": "更新时间",
+  "firstRecorded": "最早记录",
+  "lastRecorded": "最近记录",
+  "name": "名称",
+  "size": "大小",
+  "mime": "文件类型",
+  "fromDevice": "发送设备",
+  "toDevice": "接收设备",
+  "controller": "控制设备",
+  "host": "被控设备",
+  "status": "状态",
+  "reason": "结束原因",
+  "scope": "片库",
+  "shared": "共享片库",
+  "private": "私人片库",
+  "deleted": "原数据已删除",
+  "history": "近期记录",
+  "noSnapshot": "原日志未保存对象快照",
+  "invalidDates": "请检查日期范围",
+  "fileDetails": "文件详情",
+  "preview": "预览文件",
+  "close": "关闭",
+  "categories": {
+    "all": "全部类型",
+    "files": "云盘文件",
+    "transfers": "文件传输",
+    "media": "影视片库",
+    "remote": "远程连接"
+  },
+  "kinds": {
+    "file": "云盘文件",
+    "transfer": "文件传输",
+    "media": "影视条目",
+    "collection": "影视合集",
+    "remote": "远程连接"
+  },
+  "actions": {
+    "remote": {
+      "requested": "申请远程连接",
+      "accepted": "批准远程连接",
+      "ended": "结束远程连接"
+    },
+    "drive": {
+      "created": "上传文件",
+      "renamed": "重命名文件",
+      "deleted": "删除文件",
+      "moved": "移动文件"
+    },
+    "send": {
+      "created": "发送文件",
+      "accepted": "文件已接收",
+      "declined": "拒收文件",
+      "cancelled": "取消传输",
+      "failed": "传输失败",
+      "expired": "传输过期"
+    },
+    "media": {
+      "created": "新建影视条目",
+      "updated": "更新影视条目",
+      "deleted": "删除影视条目",
+      "poster_changed": "更换海报",
+      "imported": "导入影视条目",
+      "gallery_synced": "同步影视图片",
+      "collection": {
+        "created": "新建合集",
+        "updated": "更新合集",
+        "deleted": "删除合集"
+      }
+    },
+    "other": "其他操作"
+  },
+  "states": {
+    "pending": "等待批准",
+    "active": "已连接",
+    "ended": "已结束",
+    "offered": "等待接收",
+    "delivered": "已接收",
+    "declined": "已拒收",
+    "cancelled": "已取消",
+    "failed": "失败",
+    "expired": "已过期"
+  },
+  "reasons": {
+    "stopped": "主动结束",
+    "declined": "已拒绝",
+    "expired": "请求过期",
+    "disconnected": "连接中断",
+    "deviceRevoked": "设备已撤销",
+    "captureFailed": "画面采集失败",
+    "inputFailed": "输入控制失败"
+  }
+}

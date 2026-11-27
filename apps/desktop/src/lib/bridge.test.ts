@@ -11,6 +11,7 @@ import memoSamples from "../../contract/memos.json";
 type InvokeCall = { command: string; args: Record<string, unknown> };
 
 const STATE: Snapshot = {
+  driveTree: null,
   remote: { sessions: [] },
   systemNotifications: { items: [], available: true },
   downloads: {
@@ -82,6 +83,87 @@ const {
 const { messageFor } = await import("@/lib/messages");
 
 describe("桥接", () => {
+  test("目录命令只传标识版本和名称；查询取消释放自己的现场", async () => {
+    const listing = {
+      current: null,
+      ancestors: [],
+      items: [],
+      total: 0,
+      page: 1,
+      pageSize: 10,
+      usedBytes: 0,
+      limitBytes: 1024,
+    };
+    const query = { parentId: "root", q: "资料", page: 1, pageSize: 10 };
+    respondWith = listing;
+    const abort = new AbortController();
+    expect(await bridge.driveTree.list(query, abort.signal, true)).toEqual(
+      listing,
+    );
+    const request = calls.find((call) => call.command === "drive_tree_list");
+    expect(request?.args).toMatchObject({ query, remember: true });
+    expect(calls.at(-1)).toEqual({
+      command: "drive_tree_cancel",
+      args: { requestId: request?.args.requestId },
+    });
+    respondWith = {
+      id: "folder-1",
+      parentId: null,
+      name: "中文<目录>",
+      version: 1,
+      createdAt: "2026-11-27T01:00:00Z",
+      updatedAt: "2026-11-27T01:00:00Z",
+    };
+    const input = {
+      name: "中文<目录>",
+      requestId: "stable-key",
+      parentId: "root",
+    };
+    await bridge.driveTree.create?.(input);
+    expect(calls.at(-1)).toEqual({
+      command: "drive_folder_create",
+      args: { input },
+    });
+    respondWith = { kind: "folder", ...(respondWith as object) };
+    await bridge.driveTree.rename?.("folder", "folder-1", {
+      name: "新名字",
+      version: 1,
+    });
+    expect(calls.at(-1)?.command).toBe("drive_tree_rename");
+    const move = {
+      kind: "folder" as const,
+      id: "folder-1",
+      parentId: "folder-2",
+      version: 1,
+    };
+    await bridge.driveTree.move?.(move);
+    expect(calls.at(-1)).toEqual({
+      command: "drive_tree_move",
+      args: { input: move },
+    });
+    respondWith = undefined;
+    await bridge.driveTree.remove?.("folder", "folder-1", 2);
+    expect(calls.at(-1)).toEqual({
+      command: "drive_tree_delete",
+      args: { kind: "folder", id: "folder-1", version: 2 },
+    });
+    respondWith = STATE;
+    await bridge.driveTree.upload?.("folder-1");
+    expect(calls.at(-1)).toEqual({
+      command: "drive_tree_upload",
+      args: { parentId: "folder-1" },
+    });
+    const count = calls.length;
+    abort.abort();
+    await expect(
+      bridge.driveTree.list(query, abort.signal),
+    ).rejects.toMatchObject({ code: "CANCELLED" });
+    expect(calls).toHaveLength(count);
+    respondWith = { ...listing, items: [{ id: "bad" }] };
+    await expect(bridge.driveTree.list(query)).rejects.toMatchObject({
+      code: "INVALID_STATE",
+    });
+  });
   test("预览只接受本次具名入口，关闭与早到取消都释放原请求", async () => {
     const preview = {
       kind: "image",

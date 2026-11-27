@@ -33,6 +33,9 @@ impl std::fmt::Debug for RemoteSessions {
 }
 struct Entry {
     account: String,
+    phase_at: Timestamp,
+    audit_ended: bool,
+    ended_by: Option<Identity>,
     session: RemoteSession,
     controller_seen: i64,
     host_seen: i64,
@@ -48,14 +51,48 @@ struct Entry {
     controller_keepalive: Option<Sealed>,
 }
 impl Entry {
+    fn new(account: String, session: RemoteSession, offer: String) -> Self {
+        let now = session.created_at;
+        Self {
+            account,
+            phase_at: now,
+            audit_ended: false,
+            ended_by: None,
+            session: session.clone(),
+            controller_seen: now.as_millis(),
+            host_seen: now.as_millis(),
+            frames: VecDeque::new(),
+            inputs: VecDeque::new(),
+            input_sequence: 0,
+            frame_at: 0,
+            clipboard: None,
+            audio: WireAudio::default(),
+            audio_sequence: 0,
+            handshake: Handshake {
+                session,
+                offer,
+                response: None,
+                finish: None,
+            },
+            host_keepalive: None,
+            controller_keepalive: None,
+        }
+    }
     fn frame_bytes(&self) -> usize {
         self.frames.iter().map(|frame| frame.packet.bytes()).sum()
+    }
+    fn end_by(&mut self, reason: RemoteEndReason, actor: &Identity) {
+        if self.session.phase != RemotePhase::Ended {
+            self.ended_by = Some(actor.clone());
+        }
+        self.end(reason);
     }
     fn end(&mut self, reason: RemoteEndReason) {
         if self.session.phase == RemotePhase::Ended {
             return;
         }
         self.session.phase = RemotePhase::Ended;
+        self.phase_at = Timestamp::now();
         self.session.end_reason = Some(reason);
         self.frames.clear();
         self.inputs.clear();
@@ -103,16 +140,51 @@ impl Entry {
     }
 }
 impl RemoteSessions {
-    pub fn prune(&self) {
+    pub async fn prune(&self, pool: &sqlx::SqlitePool) {
         let now = Timestamp::now().as_millis();
-        let mut entries = self.entries.lock().unwrap_or_else(PoisonError::into_inner);
-        for entry in entries.values_mut() {
-            entry.expire(now);
+        let ended = {
+            let mut entries = self.entries.lock().unwrap_or_else(PoisonError::into_inner);
+            for entry in entries.values_mut() {
+                entry.expire(now);
+            }
+            let ended: Vec<_> = entries
+                .values()
+                .filter(|e| e.session.phase == RemotePhase::Ended && !e.audit_ended)
+                .map(|e| {
+                    (
+                        e.account.clone(),
+                        e.session.clone(),
+                        e.phase_at,
+                        e.ended_by.clone(),
+                    )
+                })
+                .collect();
+            entries.retain(|_, entry| {
+                entry.session.phase != RemotePhase::Ended
+                    || !entry.audit_ended
+                    || now - entry.controller_seen.max(entry.host_seen) < REQUEST_TTL_MS
+            });
+            ended
+        };
+        for (owner, session, at, actor) in ended {
+            if crate::activity::record_remote(
+                pool,
+                &owner,
+                actor.as_ref(),
+                "remote.ended",
+                &session,
+                at,
+            )
+            .await
+                && let Some(entry) = self
+                    .entries
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .get_mut(&session.id)
+            {
+                entry.audit_ended = true;
+            }
         }
-        entries.retain(|_, entry| {
-            entry.session.phase != RemotePhase::Ended
-                || now - entry.controller_seen.max(entry.host_seen) < REQUEST_TTL_MS
-        });
     }
 }
 pub fn routes() -> Router<Shared> {
@@ -150,7 +222,7 @@ fn no_store(value: impl serde::Serialize) -> Response {
 }
 
 async fn list(State(state): State<Shared>, identity: Identity) -> Result<Response, ApiError> {
-    state.remote.prune();
+    state.remote.prune(&state.pool).await;
     let sessions = state
         .remote
         .entries
@@ -186,7 +258,7 @@ async fn create(
     if !state.presence.is_online(&identity.account_id, &host.id) {
         return Err(ApiError::conflict("DEVICE_OFFLINE", "host is offline"));
     }
-    state.remote.prune();
+    state.remote.prune(&state.pool).await;
     let now = Timestamp::now();
     let session = RemoteSession {
         id: crate::secrets::random_id().map_err(|_| ApiError::internal("id unavailable"))?,
@@ -215,7 +287,7 @@ async fn create(
                 return Ok(no_store(existing.session.clone()));
             }
             if existing.session.phase == RemotePhase::Pending {
-                existing.end(RemoteEndReason::Stopped);
+                existing.end_by(RemoteEndReason::Stopped, &identity);
             }
         }
         if entries.len() >= 128
@@ -233,35 +305,16 @@ async fn create(
         }
         entries.insert(
             session.id.clone(),
-            Entry {
-                account: identity.account_id.clone(),
-                session: session.clone(),
-                controller_seen: now.as_millis(),
-                host_seen: now.as_millis(),
-                frames: VecDeque::new(),
-                inputs: VecDeque::new(),
-                input_sequence: 0,
-                frame_at: 0,
-                clipboard: None,
-                audio: WireAudio::default(),
-                audio_sequence: 0,
-                handshake: Handshake {
-                    session: session.clone(),
-                    offer: input.offer,
-                    response: None,
-                    finish: None,
-                },
-                host_keepalive: None,
-                controller_keepalive: None,
-            },
+            Entry::new(identity.account_id.clone(), session.clone(), input.offer),
         );
     }
-    crate::audit::record(
+    crate::activity::record_remote(
         &state.pool,
-        Some(&identity.account_id),
-        Some(&identity.device_id),
+        &identity.account_id,
+        Some(&identity),
         "remote.requested",
-        Some(&session.id),
+        &session,
+        session.created_at,
     )
     .await;
     Ok(no_store(session))
@@ -309,7 +362,7 @@ async fn accept(
     Path(id): Path<String>,
 ) -> Result<Response, ApiError> {
     authorize(&state, &identity, &id).await?;
-    let session = {
+    let (session, phase_at) = {
         let mut entries = state
             .remote
             .entries
@@ -334,18 +387,20 @@ async fn accept(
                 ));
             }
             e.session.phase = RemotePhase::Active;
-            let now = Timestamp::now().as_millis();
+            e.phase_at = Timestamp::now();
+            let now = e.phase_at.as_millis();
             e.controller_seen = now;
             e.host_seen = now;
         }
-        e.session.clone()
+        (e.session.clone(), e.phase_at)
     };
-    crate::audit::record(
+    crate::activity::record_remote(
         &state.pool,
-        Some(&identity.account_id),
-        Some(&identity.device_id),
+        &identity.account_id,
+        Some(&identity),
         "remote.accepted",
-        Some(&id),
+        &session,
+        phase_at,
     )
     .await;
     Ok(no_store(session))
@@ -367,7 +422,7 @@ async fn end(
             .map_err(|_| ApiError::invalid("invalid remote end reason"))?
             .reason
     };
-    {
+    let (session, phase_at, ended_by) = {
         let mut entries = state
             .remote
             .entries
@@ -400,14 +455,16 @@ async fn end(
         } else {
             reason
         };
-        e.end(reason);
-    }
-    crate::audit::record(
+        e.end_by(reason, &identity);
+        (e.session.clone(), e.phase_at, e.ended_by.clone())
+    };
+    crate::activity::record_remote(
         &state.pool,
-        Some(&identity.account_id),
-        Some(&identity.device_id),
+        &identity.account_id,
+        ended_by.as_ref(),
         "remote.ended",
-        Some(&id),
+        &session,
+        phase_at,
     )
     .await;
     Ok(StatusCode::NO_CONTENT)
@@ -643,6 +700,9 @@ mod tests {
         Entry {
             account: "account".into(),
             session: session.clone(),
+            phase_at: Timestamp::from_millis(now).unwrap(),
+            audit_ended: false,
+            ended_by: None,
             controller_seen: now,
             host_seen: now,
             frames: VecDeque::new(),
@@ -688,5 +748,74 @@ mod tests {
             Some(RemoteEndReason::Disconnected)
         );
         assert!(active.inputs.is_empty());
+    }
+
+    #[tokio::test]
+    async fn pruning_records_automatic_ends_once_without_remote_content() {
+        let dir = tempfile::tempdir().unwrap();
+        let pool = crate::db::open(dir.path()).await.unwrap();
+        for (id, phase, reason) in [
+            ("pending", RemotePhase::Pending, "expired"),
+            ("active", RemotePhase::Active, "disconnected"),
+        ] {
+            let mut old = entry(Timestamp::now().as_millis() - REQUEST_TTL_MS - 1);
+            old.session.id = id.into();
+            old.session.phase = phase;
+            let sessions = RemoteSessions::default();
+            sessions.entries.lock().unwrap().insert(id.into(), old);
+            sessions.prune(&pool).await;
+            sessions.prune(&pool).await;
+            let rows: Vec<(Option<String>, Option<String>, String)> = sqlx::query_as(
+                "SELECT account_id,device_id,snapshot FROM audit_log WHERE target=?",
+            )
+            .bind(id)
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+            assert_eq!(rows.len(), 1);
+            assert!(rows[0].0.is_none() && rows[0].1.is_none());
+            let data: serde_json::Value = serde_json::from_str(&rows[0].2).unwrap();
+            assert_eq!(data["phase"], "ended");
+            assert_eq!(data["endReason"], reason);
+            assert!(data.get("inputs").is_none());
+        }
+    }
+
+    #[tokio::test]
+    async fn background_flush_preserves_the_first_manual_actor_and_cannot_steal_an_expired_end() {
+        let dir = tempfile::tempdir().unwrap();
+        let pool = crate::db::open(dir.path()).await.unwrap();
+        let actor = Identity {
+            account_id: "account".into(),
+            device_id: "controller".into(),
+            device_name: "Windows".into(),
+        };
+        let other = Identity {
+            device_id: "host".into(),
+            device_name: "Mac".into(),
+            ..actor.clone()
+        };
+        let sessions = RemoteSessions::default();
+        let mut manual = entry(Timestamp::now().as_millis());
+        manual.end_by(RemoteEndReason::Stopped, &actor);
+        manual.end_by(RemoteEndReason::Stopped, &other);
+        sessions
+            .entries
+            .lock()
+            .unwrap()
+            .insert("session".into(), manual);
+        // 模拟后台清理先于 HTTP 处理器拿到数据库写锁。
+        sessions.prune(&pool).await;
+        let device: Option<String> =
+            sqlx::query_scalar("SELECT device_id FROM audit_log WHERE action='remote.ended'")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(device.as_deref(), Some("controller"));
+        let mut expired = entry(Timestamp::now().as_millis() - REQUEST_TTL_MS - 1);
+        expired.expire(Timestamp::now().as_millis());
+        expired.end_by(RemoteEndReason::Stopped, &actor);
+        assert!(expired.ended_by.is_none());
+        assert_eq!(expired.session.end_reason, Some(RemoteEndReason::Expired));
     }
 }

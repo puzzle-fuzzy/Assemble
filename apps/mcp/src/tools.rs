@@ -193,14 +193,14 @@ pub struct Call<'a> {
 }
 
 impl Call<'_> {
-    fn options(&self) -> RequestOptions<'_> {
+    pub(crate) fn options(&self) -> RequestOptions<'_> {
         RequestOptions {
             cancel: self.cancel,
             timeout: Some(TIMEOUT),
         }
     }
 
-    fn client(&self) -> &Client {
+    pub(crate) fn client(&self) -> &Client {
         &self.signed_in.client
     }
 
@@ -270,7 +270,7 @@ impl From<String> for Failure {
 }
 
 /// 把服务端的拒绝翻译成给助手看的缘故。
-fn explain(error: &ClientError) -> Failure {
+pub(crate) fn explain(error: &ClientError) -> Failure {
     match error {
         ClientError::InvalidRequest => Failure::Rejected("内容不合规则，没有保存。".into()),
         ClientError::Http { status: 401, .. } => Failure::LoggedOut,

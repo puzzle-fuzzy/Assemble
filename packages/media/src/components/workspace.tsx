@@ -94,6 +94,7 @@ export interface MediaPageLocation {
 
 export interface MediaWorkspaceProps {
   listLocation?: string;
+  focusEntryId?: string | null;
   presentation?: "default" | "management";
   toolbarActions?: ReactNode;
   client: MediaClient;
@@ -115,6 +116,7 @@ export function MediaWorkspace(props: MediaWorkspaceProps) {
 }
 function WorkspaceContent({
   listLocation,
+  focusEntryId,
   presentation = "default",
   toolbarActions,
   client,
@@ -241,6 +243,16 @@ function WorkspaceContent({
       },
     );
   }
+  useEffect(() => {
+    if (!focusEntryId) return;
+    setDetailsOpen(true);
+    setSelected(null);
+    void detailTask.run(
+      (signal) => client.get(focusEntryId, signal),
+      setSelected,
+    );
+    return () => detailTask.cancel();
+  }, [focusEntryId, client, detailTask.run, detailTask.cancel]);
   function showActor(
     identity: MediaPersonIdentity,
     name: string,

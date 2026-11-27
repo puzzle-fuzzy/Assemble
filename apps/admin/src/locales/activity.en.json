@@ -1,0 +1,117 @@
+{
+  "title": "Activity log",
+  "search": "Search activity",
+  "searchPlaceholder": "User, device or item name",
+  "category": "Activity type",
+  "from": "Start date",
+  "through": "End date",
+  "apply": "Filter",
+  "refresh": "Refresh",
+  "reset": "Reset",
+  "time": "Time",
+  "actor": "Actor",
+  "device": "Device",
+  "action": "Action",
+  "subject": "Item",
+  "view": "View record",
+  "back": "Back to activity",
+  "empty": "No activity yet",
+  "noMatches": "No matching records",
+  "unknown": "Not recorded",
+  "unknownUser": "Unknown user",
+  "system": "System",
+  "owner": "Owner account",
+  "id": "ID",
+  "created": "Created",
+  "updated": "Updated",
+  "firstRecorded": "First recorded",
+  "lastRecorded": "Last recorded",
+  "name": "Name",
+  "size": "Size",
+  "mime": "File type",
+  "fromDevice": "Sending device",
+  "toDevice": "Receiving device",
+  "controller": "Controller",
+  "host": "Host",
+  "status": "Status",
+  "reason": "End reason",
+  "scope": "Library",
+  "shared": "Shared library",
+  "private": "Private library",
+  "deleted": "Original item deleted",
+  "history": "Recent activity",
+  "noSnapshot": "The original log has no item snapshot",
+  "invalidDates": "Check the date range",
+  "fileDetails": "File details",
+  "preview": "Preview file",
+  "close": "Close",
+  "categories": {
+    "all": "All types",
+    "files": "Cloud files",
+    "transfers": "File transfers",
+    "media": "Media library",
+    "remote": "Remote sessions"
+  },
+  "kinds": {
+    "file": "Cloud file",
+    "transfer": "File transfer",
+    "media": "Media entry",
+    "collection": "Media collection",
+    "remote": "Remote session"
+  },
+  "actions": {
+    "remote": {
+      "requested": "Requested remote session",
+      "accepted": "Approved remote session",
+      "ended": "Ended remote session"
+    },
+    "drive": {
+      "created": "Uploaded file",
+      "renamed": "Renamed file",
+      "deleted": "Deleted file",
+      "moved": "Moved file"
+    },
+    "send": {
+      "created": "Sent file",
+      "accepted": "File received",
+      "declined": "Declined file",
+      "cancelled": "Cancelled transfer",
+      "failed": "Transfer failed",
+      "expired": "Transfer expired"
+    },
+    "media": {
+      "created": "Created media entry",
+      "updated": "Updated media entry",
+      "deleted": "Deleted media entry",
+      "poster_changed": "Changed poster",
+      "imported": "Imported media entry",
+      "gallery_synced": "Synced media images",
+      "collection": {
+        "created": "Created collection",
+        "updated": "Updated collection",
+        "deleted": "Deleted collection"
+      }
+    },
+    "other": "Other activity"
+  },
+  "states": {
+    "pending": "Awaiting approval",
+    "active": "Connected",
+    "ended": "Ended",
+    "offered": "Awaiting receipt",
+    "delivered": "Received",
+    "declined": "Declined",
+    "cancelled": "Cancelled",
+    "failed": "Failed",
+    "expired": "Expired"
+  },
+  "reasons": {
+    "stopped": "Stopped",
+    "declined": "Declined",
+    "expired": "Request expired",
+    "disconnected": "Disconnected",
+    "deviceRevoked": "Device revoked",
+    "captureFailed": "Capture failed",
+    "inputFailed": "Input control failed"
+  }
+}

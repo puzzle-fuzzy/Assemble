@@ -185,6 +185,7 @@ pub struct Draft {
 pub enum Destination {
     Device(DeviceView),
     Drive,
+    DriveFolder(String),
 }
 
 impl Destination {
@@ -192,7 +193,7 @@ impl Destination {
     fn target(&self) -> TransferTarget {
         match self {
             Self::Device(_) => TransferTarget::Device,
-            Self::Drive => TransferTarget::Drive,
+            Self::Drive | Self::DriveFolder(_) => TransferTarget::Drive,
         }
     }
 
@@ -200,7 +201,7 @@ impl Destination {
     fn peer(&self) -> String {
         match self {
             Self::Device(device) => device.name.clone(),
-            Self::Drive => DRIVE_NAME.to_owned(),
+            Self::Drive | Self::DriveFolder(_) => DRIVE_NAME.to_owned(),
         }
     }
 }
@@ -923,6 +924,7 @@ impl Registry {
                 Destination::Device(device)
             }
             Destination::Drive => Destination::Drive,
+            Destination::DriveFolder(parent) => Destination::DriveFolder(parent),
         };
         files
             .into_iter()

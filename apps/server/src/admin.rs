@@ -269,6 +269,7 @@ async fn private_response(request: Request, next: Next) -> Response {
 
 pub fn routes() -> axum::Router<Shared> {
     axum::Router::new()
+        .merge(crate::activity::routes())
         .merge(crate::dht::routes())
         .route("/v1/admin/session", get(session))
         .route("/v1/admin/notifications", get(system_notifications))

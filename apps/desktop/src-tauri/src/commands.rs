@@ -720,6 +720,158 @@ pub async fn drive_refresh(app: AppHandle) -> Result<crate::state::Snapshot, Com
     Ok(state.snapshot())
 }
 
+/// 主列表与移动选择器各自取消读取；只有当前会话的主列表进入快照。
+#[tauri::command]
+pub async fn drive_tree_list(
+    app: AppHandle,
+    window: tauri::WebviewWindow,
+    query: assemble_protocol::drive_tree::Query,
+    remember: bool,
+    request_id: String,
+) -> Result<assemble_protocol::drive_tree::Listing, CommandError> {
+    let state = app.state::<AppState>();
+    let call = remote_window(&window, &state)?;
+    if !assemble_protocol::primitives::is_valid_id(&request_id) {
+        return Err(CommandError::local(
+            "INVALID_REQUEST",
+            "invalid drive request identifier",
+        ));
+    }
+    let cancel = state
+        .drive_queries
+        .begin(&request_id, remember, &call.cancel);
+    let listing = call.finish(
+        &state,
+        state
+            .client
+            .drive_tree(&query, &RequestOptions::new(&cancel))
+            .await,
+    )?;
+    if cancel.is_cancelled() {
+        return Err(CommandError::local("CANCELLED", "drive query cancelled"));
+    }
+    if remember && !state.remember_drive_tree(listing.clone(), call.epoch, &cancel) {
+        return Err(CommandError::local("CANCELLED", "drive query cancelled"));
+    }
+    Ok(listing)
+}
+#[tauri::command]
+pub fn drive_tree_cancel(
+    app: AppHandle,
+    window: tauri::WebviewWindow,
+    request_id: String,
+) -> Result<(), CommandError> {
+    if window.label() != crate::state::MAIN_WINDOW {
+        return Err(CommandError::local("FORBIDDEN", "main window required"));
+    }
+    if !assemble_protocol::primitives::is_valid_id(&request_id) {
+        return Err(CommandError::local(
+            "INVALID_REQUEST",
+            "invalid drive request identifier",
+        ));
+    }
+    app.state::<AppState>().drive_queries.close(&request_id);
+    Ok(())
+}
+#[tauri::command]
+pub async fn drive_folder_create(
+    app: AppHandle,
+    window: tauri::WebviewWindow,
+    input: assemble_protocol::drive_tree::Create,
+) -> Result<assemble_protocol::drive_tree::Folder, CommandError> {
+    let state = app.state::<AppState>();
+    let call = remote_window(&window, &state)?;
+    call.finish(
+        &state,
+        state
+            .client
+            .drive_folder_create(&input, &RequestOptions::new(&call.cancel))
+            .await,
+    )
+}
+#[tauri::command]
+pub async fn drive_tree_rename(
+    app: AppHandle,
+    window: tauri::WebviewWindow,
+    kind: assemble_protocol::drive_tree::Kind,
+    id: String,
+    input: assemble_protocol::drive_tree::Rename,
+) -> Result<assemble_protocol::drive_tree::Entry, CommandError> {
+    let state = app.state::<AppState>();
+    let call = remote_window(&window, &state)?;
+    call.finish(
+        &state,
+        state
+            .client
+            .drive_tree_rename(kind, &id, &input, &RequestOptions::new(&call.cancel))
+            .await,
+    )
+}
+#[tauri::command]
+pub async fn drive_tree_move(
+    app: AppHandle,
+    window: tauri::WebviewWindow,
+    input: assemble_protocol::drive_tree::Move,
+) -> Result<assemble_protocol::drive_tree::Entry, CommandError> {
+    let state = app.state::<AppState>();
+    let call = remote_window(&window, &state)?;
+    call.finish(
+        &state,
+        state
+            .client
+            .drive_tree_move(&input, &RequestOptions::new(&call.cancel))
+            .await,
+    )
+}
+#[tauri::command]
+pub async fn drive_tree_delete(
+    app: AppHandle,
+    window: tauri::WebviewWindow,
+    kind: assemble_protocol::drive_tree::Kind,
+    id: String,
+    version: i64,
+) -> Result<(), CommandError> {
+    let state = app.state::<AppState>();
+    let call = remote_window(&window, &state)?;
+    call.finish(
+        &state,
+        state
+            .client
+            .drive_tree_delete(kind, &id, version, &RequestOptions::new(&call.cancel))
+            .await,
+    )
+}
+#[tauri::command]
+pub async fn drive_tree_upload(
+    app: AppHandle,
+    window: tauri::WebviewWindow,
+    parent_id: String,
+) -> Result<crate::state::Snapshot, CommandError> {
+    let state = app.state::<AppState>();
+    let call = remote_window(&window, &state)?;
+    // 打开系统选择器之前先核对目录；旧服务不能忽略目标后把文件存到根目录。
+    let query = assemble_protocol::drive_tree::Query {
+        parent_id: parent_id.clone(),
+        page_size: 1,
+        ..Default::default()
+    };
+    call.finish(
+        &state,
+        state
+            .client
+            .drive_tree(&query, &RequestOptions::new(&call.cancel))
+            .await,
+    )?;
+    let files = crate::send_panel::pick(&app, "往云盘里存文件")
+        .await
+        .map_err(|error| start_failed(&error))?;
+    call.finish(&state, Ok(()))?;
+    if !files.is_empty() {
+        state.queue_files(Destination::DriveFolder(parent_id), files);
+    }
+    Ok(state.snapshot())
+}
+
 /// 挑几个文件存进云盘。位置由系统选择器直接交给 Rust，不经过界面。
 #[tauri::command]
 pub async fn drive_upload(app: AppHandle) -> Result<crate::state::Snapshot, CommandError> {
@@ -735,11 +887,17 @@ pub async fn drive_upload(app: AppHandle) -> Result<crate::state::Snapshot, Comm
 
 /// 把云盘里的一个文件取回到这台电脑的接收位置。
 #[tauri::command]
-pub fn drive_download(
+pub async fn drive_download(
     app: AppHandle,
     file_id: String,
 ) -> Result<crate::state::Snapshot, CommandError> {
     let state = app.state::<AppState>();
+    let call = memo_call(&state)?;
+    let listing = call.finish(
+        &state,
+        state.client.drive(&RequestOptions::new(&call.cancel)).await,
+    )?;
+    state.set_drive(Some(listing));
     let Some(file) = state.drive_file(&file_id) else {
         return Err(CommandError::local(
             "FILE_GONE",

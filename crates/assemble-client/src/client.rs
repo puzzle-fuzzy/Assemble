@@ -461,6 +461,108 @@ impl Client {
     }
 
     // ---- 账户私有备忘录 ----
+    /// 新目录接口不存在时由调用方明确回退旧名单，不能静默丢掉目标目录。
+    pub async fn drive_tree(
+        &self,
+        query: &assemble_protocol::drive_tree::Query,
+        options: &RequestOptions<'_>,
+    ) -> Result<assemble_protocol::drive_tree::Listing, ClientError> {
+        if !query.valid() {
+            return Err(ClientError::InvalidRequest);
+        }
+        let call = Call::get("/v1/drive/tree")
+            .query("foldersOnly", query.folders_only.to_string())
+            .query("parentId", query.parent_id.clone())
+            .query("q", query.q.clone())
+            .query("page", query.page.to_string())
+            .query("pageSize", query.page_size.to_string());
+        self.call_json(call, options).await
+    }
+    pub async fn drive_folder_create(
+        &self,
+        input: &assemble_protocol::drive_tree::Create,
+        options: &RequestOptions<'_>,
+    ) -> Result<assemble_protocol::drive_tree::Folder, ClientError> {
+        if !input.valid() {
+            return Err(ClientError::InvalidRequest);
+        }
+        self.call_json(
+            Call::get("/v1/drive/tree/folders").post(Payload::Json(json(input)?)),
+            options,
+        )
+        .await
+    }
+    pub async fn drive_tree_upload(
+        &self,
+        parent: &str,
+        name: &str,
+        file: &OutgoingFile,
+        options: TransferOptions<'_>,
+        progress: Option<ProgressCallback<'_>>,
+    ) -> Result<assemble_protocol::drive_tree::TreeFile, ClientError> {
+        if !assemble_protocol::drive_tree::valid_parent(parent) {
+            return Err(ClientError::InvalidRequest);
+        }
+        let mut query = upload_query(name, file)?;
+        query.push(("parentId", parent.to_owned()));
+        self.upload("/v1/drive/tree/files", query, file, options, progress)
+            .await
+    }
+    pub async fn drive_tree_rename(
+        &self,
+        kind: assemble_protocol::drive_tree::Kind,
+        id: &str,
+        input: &assemble_protocol::drive_tree::Rename,
+        options: &RequestOptions<'_>,
+    ) -> Result<assemble_protocol::drive_tree::Entry, ClientError> {
+        if input.version < 1 || assemble_protocol::drive::clean_file_name(&input.name).is_none() {
+            return Err(ClientError::InvalidRequest);
+        }
+        let path = tree_path(kind, id)?;
+        self.call_json(
+            Call::get(&path).with_payload(Method::PATCH, Payload::Json(json(input)?)),
+            options,
+        )
+        .await
+    }
+    pub async fn drive_tree_move(
+        &self,
+        input: &assemble_protocol::drive_tree::Move,
+        options: &RequestOptions<'_>,
+    ) -> Result<assemble_protocol::drive_tree::Entry, ClientError> {
+        if input.version < 1
+            || !is_valid_id(&input.id)
+            || !assemble_protocol::drive_tree::valid_parent(&input.parent_id)
+        {
+            return Err(ClientError::InvalidRequest);
+        }
+        self.call_json(
+            Call::get("/v1/drive/tree/moves").post(Payload::Json(json(input)?)),
+            options,
+        )
+        .await
+    }
+    pub async fn drive_tree_delete(
+        &self,
+        kind: assemble_protocol::drive_tree::Kind,
+        id: &str,
+        version: i64,
+        options: &RequestOptions<'_>,
+    ) -> Result<(), ClientError> {
+        if version < 1 {
+            return Err(ClientError::InvalidRequest);
+        }
+        let path = tree_path(kind, id)?;
+        self.call_empty(
+            Call::get(&path)
+                .query("version", version.to_string())
+                .delete(),
+            options,
+        )
+        .await
+    }
+
+    // ---- 账户私有备忘录 ----
 
     pub async fn memo_list(
         &self,
@@ -1024,6 +1126,14 @@ fn idempotent<'a>(call: Call<'a>, key: Option<&str>) -> Call<'a> {
         Some(key) => call.header("idempotency-key", key.to_owned()),
         None => call,
     }
+}
+
+fn tree_path(kind: assemble_protocol::drive_tree::Kind, id: &str) -> Result<String, ClientError> {
+    let collection = match kind {
+        assemble_protocol::drive_tree::Kind::Folder => "folders",
+        assemble_protocol::drive_tree::Kind::File => "files",
+    };
+    Ok(format!("/v1/drive/tree/{collection}/{}", id_segment(id)?))
 }
 
 /// 一次调用的全部要素，交给发送管线之前先在这里组装好。

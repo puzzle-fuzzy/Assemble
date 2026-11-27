@@ -16,12 +16,14 @@
 #![cfg_attr(test, allow(clippy::pedantic))]
 
 pub mod account;
+pub mod activity;
 pub mod admin;
 pub mod browser;
 pub mod device;
 pub mod dht;
 pub mod downloads;
 pub mod drive;
+pub mod drive_tree;
 pub mod error;
 pub mod events;
 pub mod health;

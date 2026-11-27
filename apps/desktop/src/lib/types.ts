@@ -247,6 +247,7 @@ export interface ServiceView {
 }
 
 export interface Snapshot {
+  driveTree: import("@assemble/ui/lib/drive-tree").DriveTreeListing | null;
   remote: import("./remote").RemoteView;
   systemNotifications: import("@assemble/ui/lib/system-notifications").SystemNotifications;
   downloads: import("./downloads").DownloadsView;

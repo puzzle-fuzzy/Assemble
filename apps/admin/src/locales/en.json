@@ -17,7 +17,8 @@
     "dht": "DHT observations",
     "userDetail": "User details",
     "about": "About",
-    "signOut": "Sign out"
+    "signOut": "Sign out",
+    "activity": "Activity log"
   },
   "about": {
     "version": "Version",
