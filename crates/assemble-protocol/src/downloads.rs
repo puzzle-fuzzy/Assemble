@@ -19,10 +19,20 @@ pub enum DownloadInitiator {
     Assistant,
 }
 
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum MagnetNetwork {
+    #[default]
+    System,
+    Direct,
+}
+
 /// 后续浏览器插件可复用此输入；不接受 Cookie、任意请求头、文件路径或进程参数。
 #[derive(Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct DownloadInput {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub magnet_network: Option<MagnetNetwork>,
     pub kind: DownloadKind,
     pub url: String,
     #[serde(default)]
@@ -51,6 +61,8 @@ pub struct DownloadFile {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DownloadPreview {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub magnet_network: Option<MagnetNetwork>,
     pub id: String,
     pub kind: DownloadKind,
     pub title: String,
@@ -87,6 +99,8 @@ impl DownloadPhase {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DownloadTask {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub magnet_network: Option<MagnetNetwork>,
     pub id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub initiated_by: Option<DownloadInitiator>,
@@ -110,6 +124,8 @@ pub struct DownloadTask {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DownloadsView {
+    #[serde(default)]
+    pub direct_bt_available: bool,
     #[serde(default = "assistant_allowed_default")]
     pub assistant_allowed: bool,
     pub browser_task_id: Option<String>,
@@ -125,6 +141,7 @@ pub fn assistant_allowed_default() -> bool {
 impl Default for DownloadsView {
     fn default() -> Self {
         Self {
+            direct_bt_available: false,
             assistant_allowed: true,
             browser_task_id: None,
             folder_name: String::new(),

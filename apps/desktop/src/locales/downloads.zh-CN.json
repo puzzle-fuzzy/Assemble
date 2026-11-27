@@ -57,7 +57,8 @@
     "DOWNLOAD_BUSY": "队列已满或任务仍在进行，请稍后再试。",
     "unknown": "操作未完成，请重试。",
     "DOWNLOAD_CREDENTIALS_UNAVAILABLE": "系统钥匙串不可用，无法安全保存或读取续传信息。",
-    "DOWNLOAD_METADATA_UNAVAILABLE": "暂未找到可提供文件列表的节点，请确认资源有人分享后重试。"
+    "DOWNLOAD_METADATA_UNAVAILABLE": "未获取到文件列表。请确认资源有节点，并检查当前代理或网络是否允许 BT；Mac 可在知晓真实出口 IP 会被使用后选择 BT 节点直连。",
+    "DOWNLOAD_ROUTE_UNAVAILABLE": "所选直连网络不可用。目前仅支持 Mac 的默认物理网络，请检查网络后重试。"
   },
   "magnet": "磁力链",
   "magnetAddress": "磁力链接",
@@ -70,5 +71,8 @@
   "pause": "暂停",
   "resume": "继续下载",
   "paused": "已暂停，可继续下载",
-  "openFolder": "打开下载文件夹"
+  "openFolder": "打开下载文件夹",
+  "directBt": "BT 节点直连（Mac）",
+  "systemNetwork": "跟随系统网络",
+  "directBtHint": "默认跟随系统网络。仅为此磁力任务启用直连时，BT 节点和 DHT 将使用本机真实出口 IP；不会更改系统代理或防火墙。"
 }

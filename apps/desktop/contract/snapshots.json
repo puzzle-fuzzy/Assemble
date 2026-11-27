@@ -63,10 +63,12 @@
           "errorCode": null,
           "retryable": false,
           "createdAt": "2026-11-25T08:00:00.000Z",
-          "initiatedBy": "assistant"
+          "initiatedBy": "assistant",
+          "magnetNetwork": "direct"
         }
       ],
-      "assistantAllowed": false
+      "assistantAllowed": false,
+      "directBtAvailable": true
     },
     "systemNotifications": {
       "items": [],
@@ -113,7 +115,8 @@
       "folderName": "",
       "toolsAvailable": false,
       "tasks": [],
-      "assistantAllowed": true
+      "assistantAllowed": true,
+      "directBtAvailable": true
     },
     "systemNotifications": {
       "items": [],
@@ -384,7 +387,8 @@
       "folderName": "",
       "toolsAvailable": false,
       "tasks": [],
-      "assistantAllowed": true
+      "assistantAllowed": true,
+      "directBtAvailable": true
     },
     "systemNotifications": {
       "items": [],
@@ -452,7 +456,8 @@
       "folderName": "",
       "toolsAvailable": false,
       "tasks": [],
-      "assistantAllowed": true
+      "assistantAllowed": true,
+      "directBtAvailable": true
     },
     "systemNotifications": {
       "items": [],
@@ -502,7 +507,8 @@
       "folderName": "",
       "toolsAvailable": false,
       "tasks": [],
-      "assistantAllowed": true
+      "assistantAllowed": true,
+      "directBtAvailable": true
     },
     "systemNotifications": {
       "items": [],
@@ -581,7 +587,8 @@
       "folderName": "",
       "toolsAvailable": false,
       "tasks": [],
-      "assistantAllowed": true
+      "assistantAllowed": true,
+      "directBtAvailable": true
     },
     "systemNotifications": {
       "items": [],
@@ -746,7 +753,8 @@
       "folderName": "",
       "toolsAvailable": false,
       "tasks": [],
-      "assistantAllowed": true
+      "assistantAllowed": true,
+      "directBtAvailable": true
     },
     "systemNotifications": {
       "items": [],
@@ -996,7 +1004,8 @@
       "folderName": "",
       "toolsAvailable": false,
       "tasks": [],
-      "assistantAllowed": true
+      "assistantAllowed": true,
+      "directBtAvailable": true
     },
     "systemNotifications": {
       "items": [],
@@ -1090,7 +1099,8 @@
       "folderName": "",
       "toolsAvailable": false,
       "tasks": [],
-      "assistantAllowed": true
+      "assistantAllowed": true,
+      "directBtAvailable": true
     },
     "systemNotifications": {
       "items": [],
@@ -1202,7 +1212,8 @@
       "folderName": "",
       "toolsAvailable": false,
       "tasks": [],
-      "assistantAllowed": true
+      "assistantAllowed": true,
+      "directBtAvailable": true
     },
     "systemNotifications": {
       "items": [],
@@ -1453,7 +1464,8 @@
       "folderName": "",
       "toolsAvailable": false,
       "tasks": [],
-      "assistantAllowed": true
+      "assistantAllowed": true,
+      "directBtAvailable": true
     },
     "systemNotifications": {
       "items": [],
@@ -1717,7 +1729,8 @@
       "folderName": "",
       "toolsAvailable": false,
       "tasks": [],
-      "assistantAllowed": true
+      "assistantAllowed": true,
+      "directBtAvailable": true
     },
     "systemNotifications": {
       "items": [],
@@ -1984,7 +1997,8 @@
       "folderName": "",
       "toolsAvailable": false,
       "tasks": [],
-      "assistantAllowed": true
+      "assistantAllowed": true,
+      "directBtAvailable": true
     },
     "systemNotifications": {
       "items": [],
@@ -2031,7 +2045,8 @@
       "folderName": "",
       "toolsAvailable": false,
       "tasks": [],
-      "assistantAllowed": true
+      "assistantAllowed": true,
+      "directBtAvailable": true
     },
     "systemNotifications": {
       "items": [],
@@ -2078,7 +2093,8 @@
       "folderName": "",
       "toolsAvailable": false,
       "tasks": [],
-      "assistantAllowed": true
+      "assistantAllowed": true,
+      "directBtAvailable": true
     },
     "systemNotifications": {
       "items": [],
@@ -2255,7 +2271,8 @@
       "folderName": "",
       "toolsAvailable": false,
       "tasks": [],
-      "assistantAllowed": true
+      "assistantAllowed": true,
+      "directBtAvailable": true
     },
     "systemNotifications": {
       "items": [
@@ -2451,7 +2468,8 @@
       "folderName": "",
       "toolsAvailable": false,
       "tasks": [],
-      "assistantAllowed": true
+      "assistantAllowed": true,
+      "directBtAvailable": true
     },
     "systemNotifications": {
       "items": [],
@@ -2641,7 +2659,8 @@
       "folderName": "",
       "toolsAvailable": false,
       "tasks": [],
-      "assistantAllowed": true
+      "assistantAllowed": true,
+      "directBtAvailable": true
     },
     "systemNotifications": {
       "items": [],
@@ -2831,7 +2850,8 @@
       "folderName": "",
       "toolsAvailable": false,
       "tasks": [],
-      "assistantAllowed": true
+      "assistantAllowed": true,
+      "directBtAvailable": true
     },
     "systemNotifications": {
       "items": [],
@@ -3022,7 +3042,8 @@
       "folderName": "",
       "toolsAvailable": false,
       "tasks": [],
-      "assistantAllowed": true
+      "assistantAllowed": true,
+      "directBtAvailable": true
     },
     "systemNotifications": {
       "items": [],
@@ -3276,7 +3297,8 @@
       "folderName": "",
       "toolsAvailable": false,
       "tasks": [],
-      "assistantAllowed": true
+      "assistantAllowed": true,
+      "directBtAvailable": true
     },
     "systemNotifications": {
       "items": [],

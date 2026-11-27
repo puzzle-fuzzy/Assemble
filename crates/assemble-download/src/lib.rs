@@ -53,6 +53,8 @@ pub enum DownloadError {
     CredentialsUnavailable,
     #[error("torrent metadata is unavailable")]
     MetadataUnavailable,
+    #[error("the explicitly requested direct network is unavailable")]
+    NetworkRouteUnavailable,
 }
 
 impl DownloadError {
@@ -73,6 +75,7 @@ impl DownloadError {
             Self::NoSpace => "DOWNLOAD_NO_SPACE",
             Self::CredentialsUnavailable => "DOWNLOAD_CREDENTIALS_UNAVAILABLE",
             Self::MetadataUnavailable => "DOWNLOAD_METADATA_UNAVAILABLE",
+            Self::NetworkRouteUnavailable => "DOWNLOAD_ROUTE_UNAVAILABLE",
             Self::AssistantDisabled => "DOWNLOAD_ASSISTANT_DISABLED",
         }
     }

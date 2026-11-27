@@ -31,6 +31,57 @@ function currentDialog() {
   if (!dialog) throw new Error("download dialog missing");
   return dialog;
 }
+async function chooseMagnet(dialog: HTMLElement) {
+  const trigger = dialog.querySelector<HTMLElement>('[role="combobox"]');
+  await act(async () =>
+    trigger?.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }),
+    ),
+  );
+  await settle();
+  await click(
+    [...document.querySelectorAll<HTMLElement>('[role="option"]')].find(
+      (v) => v.textContent?.trim() === "磁力链",
+    ),
+  );
+}
+test("Mac 直连默认关闭，明确勾选后只随本次磁力预览提交并在开始后重置", async () => {
+  const source = new FakeBridge(snapshot());
+  source.downloadPreview = {
+    id: "p",
+    kind: "magnet",
+    magnetNetwork: "direct",
+    title: "公开样本",
+    sourceHost: "BitTorrent",
+    durationSeconds: null,
+    files: [{ id: 0, name: "sample.bin", size: 1 }],
+    variants: [{ id: "magnet", width: null, height: null, bandwidth: null }],
+  };
+  const view = await render(
+    <DownloadsPage
+      source={source}
+      view={{ ...source.current.downloads, directBtAvailable: true }}
+    />,
+  );
+  await click(button(view.host, "新建下载"));
+  let dialog = currentDialog();
+  await chooseMagnet(dialog);
+  const direct = dialog.querySelector<HTMLElement>('[id$="-direct-bt"]');
+  expect(direct?.getAttribute("aria-checked")).toBe("false");
+  expect(text(dialog)).toContain("真实出口 IP");
+  await click(direct ?? undefined);
+  await typeInto(dialog, `magnet:?xt=urn:btih:${"a".repeat(40)}`);
+  await click(button(dialog, "解析地址"));
+  expect(source.downloadInput?.magnetNetwork).toBe("direct");
+  await click(button(dialog, "开始下载"));
+  await click(button(view.host, "新建下载"));
+  dialog = currentDialog();
+  expect(
+    dialog.querySelector('[id$="-direct-bt"]')?.getAttribute("aria-checked"),
+  ).toBe("false");
+  await act(async () => setLanguage("en"));
+  expect(text(dialog)).toContain("real outbound IP");
+});
 
 test("助手任务标记跟随语言，普通任务不增加标记", async () => {
   const source = new FakeBridge(snapshot());

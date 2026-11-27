@@ -23,6 +23,7 @@ async fn main() {
     };
     match manager
         .prepare(DownloadInput {
+            magnet_network: None,
             kind,
             url: value,
             page_url: None,

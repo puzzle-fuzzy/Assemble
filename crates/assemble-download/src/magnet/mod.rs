@@ -1,7 +1,10 @@
 //! 磁力任务与视频共用队列外观，但独立保存可恢复分片，避免视频清理器误删。
 mod credentials;
+#[cfg(test)]
+mod diagnostics;
 mod engine;
 mod files;
+mod route;
 #[cfg(test)]
 mod tests;
 mod tracker_pool;
@@ -201,6 +204,7 @@ impl MagnetManager {
         &self,
         value: &str,
         by: Option<DownloadInitiator>,
+        network: assemble_protocol::downloads::MagnetNetwork,
     ) -> Result<DownloadPreview> {
         if self.lifetime.is_cancelled() {
             return Err(DownloadError::Cancelled);
@@ -214,9 +218,11 @@ impl MagnetManager {
             state.preparing = Some(cancel.clone());
         }
         let _preparation = Preparation(self);
-        let result = engine::prepare(value, &cancel, &self.options).await;
+        let options = route::options(&self.options, network).await?;
+        let result = engine::prepare(value, &cancel, &options).await;
         let prepared = result?;
         let view = DownloadPreview {
+            magnet_network: Some(network),
             id: random_id()?,
             kind: DownloadKind::Magnet,
             title: prepared.title.clone(),
@@ -298,6 +304,7 @@ impl MagnetManager {
         credentials::put(store.as_ref(), &id, &engine.source)?;
         let record = Record {
             view: DownloadTask {
+                magnet_network: view.magnet_network,
                 id: id.clone(),
                 initiated_by: by,
                 kind: DownloadKind::Magnet,
@@ -529,11 +536,15 @@ impl MagnetManager {
                 .saturating_sub(record.view.received_bytes)
                 .saturating_add(record.view.total_bytes.unwrap_or(0)),
         )?;
-        let (trackers, initial) =
-            engine::connection_options(&source, &self.options, cancel).await?;
+        let options = route::options(
+            &self.options,
+            record.view.magnet_network.unwrap_or_default(),
+        )
+        .await?;
+        let (trackers, initial) = engine::connection_options(&source, &options, cancel).await?;
         peers.extend(initial);
         peers.truncate(128);
-        let engine = engine::session(data.clone(), cancel.child_token(), &self.options).await?;
+        let engine = engine::session(data.clone(), cancel.child_token(), &options).await?;
         let outcome=async {
             self.update(id,DownloadPhase::Verifying,record.view.received_bytes,0);
             let added=tokio::select! {()=cancel.cancelled()=>return Err(DownloadError::Cancelled),result=engine.add_torrent(AddTorrent::from_bytes(record.metadata.clone()),Some(AddTorrentOptions {output_folder:Some(data.to_str().ok_or(DownloadError::Storage)?.to_owned()),only_files:Some(record.selected.iter().map(|f|usize::try_from(f.id).map_err(|_|DownloadError::InvalidSource)).collect::<Result<Vec<_>>>()?),overwrite:true,initial_peers:Some(peers),trackers:Some(trackers),..AddTorrentOptions::default()}))=>result.map_err(|_|DownloadError::Network)?};

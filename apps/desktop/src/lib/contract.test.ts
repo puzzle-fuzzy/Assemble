@@ -26,6 +26,25 @@ describe("状态契约样本", () => {
     expect(checked().length).toBeGreaterThan(0);
   });
 
+  test("磁力网络模式兼容旧状态并拒绝未知或用于视频的模式", () => {
+    const source = samples.find((s) =>
+      s.downloads.tasks.some((t) => t.kind === "magnet"),
+    );
+    if (!source) throw new Error("missing magnet snapshot");
+    const sample = structuredClone(source);
+    const task = sample.downloads.tasks.find((t) => t.kind === "magnet");
+    if (!task) throw new Error("missing magnet task");
+    expect(isSnapshot(sample)).toBe(true);
+    const raw = task as unknown as Record<string, unknown>;
+    delete raw.magnetNetwork;
+    expect(isSnapshot(sample)).toBe(true);
+    raw.magnetNetwork = "arbitrary-route";
+    expect(isSnapshot(sample)).toBe(false);
+    raw.magnetNetwork = "direct";
+    raw.kind = "hls";
+    expect(isSnapshot(sample)).toBe(false);
+  });
+
   test("覆盖了会话的全部阶段", () => {
     const phases = new Set(checked().map((snapshot) => snapshot.session.phase));
     expect(phases).toEqual(new Set(["signedOut", "signingIn", "signedIn"]));

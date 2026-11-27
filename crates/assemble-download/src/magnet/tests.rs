@@ -161,8 +161,19 @@ async fn selects_files_pauses_and_recovers_after_restart() {
         .unwrap()
     };
     let manager = open();
-    let preview = manager.prepare(&source, None).await.unwrap();
+    let preview = manager
+        .prepare(
+            &source,
+            None,
+            assemble_protocol::downloads::MagnetNetwork::Direct,
+        )
+        .await
+        .unwrap();
     assert!(announces.load(std::sync::atomic::Ordering::SeqCst) > 0);
+    assert_eq!(
+        preview.magnet_network,
+        Some(assemble_protocol::downloads::MagnetNetwork::Direct)
+    );
     assert_eq!(preview.files.len(), 3);
     let ids: Vec<_> = preview
         .files
@@ -210,6 +221,10 @@ async fn selects_files_pauses_and_recovers_after_restart() {
     manager.shutdown().await;
     drop(manager);
     let recovered = open();
+    assert_eq!(
+        recovered.record(&id).unwrap().view.magnet_network,
+        Some(assemble_protocol::downloads::MagnetNetwork::Direct)
+    );
     assert_eq!(
         recovered.record(&id).unwrap().view.phase,
         DownloadPhase::Paused
@@ -296,7 +311,8 @@ async fn cancelling_metadata_and_shutdown_wait_for_engine_cleanup() {
         "a".repeat(40),
         listener.local_addr().unwrap()
     );
-    let preparation = tokio::spawn(async move { worker.prepare(&uri, None).await });
+    let preparation =
+        tokio::spawn(async move { worker.prepare(&uri, None, Default::default()).await });
     tokio::time::timeout(Duration::from_secs(5), async {
         while manager.lock().preparing.is_none() {
             tokio::task::yield_now().await;
@@ -378,6 +394,7 @@ async fn active_history_restores_paused_and_cancel_discards_only_owned_cache() {
     let history = dir.path().join("tasks.json");
     let record = Record {
         view: DownloadTask {
+            magnet_network: None,
             id: id.clone(),
             initiated_by: None,
             kind: DownloadKind::Magnet,
@@ -449,8 +466,17 @@ fn keychain_chunks_keep_unicode_and_remove_every_part() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[ignore = "requires an explicitly supplied public magnet and network access"]
 async fn public_tracker_download_benchmark() {
+    let counters = diagnostics::Counters::start();
     let input = std::env::var("ASSEMBLE_PUBLIC_MAGNET_FILE").expect("public magnet file");
     let source = std::fs::read_to_string(input).unwrap();
+    let bound_test = std::env::var("ASSEMBLE_PUBLIC_BT_INTERFACE").ok();
+    let direct = bound_test.is_some();
+    // 小样本对照留出在途分片和停止会话的余量，不把 250 ms 的状态采样当作严格流量闸门。
+    let byte_budget = if bound_test.is_some() {
+        16 * 1024 * 1024
+    } else {
+        128 * 1024 * 1024
+    };
     let dir = tempfile::tempdir().unwrap();
     let manager = MagnetManager::open_with(
         dir.path().join("history.json"),
@@ -459,13 +485,33 @@ async fn public_tracker_download_benchmark() {
         Some(Arc::new(MemorySecretStore::default())),
         engine::Options {
             pool: Some(tracker_pool::Pool::open(dir.path().join("trackers.json"))),
+            download_bps: bound_test
+                .as_ref()
+                .and_then(|_| std::num::NonZeroU32::new(8 * 1024 * 1024)),
+            bind_device_name: bound_test,
             ..engine::Options::default()
         },
     )
     .unwrap();
     let started = Instant::now();
-    let preview = manager.prepare(source.trim(), None).await;
+    let preview = manager
+        .prepare(
+            source.trim(),
+            None,
+            if direct {
+                assemble_protocol::downloads::MagnetNetwork::Direct
+            } else {
+                Default::default()
+            },
+        )
+        .await;
     let metadata_ms = started.elapsed().as_millis();
+    if let Some(counters) = counters {
+        println!(
+            "METADATA_DIAGNOSTICS {}",
+            serde_json::to_string(&counters.finish()).unwrap()
+        );
+    }
     let Ok(preview) = preview else {
         manager.shutdown().await;
         println!(
@@ -494,7 +540,7 @@ async fn public_tracker_download_benchmark() {
         peak_bps = peak_bps.max(task.bytes_per_second);
         if !task.phase.active()
             || download.elapsed() >= Duration::from_secs(90)
-            || task.received_bytes >= 128 * 1024 * 1024
+            || task.received_bytes >= byte_budget
         {
             let elapsed_ms = download.elapsed().as_millis().max(1);
             let first = first_byte_ms.map_or_else(|| "null".into(), |v| v.to_string());
@@ -505,6 +551,8 @@ async fn public_tracker_download_benchmark() {
                 task.phase == DownloadPhase::Completed
             );
             if task.phase.active() {
+                manager.pause(&id).await.unwrap();
+                verify_public_sample(&manager, &id).await;
                 manager.cancel(&id).await.unwrap();
             }
             break;
@@ -512,6 +560,42 @@ async fn public_tracker_download_benchmark() {
         tokio::time::sleep(Duration::from_millis(250)).await;
     }
     manager.shutdown().await;
+}
+
+async fn verify_public_sample(manager: &MagnetManager, id: &str) {
+    use sha1::{Digest, Sha1};
+    use tokio::io::AsyncReadExt;
+    let record = manager.record(id).unwrap();
+    assert_eq!(
+        record.selected.len(),
+        1,
+        "the public speed sample must be a single-file torrent"
+    );
+    let metadata = librqbit::torrent_from_bytes(&record.metadata).unwrap();
+    let piece_length = metadata.info.data.piece_length as usize;
+    assert!(piece_length > 0 && piece_length <= 16 * 1024 * 1024);
+    let hashes: &[u8] = metadata.info.data.pieces.as_ref();
+    let cache = files::cache(&record.folder, id, false).await.unwrap();
+    let mut file = tokio::fs::File::open(cache.join("data").join(&record.selected[0].name))
+        .await
+        .unwrap();
+    let mut buffer = vec![0_u8; piece_length];
+    let mut count = 0_u64;
+    let sample = usize::try_from(record.view.received_bytes).unwrap() / piece_length;
+    for expected in hashes.as_chunks::<20>().0.iter().take(sample.min(128)) {
+        file.read_exact(&mut buffer).await.unwrap();
+        if Sha1::digest(&buffer).as_slice() == expected {
+            count += 1;
+        }
+    }
+    assert!(
+        count > 0,
+        "no downloaded sample piece matches the official torrent"
+    );
+    println!(
+        "SAMPLE_VERIFIED {{\"pieceCount\":{count},\"pieceBytes\":{piece_length},\"verifiedBytes\":{}}}",
+        count * piece_length as u64
+    );
 }
 
 #[tokio::test]

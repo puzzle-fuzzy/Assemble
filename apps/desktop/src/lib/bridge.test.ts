@@ -511,6 +511,32 @@ describe("桥接", () => {
       { command: "download_cancel_preparation", args: {} },
     ]);
   });
+  test("直连选择单向交给 Rust，预览必须确认相同网络模式", async () => {
+    const input = {
+      kind: "magnet" as const,
+      url: `magnet:?xt=urn:btih:${"a".repeat(40)}`,
+      magnetNetwork: "direct" as const,
+    };
+    const preview = {
+      id: "p",
+      kind: "magnet",
+      title: "公开样本",
+      sourceHost: "BitTorrent",
+      durationSeconds: null,
+      files: [{ id: 0, name: "sample.bin", size: 1 }],
+      variants: [{ id: "magnet", width: null, height: null, bandwidth: null }],
+    };
+    respondWith = preview;
+    await expect(bridge.downloadPrepare(input)).rejects.toMatchObject({
+      code: "DOWNLOAD_ROUTE_UNAVAILABLE",
+    });
+    respondWith = { ...preview, magnetNetwork: "direct" };
+    expect((await bridge.downloadPrepare(input)).magnetNetwork).toBe("direct");
+    expect(calls.at(-1)).toEqual({
+      command: "download_prepare",
+      args: { input },
+    });
+  });
   test("每条命令使用与 Rust 侧一致的名字与参数", async () => {
     await bridge.snapshot();
     await bridge.signIn();

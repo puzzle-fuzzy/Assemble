@@ -57,7 +57,8 @@
     "DOWNLOAD_BUSY": "The queue is full or the task is still running. Try again later.",
     "unknown": "The operation did not complete. Try again.",
     "DOWNLOAD_CREDENTIALS_UNAVAILABLE": "The system keychain is unavailable. Resume credentials could not be saved or read.",
-    "DOWNLOAD_METADATA_UNAVAILABLE": "No peer supplied the file list. Check that the torrent has available peers and try again."
+    "DOWNLOAD_METADATA_UNAVAILABLE": "No file list was received. Check resource availability and whether the current proxy or network permits BT. On Mac, direct BT connections are an option if you accept using your real outbound IP.",
+    "DOWNLOAD_ROUTE_UNAVAILABLE": "Direct routing is unavailable. It currently requires the default physical network on a Mac."
   },
   "magnet": "Magnet link",
   "magnetAddress": "Magnet URI",
@@ -70,5 +71,8 @@
   "pause": "Pause",
   "resume": "Resume",
   "paused": "Paused · ready to resume",
-  "openFolder": "Open download folder"
+  "openFolder": "Open download folder",
+  "directBt": "Direct BT connections (Mac)",
+  "systemNetwork": "Follow system network",
+  "directBtHint": "System network is the default. Direct mode applies only to this magnet task and exposes your real outbound IP to BT peers and DHT. System proxy and firewall settings stay unchanged."
 }

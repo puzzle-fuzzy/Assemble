@@ -1,6 +1,8 @@
 // 本机下载的公开展示契约；地址只在提交时单向交给 Rust。
 export type DownloadKind = "hls" | "douyin" | "video" | "magnet";
+export type MagnetNetwork = "system" | "direct";
 export interface DownloadInput {
+  magnetNetwork?: MagnetNetwork;
   kind: DownloadKind;
   url: string;
   pageUrl?: string | null;
@@ -18,6 +20,7 @@ export interface DownloadFile {
   size: number;
 }
 export interface DownloadPreview {
+  magnetNetwork?: MagnetNetwork;
   id: string;
   kind: DownloadKind;
   title: string;
@@ -37,6 +40,7 @@ export type DownloadPhase =
   | "interrupted"
   | "paused";
 export interface DownloadTask {
+  magnetNetwork?: MagnetNetwork;
   /** 旧任务缺省；来源标记不包含助手身份或来源凭据。 */
   initiatedBy?: "assistant";
   id: string;
@@ -57,6 +61,7 @@ export interface DownloadTask {
   createdAt: string;
 }
 export interface DownloadsView {
+  directBtAvailable?: boolean;
   assistantAllowed: boolean;
   /** 旧开发预览缺少此定位信号时按未触发处理。 */
   browserTaskId?: string | null;
@@ -78,9 +83,14 @@ const kind = (value: unknown) =>
   value === "video" ||
   value === "magnet";
 
+const validNetwork = (value: Record<string, unknown>) =>
+  value.magnetNetwork === undefined ||
+  (value.kind === "magnet" &&
+    (value.magnetNetwork === "system" || value.magnetNetwork === "direct"));
 export function isDownloadPreview(value: unknown): value is DownloadPreview {
   return (
     record(value) &&
+    validNetwork(value) &&
     typeof value.id === "string" &&
     kind(value.kind) &&
     typeof value.title === "string" &&
@@ -119,6 +129,8 @@ export function isDownloadPreview(value: unknown): value is DownloadPreview {
 export function isDownloadsView(value: unknown): value is DownloadsView {
   return (
     record(value) &&
+    (value.directBtAvailable === undefined ||
+      typeof value.directBtAvailable === "boolean") &&
     typeof value.folderName === "string" &&
     typeof value.assistantAllowed === "boolean" &&
     (value.browserTaskId === undefined ||
@@ -128,6 +140,7 @@ export function isDownloadsView(value: unknown): value is DownloadsView {
     value.tasks.every(
       (v) =>
         record(v) &&
+        validNetwork(v) &&
         typeof v.id === "string" &&
         (v.initiatedBy === undefined || v.initiatedBy === "assistant") &&
         kind(v.kind) &&

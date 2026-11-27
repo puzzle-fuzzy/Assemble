@@ -255,10 +255,22 @@ export const bridge: Bridge = {
     upload: (parentId) =>
       checked(() => invoke<unknown>("drive_tree_upload", { parentId })),
   },
-  downloadPrepare: async (input) =>
-    requireDownloadPreview(
+  downloadPrepare: async (input) => {
+    if (input.magnetNetwork !== undefined && input.kind !== "magnet")
+      throw new BridgeError(
+        "DOWNLOAD_INVALID_SOURCE",
+        "Invalid download network mode",
+      );
+    const preview = requireDownloadPreview(
       await invoke<unknown>("download_prepare", { input }),
-    ),
+    );
+    if (input.magnetNetwork === "direct" && preview.magnetNetwork !== "direct")
+      throw new BridgeError(
+        "DOWNLOAD_ROUTE_UNAVAILABLE",
+        "The desktop did not confirm direct routing",
+      );
+    return preview;
+  },
   downloadImportHls: async (baseUrl, pageUrl) => {
     const value = await invoke<unknown>("download_import_hls", {
       baseUrl,

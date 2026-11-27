@@ -222,7 +222,11 @@ impl DownloadManager {
             }
             let preview = self
                 .magnet
-                .prepare(&input.url, Some(DownloadInitiator::Assistant))
+                .prepare(
+                    &input.url,
+                    Some(DownloadInitiator::Assistant),
+                    input.magnet_network.unwrap_or_default(),
+                )
                 .await?;
             if let Err(error) = self.ensure_assistant_allowed() {
                 self.magnet.discard_preview(&preview.id);
@@ -281,7 +285,13 @@ impl DownloadManager {
             if input.page_url.is_some() || input.title.is_some() {
                 return Err(DownloadError::InvalidSource);
             }
-            return self.magnet.prepare(&input.url, None).await;
+            return self
+                .magnet
+                .prepare(&input.url, None, input.magnet_network.unwrap_or_default())
+                .await;
+        }
+        if input.magnet_network.is_some() {
+            return Err(DownloadError::InvalidSource);
         }
         let request_headers = headers(if input.kind == DownloadKind::Douyin {
             Some("https://www.douyin.com/")
@@ -443,6 +453,7 @@ impl DownloadManager {
             title
         };
         let preview = DownloadPreview {
+            magnet_network: None,
             id: random_id()?,
             kind,
             title,
@@ -636,6 +647,7 @@ impl DownloadManager {
                 0,
                 Record {
                     view: DownloadTask {
+                        magnet_network: None,
                         id: id.clone(),
                         initiated_by,
                         kind: prepared.preview.kind,
@@ -949,6 +961,7 @@ fn download_view(state: &State, available: bool, magnet: Vec<DownloadTask>) -> D
         .collect();
     tasks.sort_by_key(|a| std::cmp::Reverse(a.created_at.as_millis()));
     DownloadsView {
+        direct_bt_available: cfg!(target_os = "macos"),
         assistant_allowed: state.assistant_allowed,
         browser_task_id: state.browser_task_id.clone(),
         folder_name: state
@@ -1019,6 +1032,7 @@ mod tests {
         assert!(
             manager
                 .prepare(DownloadInput {
+                    magnet_network: None,
                     kind: DownloadKind::Hls,
                     url: "file:///secret".into(),
                     page_url: None,
@@ -1045,6 +1059,7 @@ mod tests {
             let mut state = manager.lock();
             state.history.records.push(Record {
                 view: DownloadTask {
+                    magnet_network: None,
                     id: "running".into(),
                     initiated_by: None,
                     kind: DownloadKind::Hls,

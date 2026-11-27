@@ -107,6 +107,48 @@ fn dns_answers(body: &[u8]) -> Result<Vec<IpAddr>> {
     Ok(addresses)
 }
 
+async fn doh_addresses(client: &reqwest::Client, host: &str, record: &str) -> Result<Vec<IpAddr>> {
+    let mut url =
+        Url::parse("https://cloudflare-dns.com/dns-query").map_err(|_| DownloadError::Network)?;
+    url.query_pairs_mut()
+        .append_pair("name", host)
+        .append_pair("type", record);
+    let mut response = client
+        .get(url)
+        .header("accept", "application/dns-json")
+        .send()
+        .await
+        .map_err(|_| DownloadError::Network)?;
+    if !response.status().is_success() {
+        return Err(DownloadError::Network);
+    }
+    let mut body = Vec::new();
+    while let Some(chunk) = response.chunk().await.map_err(|_| DownloadError::Network)? {
+        if body.len() + chunk.len() > 65_536 {
+            return Err(DownloadError::Limit);
+        }
+        body.extend_from_slice(&chunk);
+    }
+    dns_answers(&body)
+}
+fn merge_dns(v4: Result<Vec<IpAddr>>, v6: Result<Vec<IpAddr>>) -> Result<Vec<IpAddr>> {
+    let mut addresses = Vec::new();
+    for result in [v4, v6] {
+        match result {
+            Ok(ips) => addresses.extend(ips),
+            Err(DownloadError::InvalidSource) => return Err(DownloadError::InvalidSource),
+            Err(DownloadError::Limit) => return Err(DownloadError::Limit),
+            _ => {}
+        }
+    }
+    addresses.sort_unstable();
+    addresses.dedup();
+    if addresses.is_empty() {
+        return Err(DownloadError::Network);
+    }
+    Ok(addresses)
+}
+
 impl Network {
     #[cfg(test)]
     pub(crate) fn test(origin: String) -> Self {
@@ -135,37 +177,12 @@ impl Network {
             .timeout(Duration::from_secs(10))
             .build()
             .map_err(|_| DownloadError::Network)?;
-        let mut addresses = Vec::new();
-        for record in ["A", "AAAA"] {
-            let mut url = Url::parse("https://cloudflare-dns.com/dns-query")
-                .map_err(|_| DownloadError::Network)?;
-            url.query_pairs_mut()
-                .append_pair("name", host)
-                .append_pair("type", record);
-            let mut response = client
-                .get(url)
-                .header("accept", "application/dns-json")
-                .send()
-                .await
-                .map_err(|_| DownloadError::Network)?;
-            if !response.status().is_success() {
-                return Err(DownloadError::Network);
-            }
-            let mut body = Vec::new();
-            while let Some(chunk) = response.chunk().await.map_err(|_| DownloadError::Network)? {
-                if body.len() + chunk.len() > 65_536 {
-                    return Err(DownloadError::Limit);
-                }
-                body.extend_from_slice(&chunk);
-            }
-            addresses = dns_answers(&body)?;
-            if !addresses.is_empty() {
-                break;
-            }
-        }
-        if addresses.is_empty() {
-            return Err(DownloadError::Network);
-        }
+        // 两种地址族独立查询；A 成功不能截断 AAAA，否则会永远漏掉 IPv6 节点。
+        let (v4, v6) = tokio::join!(
+            doh_addresses(&client, host, "A"),
+            doh_addresses(&client, host, "AAAA")
+        );
+        let addresses = merge_dns(v4, v6)?;
         let mut cache = self
             .resolved
             .lock()
@@ -455,6 +472,17 @@ mod tests {
             vec!["2606:4700:4700::1111".parse::<IpAddr>().unwrap()]
         );
         assert!(dns_answers(br#"{"Status":0,"Answer":[{"type":1,"data":"127.0.0.1"}]}"#).is_err());
+    }
+    #[test]
+    fn real_dns_keeps_both_families_and_rejects_any_private_answer() {
+        let v4 = "8.8.8.8".parse().unwrap();
+        let v6 = "2606:4700:4700::1111".parse().unwrap();
+        assert_eq!(merge_dns(Ok(vec![v4]), Ok(vec![v6])).unwrap(), vec![v4, v6]);
+        assert_eq!(
+            merge_dns(Err(DownloadError::Network), Ok(vec![v6])).unwrap(),
+            vec![v6]
+        );
+        assert!(merge_dns(Ok(vec![v4]), Err(DownloadError::InvalidSource)).is_err());
     }
     #[tokio::test]
     async fn actual_connection_addresses_reject_private_targets() {

@@ -60,17 +60,35 @@ impl Endpoint {
             local_test,
         })
     }
-    pub fn udp_url(&self) -> Result<String> {
-        let mut url = self.url.clone();
-        let addr = self
-            .addresses
-            .iter()
-            .find(|a| a.is_ipv4())
-            .or(self.addresses.first())
-            .ok_or(DownloadError::Network)?;
-        url.set_ip_host(addr.ip())
-            .map_err(|()| DownloadError::InvalidSource)?;
-        Ok(url.to_string())
+    pub fn families(&self) -> Vec<Self> {
+        [false, true]
+            .into_iter()
+            .filter_map(|v6| {
+                let addresses: Vec<_> = self
+                    .addresses
+                    .iter()
+                    .copied()
+                    .filter(|a| a.is_ipv6() == v6)
+                    .collect();
+                (!addresses.is_empty()).then(|| Self {
+                    url: self.url.clone(),
+                    addresses,
+                    local_test: self.local_test,
+                })
+            })
+            .collect()
+    }
+    pub fn udp_urls(&self) -> Result<Vec<String>> {
+        self.families()
+            .into_iter()
+            .map(|endpoint| {
+                let mut url = endpoint.url;
+                let addr = endpoint.addresses.first().ok_or(DownloadError::Network)?;
+                url.set_ip_host(addr.ip())
+                    .map_err(|()| DownloadError::InvalidSource)?;
+                Ok(url.to_string())
+            })
+            .collect()
     }
     fn client(&self) -> Result<reqwest::Client> {
         reqwest::Client::builder()
@@ -105,6 +123,17 @@ impl Endpoint {
         Ok(bytes)
     }
     pub async fn healthy(&self) -> bool {
+        let mut checks = stream::iter(self.families())
+            .map(|endpoint| async move { endpoint.healthy_family().await })
+            .buffer_unordered(2);
+        while let Some(healthy) = checks.next().await {
+            if healthy {
+                return true;
+            }
+        }
+        false
+    }
+    async fn healthy_family(&self) -> bool {
         if self.url.scheme() == "udp" {
             return self.udp_connect().await.is_ok();
         }
@@ -219,7 +248,12 @@ pub(super) async fn bootstrap(
     hash: &[u8; 20],
     cancel: &CancellationToken,
 ) -> Vec<SocketAddr> {
-    let groups = stream::iter(endpoints)
+    // Tracker 可能只返回请求地址族的节点；分别查询两族，不能用一次 IPv4 成功掩盖 IPv6。
+    let families = endpoints
+        .into_iter()
+        .flat_map(|endpoint| endpoint.families())
+        .collect::<Vec<_>>();
+    let groups = stream::iter(families)
         .map(|endpoint| async move { endpoint.peers(hash, cancel).await })
         .buffer_unordered(8)
         .collect::<Vec<_>>()
@@ -295,6 +329,35 @@ mod tests {
         Arc,
         atomic::{AtomicUsize, Ordering},
     };
+    #[test]
+    fn dual_stack_trackers_and_ipv6_peers_are_not_lost() {
+        let endpoint = Endpoint {
+            url: Url::parse("udp://tracker.example:6969/announce").unwrap(),
+            addresses: vec![
+                "8.8.8.8:6969".parse().unwrap(),
+                "[2606:4700:4700::1111]:6969".parse().unwrap(),
+            ],
+            local_test: false,
+        };
+        assert_eq!(endpoint.families().len(), 2);
+        assert_eq!(
+            endpoint.udp_urls().unwrap(),
+            vec![
+                "udp://8.8.8.8:6969/announce",
+                "udp://[2606:4700:4700::1111]:6969/announce"
+            ]
+        );
+        let mut bytes = b"d5:peers0:6:peers636:".to_vec();
+        for ip in ["2606:4700:4700::1111", "fd00::1"] {
+            bytes.extend_from_slice(&ip.parse::<Ipv6Addr>().unwrap().octets());
+            bytes.extend_from_slice(&6881_u16.to_be_bytes());
+        }
+        bytes.push(b'e');
+        assert_eq!(
+            decode_peers(&bytes, false).unwrap(),
+            vec!["[2606:4700:4700::1111]:6881".parse().unwrap()]
+        );
+    }
     #[tokio::test]
     async fn http_discovery_pins_connection_preserves_host_and_stops_on_cancel() {
         let stopped = Arc::new(AtomicUsize::new(0));

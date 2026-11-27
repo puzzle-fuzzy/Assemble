@@ -60,6 +60,7 @@ export function DownloadsPage({
   const id = useId();
   const locked = useRef(false);
   const [kind, setKind] = useState<DownloadKind>("hls");
+  const [directBt, setDirectBt] = useState(false);
   const [url, setUrl] = useState("");
   const [page, setPage] = useState("");
   const [preview, setPreview] = useState<DownloadPreview | null>(null);
@@ -140,6 +141,9 @@ export function DownloadsPage({
               accept(
                 await source.downloadPrepare({
                   kind,
+                  ...(kind === "magnet" && directBt
+                    ? { magnetNetwork: "direct" as const }
+                    : {}),
                   url,
                   pageUrl: kind === "hls" ? page || null : null,
                 }),
@@ -216,7 +220,33 @@ export function DownloadsPage({
               </Field>
             ) : null}
             {kind === "magnet" ? (
-              <p className="text-sm text-muted-foreground">{t("magnetHint")}</p>
+              <div className="space-y-2">
+                <p className="text-sm text-muted-foreground">
+                  {t("magnetHint")}
+                </p>
+                {view?.directBtAvailable ? (
+                  <label
+                    className="flex items-center gap-2 text-sm"
+                    htmlFor={`${id}-direct-bt`}
+                  >
+                    <Checkbox
+                      id={`${id}-direct-bt`}
+                      checked={directBt}
+                      disabled={pending}
+                      onCheckedChange={(checked) => {
+                        setDirectBt(checked === true);
+                        setPreview(null);
+                      }}
+                    />
+                    {t("directBt")}
+                  </label>
+                ) : null}
+                {view?.directBtAvailable ? (
+                  <p className="text-xs text-muted-foreground">
+                    {t("directBtHint")}
+                  </p>
+                ) : null}
+              </div>
             ) : null}
             <div className="flex flex-wrap gap-2">
               <Button type="submit" disabled={pending}>
@@ -266,7 +296,12 @@ export function DownloadsPage({
           <Card size="sm">
             <CardHeader>
               <CardTitle className="break-words">{preview.title}</CardTitle>
-              <CardDescription>{preview.sourceHost}</CardDescription>
+              <CardDescription>
+                {preview.sourceHost}
+                {preview.kind === "magnet"
+                  ? ` · ${t(preview.magnetNetwork === "direct" ? "directBt" : "systemNetwork")}`
+                  : ""}
+              </CardDescription>
             </CardHeader>
             <CardContent>
               {preview.kind === "magnet" ? (
@@ -381,6 +416,7 @@ export function DownloadsPage({
                       preview.kind === "magnet" ? fileIds : [],
                     );
                     setPreview(null);
+                    setDirectBt(false);
                     composeRef.current = false;
                     setCompose(false);
                   })
@@ -467,6 +503,15 @@ export function DownloadsPage({
                       />
                     ) : null}
                     <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
+                      {task.kind === "magnet" ? (
+                        <span>
+                          {t(
+                            task.magnetNetwork === "direct"
+                              ? "directBt"
+                              : "systemNetwork",
+                          )}
+                        </span>
+                      ) : null}
                       {task.initiatedBy === "assistant" ? (
                         <span>{t("initiatedByAssistant")}</span>
                       ) : null}

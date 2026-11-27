@@ -22,6 +22,9 @@ pub(super) struct Options {
     pub local_test: bool,
     pub network: crate::network::Network,
     pub pool: Option<Arc<tracker_pool::Pool>>,
+    pub bind_device_name: Option<String>,
+    #[cfg(test)]
+    pub download_bps: Option<NonZeroU32>,
 }
 #[derive(Clone)]
 pub(super) struct Prepared {
@@ -107,7 +110,7 @@ pub(super) async fn connection_options(
     let mut http = Vec::new();
     for endpoint in endpoints.into_iter().flatten() {
         if endpoint.url.scheme() == "udp" {
-            udp.push(endpoint.udp_url()?);
+            udp.extend(endpoint.udp_urls()?);
         } else {
             http.push(endpoint);
         }
@@ -144,6 +147,7 @@ pub(super) async fn session(
     Session::new_with_opts(
         folder,
         SessionOptions {
+            bind_device_name: options.bind_device_name.clone(),
             dht: if options.local_test {
                 None
             } else {
@@ -161,6 +165,9 @@ pub(super) async fn session(
             disable_local_service_discovery: true,
             ratelimits: librqbit::limits::LimitsConfig {
                 upload_bps: NonZeroU32::new(UPLOAD_BPS),
+                #[cfg(test)]
+                download_bps: options.download_bps,
+                #[cfg(not(test))]
                 download_bps: None,
             },
             ..SessionOptions::default()

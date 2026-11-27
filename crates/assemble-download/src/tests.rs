@@ -330,6 +330,7 @@ async fn real_media_pipeline() {
     ] {
         let preview = manager
             .prepare(DownloadInput {
+                magnet_network: None,
                 kind: if source.ends_with(".m3u8") {
                     DownloadKind::Hls
                 } else {

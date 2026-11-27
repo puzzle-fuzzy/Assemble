@@ -502,6 +502,7 @@ mod tests {
                 .await
                 .unwrap();
         let input = DownloadInput {
+            magnet_network: None,
             kind: DownloadKind::Video,
             url: source,
             page_url: None,
@@ -592,6 +593,7 @@ mod tests {
                 .await
                 .unwrap();
         let input = DownloadInput {
+            magnet_network: None,
             kind: DownloadKind::Video,
             url: "http://127.0.0.1:99/video.mp4?private=source".into(),
             page_url: None,
@@ -759,6 +761,7 @@ mod tests {
             request_id: "once".into(),
             via: None,
             input: DownloadInput {
+                magnet_network: None,
                 kind: DownloadKind::Video,
                 url: "http://127.0.0.1:99/video.mp4".into(),
                 page_url: None,

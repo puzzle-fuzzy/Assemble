@@ -273,6 +273,7 @@ pub async fn download_prepare(
     app: AppHandle,
     input: assemble_protocol::downloads::DownloadInput,
 ) -> Result<assemble_protocol::downloads::DownloadPreview, CommandError> {
+    // 直连选择只随本任务传入枚举；网卡发现与绑定留在 Rust，不接受界面提供的网卡或进程参数。
     app.state::<std::sync::Arc<assemble_download::DownloadManager>>()
         .prepare(input)
         .await

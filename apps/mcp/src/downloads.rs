@@ -18,8 +18,18 @@ pub enum Kind {
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub enum Network {
+    System,
+    Direct,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct Preview {
+    /// Mac 磁力任务的 BT 网络；direct 使用真实出口 IP，必须获得用户明确同意。缺省跟随系统。
+    #[serde(default)]
+    pub magnet_network: Option<Network>,
     pub kind: Kind,
     pub url: String,
     #[serde(default)]
@@ -59,6 +69,10 @@ pub fn result(reply: &AssistantDownloadReply) -> Result<String, Failure> {
             "DOWNLOAD_EXPIRED" => "下载预览或任务已失效，请重新预览。",
             "DOWNLOAD_TOOLS_UNAVAILABLE" => "本机未找到 FFmpeg 和 ffprobe，请用户安装后再试。",
             "DOWNLOAD_NO_SPACE" => "下载目录所在磁盘空间不足。",
+            "DOWNLOAD_ROUTE_UNAVAILABLE" => "所选直连网络不可用；目前仅支持 Mac 的默认物理网络。",
+            "DOWNLOAD_METADATA_UNAVAILABLE" => {
+                "未获取到文件列表；请确认资源有节点，并检查当前代理或网络是否允许 BT。"
+            }
             "DOWNLOAD_BUSY" => "当前下载任务过多，请稍后再试。",
             "DOWNLOAD_INVALID_SOURCE" | browser::INVALID_REQUEST => "下载地址或所选清晰度无效。",
             _ => "下载操作失败，请在 Assemble 桌面应用中查看任务。",
@@ -68,26 +82,27 @@ pub fn result(reply: &AssistantDownloadReply) -> Result<String, Failure> {
     serde_json::to_string(reply).map_err(|_| Failure::Other("下载结果无法编码。".into()))
 }
 
-pub async fn preview(store: &dyn SecretStore, input: Preview) -> Result<String, Failure> {
-    let kind = match input.kind {
-        Kind::Hls => DownloadKind::Hls,
-        Kind::Douyin => DownloadKind::Douyin,
-        Kind::Video => DownloadKind::Video,
-        Kind::Magnet => DownloadKind::Magnet,
-    };
-    result(
-        &assistant::preview(
-            store,
-            assistant::DESKTOP_APP_ID,
-            DownloadInput {
-                kind,
-                url: input.url,
-                page_url: input.page_url,
-                title: None,
+impl Preview {
+    fn into_input(self) -> DownloadInput {
+        DownloadInput {
+            kind: match self.kind {
+                Kind::Hls => DownloadKind::Hls,
+                Kind::Douyin => DownloadKind::Douyin,
+                Kind::Video => DownloadKind::Video,
+                Kind::Magnet => DownloadKind::Magnet,
             },
-        )
-        .await,
-    )
+            magnet_network: self.magnet_network.map(|mode| match mode {
+                Network::System => assemble_protocol::downloads::MagnetNetwork::System,
+                Network::Direct => assemble_protocol::downloads::MagnetNetwork::Direct,
+            }),
+            url: self.url,
+            page_url: self.page_url,
+            title: None,
+        }
+    }
+}
+pub async fn preview(store: &dyn SecretStore, input: Preview) -> Result<String, Failure> {
+    result(&assistant::preview(store, assistant::DESKTOP_APP_ID, input.into_input()).await)
 }
 
 pub async fn start(store: &dyn SecretStore, input: Start) -> Result<String, Failure> {
@@ -118,4 +133,38 @@ pub async fn resume(store: &dyn SecretStore, input: &Status) -> Result<String, F
 }
 pub async fn cancel(store: &dyn SecretStore, input: &Status) -> Result<String, Failure> {
     result(&assistant::cancel(store, assistant::DESKTOP_APP_ID, &input.id).await)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn network_choice_is_optional_and_cannot_supply_an_interface_or_process_argument() {
+        let old = serde_json::json!({"kind":"magnet","url":"magnet:?xt=urn:btih:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"});
+        let input = serde_json::from_value::<Preview>(old.clone())
+            .unwrap()
+            .into_input();
+        assert!(
+            !serde_json::to_value(input)
+                .unwrap()
+                .as_object()
+                .unwrap()
+                .contains_key("magnetNetwork")
+        );
+        let mut direct = old.clone();
+        direct["magnetNetwork"] = "direct".into();
+        let input = serde_json::from_value::<Preview>(direct)
+            .unwrap()
+            .into_input();
+        assert_eq!(
+            input.magnet_network,
+            Some(assemble_protocol::downloads::MagnetNetwork::Direct)
+        );
+        let mut unsafe_input = old.clone();
+        unsafe_input["bindDeviceName"] = "en9".into();
+        assert!(serde_json::from_value::<Preview>(unsafe_input).is_err());
+        let mut unknown = old;
+        unknown["magnetNetwork"] = "arbitrary-route".into();
+        assert!(serde_json::from_value::<Preview>(unknown).is_err());
+    }
 }
