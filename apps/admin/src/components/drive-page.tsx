@@ -1,10 +1,8 @@
 import { Button } from "@assemble/ui/button";
 import { DataTable, type DataTableColumn } from "@assemble/ui/data-table";
-import {
-  DriveTreeBrowser,
-  type DriveTreeLocation,
-} from "@assemble/ui/drive-tree-browser";
+import type { DriveTreeLocation } from "@assemble/ui/drive-tree-browser";
 import { usePageCorrection } from "@assemble/ui/hooks/use-url-state";
+import { useTrashTranslation } from "@assemble/ui/lib/drive-trash-i18n";
 import {
   type DriveTreeSource,
   isDriveTreeListing,
@@ -28,6 +26,7 @@ import { RecordedTime } from "../lib/text";
 import { useResource } from "../lib/use-resource";
 import { DetailDialog, DetailFields } from "./detail-dialog";
 import { DriveAccountPicker } from "./drive-account-picker";
+import { DriveOwnerWorkspace } from "./drive-owner-workspace";
 import { DrivePreviewDialog } from "./drive-preview";
 import { LoadingContent, NoResults, RequestError } from "./feedback";
 import { SearchForm, useListQuery } from "./list-controls";
@@ -36,6 +35,7 @@ import { StorageWarnings, storageBytes } from "./storage-overview";
 const EMPTY_FILES: AdminDriveFile[] = [];
 
 function DriveCapacity({ storage }: { storage: AdminStorage }) {
+  const { t: trashText } = useTrashTranslation();
   const { t, i18n } = useAdminTranslation();
   const language = i18n.resolvedLanguage || i18n.language;
   const format = (value: number | null) =>
@@ -64,6 +64,14 @@ function DriveCapacity({ storage }: { storage: AdminStorage }) {
             value: `${format(storage.contentBytes)} / ${format(storage.budgetBytes)}`,
           },
           { label: t("drive.database"), value: format(storage.databaseBytes) },
+          {
+            label: trashText("trashBytes"),
+            value: format(storage.trashBytes ?? null),
+          },
+          {
+            label: trashText("reclaimableBytes"),
+            value: format(storage.reclaimableBytes ?? null),
+          },
         ].map((item) => (
           <div key={item.label} className="flex min-w-0 flex-col gap-2">
             <dt className="text-sm text-muted-foreground">{item.label}</dt>
@@ -227,7 +235,9 @@ export function DrivePage({
         <LoadingContent />
       )}
       {owner ? (
-        <DriveTreeBrowser
+        <DriveOwnerWorkspace
+          owner={owner}
+          onAccessFailure={onAccessFailure}
           variant="management"
           key={owner.id}
           source={treeSource}

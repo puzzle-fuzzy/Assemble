@@ -685,4 +685,46 @@ async fn drive_tools_use_stable_ids_versions_and_safe_owner_only_projections() {
     .await
     .unwrap();
     assert!(drive::create(&call, &input).await.is_err());
+    let trash: assemble_protocol::drive_trash::Listing = serde_json::from_str(
+        &drive::trash_list(
+            &call,
+            &drive::TrashList {
+                id: None,
+                q: String::new(),
+                page: 1,
+            },
+        )
+        .await
+        .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(trash.total, 2);
+    let batch = &trash.items[0];
+    let plan: assemble_protocol::drive_trash::RestorePreview = serde_json::from_str(
+        &drive::trash_list(
+            &call,
+            &drive::TrashList {
+                id: Some(batch.id.clone()),
+                q: String::new(),
+                page: 1,
+            },
+        )
+        .await
+        .unwrap(),
+    )
+    .unwrap();
+    let restored = drive::trash_restore(
+        &call,
+        &drive::TrashRestore {
+            id: batch.id.clone(),
+            version: plan.version,
+            revision: plan.revision,
+        },
+    )
+    .await
+    .unwrap();
+    assert!(restored.contains(&batch.root_id));
+    for forbidden in ["password", "token", "sha256", "authorization"] {
+        assert!(!restored.contains(forbidden));
+    }
 }

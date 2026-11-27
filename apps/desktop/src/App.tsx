@@ -1580,7 +1580,7 @@ function DriveRow({
             <Button
               size="default"
               variant="outline"
-              disabled={pending}
+              disabled
               onClick={onConfirm}
             >
               {uiText("delete")}

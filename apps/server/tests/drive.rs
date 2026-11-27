@@ -48,6 +48,24 @@ async fn refcount(server: &TestServer, digest: &str) -> Option<i64> {
         .unwrap()
 }
 
+/// 旧删除入口现在只移入回收站；释放空间需要明确永久清理并完成内容回收。
+async fn permanently_remove(fixture: &Fixture, pc: &Registered, id: &str) {
+    pc.drive_delete(id, &pc.options()).await.unwrap();
+    let listing = pc
+        .drive_trash_list("", 1, 100, &pc.options())
+        .await
+        .unwrap();
+    let batch = listing
+        .items
+        .iter()
+        .find(|batch| batch.root_id == id)
+        .unwrap();
+    pc.drive_trash_purge(&batch.id, batch.version, &pc.options())
+        .await
+        .unwrap();
+    fixture.server.state.blobs.cleanup().await.unwrap();
+}
+
 /// 登记另一台设备，不经浏览器：登记要写数据库，只在这里的测试环境里用。
 async fn device_of_another_account(server: &TestServer, username: &str) -> Registered {
     let account = assemble_server::accounts::find_by_username(&server.state.pool, username)
@@ -225,7 +243,7 @@ async fn a_file_can_be_renamed_and_removed_and_the_newest_is_listed_first() {
     assert_eq!(listing.items, vec![renamed.clone()]);
 
     // 删掉：列表里没有了，空间还回来了，内容也取不到了。
-    pc.drive_delete(&stored.id, &pc.options()).await.unwrap();
+    permanently_remove(&fixture, &pc, &stored.id).await;
     let listing = pc.drive(&pc.options()).await.unwrap();
     assert_eq!(listing.items, Vec::new());
     assert_eq!(listing.used_bytes, 0);
@@ -293,13 +311,13 @@ async fn identical_content_is_stored_once_and_lives_until_the_last_copy_is_remov
     let listing = pc.drive(&pc.options()).await.unwrap();
     assert_eq!(listing.used_bytes, 2 * bytes.len() as u64);
 
-    pc.drive_delete(&original.id, &pc.options()).await.unwrap();
+    permanently_remove(&fixture, &pc, &original.id).await;
     assert_eq!(refcount(&fixture.server, &file.sha256).await, Some(1));
     // 另一份照常能下载。
     let received = fetched(&pc, &copy.id).await;
     assert_eq!(received, bytes);
 
-    pc.drive_delete(&copy.id, &pc.options()).await.unwrap();
+    permanently_remove(&fixture, &pc, &copy.id).await;
     assert_eq!(refcount(&fixture.server, &file.sha256).await, None);
     assert!(!fixture.server.state.blobs.path_for(&file.sha256).exists());
 }
@@ -350,7 +368,7 @@ async fn a_file_kept_in_the_drive_and_sent_to_a_device_shares_one_copy() {
         )
         .await
         .unwrap();
-    pc.drive_delete(&kept.id, &pc.options()).await.unwrap();
+    permanently_remove(&fixture, &pc, &kept.id).await;
     assert_eq!(refcount(&fixture.server, &file.sha256).await, Some(1));
     let download = mac
         .send_content(&sent.id, TransferOptions::new(&mac.cancel), None)
@@ -463,11 +481,8 @@ async fn the_storage_budget_is_shared_by_every_account_and_by_sends() {
     assert!(!fixture.server.state.blobs.path_for(&more.sha256).exists());
 
     // 两个人都删掉之后才腾得出地方：那时 600 字节就放得下了。
-    alex.drive_delete(&kept.id, &alex.options()).await.unwrap();
-    blake
-        .drive_delete(&copied.id, &blake.options())
-        .await
-        .unwrap();
+    permanently_remove(&fixture, &alex, &kept.id).await;
+    permanently_remove(&fixture, &blake, &copied.id).await;
     assert_eq!(refcount(&fixture.server, &big.sha256).await, None);
     blake
         .drive_upload(
@@ -552,7 +567,7 @@ async fn the_quota_is_checked_before_the_body_is_read() {
     assert_eq!(refcount(&fixture.server, &hundred.sha256).await, None);
 
     // 腾出地方之后就放得下了。
-    pc.drive_delete(&first.id, &pc.options()).await.unwrap();
+    permanently_remove(&fixture, &pc, &first.id).await;
     pc.drive_upload("c.bin", &hundred, TransferOptions::new(&pc.cancel), None)
         .await
         .unwrap();

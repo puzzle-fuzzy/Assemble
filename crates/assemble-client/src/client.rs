@@ -461,6 +461,104 @@ impl Client {
     }
 
     // ---- 账户私有备忘录 ----
+    pub async fn drive_trash_list(
+        &self,
+        q: &str,
+        page: u32,
+        page_size: u32,
+        options: &RequestOptions<'_>,
+    ) -> Result<assemble_protocol::drive_trash::Listing, ClientError> {
+        if q.chars().count() > 200 || page == 0 || !(1..=100).contains(&page_size) {
+            return Err(ClientError::InvalidRequest);
+        }
+        self.call_json(
+            Call::get("/v1/drive/trash")
+                .query("q", q.to_owned())
+                .query("page", page.to_string())
+                .query("pageSize", page_size.to_string()),
+            options,
+        )
+        .await
+    }
+    pub async fn drive_trash_detail(
+        &self,
+        id: &str,
+        query: &assemble_protocol::drive_tree::Query,
+        options: &RequestOptions<'_>,
+    ) -> Result<assemble_protocol::drive_trash::Detail, ClientError> {
+        if !query.valid() {
+            return Err(ClientError::InvalidRequest);
+        }
+        let path = format!("/v1/drive/trash/{}", id_segment(id)?);
+        self.call_json(
+            Call::get(&path)
+                .query("parentId", query.parent_id.clone())
+                .query("q", query.q.clone())
+                .query("page", query.page.to_string())
+                .query("pageSize", query.page_size.to_string()),
+            options,
+        )
+        .await
+    }
+    pub async fn drive_trash_preview(
+        &self,
+        target: &assemble_protocol::drive_trash::Target,
+        options: &RequestOptions<'_>,
+    ) -> Result<assemble_protocol::drive_trash::Preview, ClientError> {
+        self.call_json(
+            Call::get("/v1/drive/trash/preview").post(Payload::Json(json(target)?)),
+            options,
+        )
+        .await
+    }
+    pub async fn drive_trash_move(
+        &self,
+        input: &assemble_protocol::drive_trash::Move,
+        options: &RequestOptions<'_>,
+    ) -> Result<assemble_protocol::drive_trash::Batch, ClientError> {
+        self.call_json(
+            Call::get("/v1/drive/trash").post(Payload::Json(json(input)?)),
+            options,
+        )
+        .await
+    }
+    pub async fn drive_trash_restore_preview(
+        &self,
+        id: &str,
+        options: &RequestOptions<'_>,
+    ) -> Result<assemble_protocol::drive_trash::RestorePreview, ClientError> {
+        let path = format!("/v1/drive/trash/{}/restore-preview", id_segment(id)?);
+        self.call_json(Call::get(&path).post(Payload::None), options)
+            .await
+    }
+    pub async fn drive_trash_restore(
+        &self,
+        id: &str,
+        input: &assemble_protocol::drive_trash::Restore,
+        options: &RequestOptions<'_>,
+    ) -> Result<assemble_protocol::drive_trash::Restored, ClientError> {
+        let path = format!("/v1/drive/trash/{}/restore", id_segment(id)?);
+        self.call_json(Call::get(&path).post(Payload::Json(json(input)?)), options)
+            .await
+    }
+    pub async fn drive_trash_purge(
+        &self,
+        id: &str,
+        version: i64,
+        options: &RequestOptions<'_>,
+    ) -> Result<assemble_protocol::drive_trash::Purged, ClientError> {
+        if version < 1 {
+            return Err(ClientError::InvalidRequest);
+        }
+        let path = format!("/v1/drive/trash/{}", id_segment(id)?);
+        self.call_json(
+            Call::get(&path)
+                .query("version", version.to_string())
+                .delete(),
+            options,
+        )
+        .await
+    }
     /// 新目录接口不存在时由调用方明确回退旧名单，不能静默丢掉目标目录。
     pub async fn drive_tree(
         &self,

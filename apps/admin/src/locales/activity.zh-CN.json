@@ -69,7 +69,15 @@
       "created": "上传文件",
       "renamed": "重命名文件",
       "deleted": "删除文件",
-      "moved": "移动文件"
+      "moved": "移动文件",
+      "trashed": "移入回收站",
+      "restored": "恢复文件",
+      "purged": "永久删除文件",
+      "folder_trashed": "文件夹移入回收站",
+      "folder_restored": "恢复文件夹",
+      "folder_purged": "永久删除文件夹",
+      "cleanup_failed": "内容清理待重试",
+      "folder_cleanup_failed": "文件夹内容清理待重试"
     },
     "send": {
       "created": "发送文件",

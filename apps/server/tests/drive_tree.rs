@@ -212,6 +212,21 @@ async fn folders_moves_legacy_and_content_references() {
     pc.drive_tree_delete(Kind::File, &moved.file.id, 4, &pc.options())
         .await
         .unwrap();
+    assert_eq!(
+        pc.drive(&pc.options()).await.unwrap().used_bytes,
+        source.size
+    );
+    for batch in pc
+        .drive_trash_list("", 1, 100, &pc.options())
+        .await
+        .unwrap()
+        .items
+    {
+        pc.drive_trash_purge(&batch.id, batch.version, &pc.options())
+            .await
+            .unwrap();
+    }
+    f.server.state.blobs.cleanup().await.unwrap();
     assert_eq!(pc.drive(&pc.options()).await.unwrap().used_bytes, 0);
     assert!(!f.server.state.blobs.path_for(&source.sha256).exists());
     f.server.stop().await;

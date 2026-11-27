@@ -196,6 +196,7 @@ export function snapshot(overrides: Overrides = {}): Snapshot {
     draft: null,
     drive: phase === "signedIn" ? DRIVE : null,
     driveTree: null,
+    driveTrash: null,
     // 测试跑在 macOS 的开发构建上：右键菜单在这里不存在。
     sendMenu: "unsupported",
     receive: { customFolder: null, displayPath: null },
@@ -239,6 +240,14 @@ export function transfer(overrides: Partial<TransferView> = {}): TransferView {
 
 /** 记录调用、可注入失败的替身桥接。 */
 export class FakeBridge implements Bridge {
+  driveTrash: import("@assemble/ui/lib/drive-trash").TrashSource = {
+    list: async () => {
+      throw { code: "NOT_FOUND" };
+    },
+    detail: async () => {
+      throw { code: "NOT_FOUND" };
+    },
+  };
   driveTree: import("@assemble/ui/lib/drive-tree").DriveTreeSource = {
     list: async () => {
       throw { code: "NOT_FOUND" };

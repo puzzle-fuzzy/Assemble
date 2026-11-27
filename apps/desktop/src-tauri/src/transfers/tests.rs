@@ -1427,6 +1427,19 @@ async fn queued_folder_upload_keeps_its_target_and_session_cleanup_clears_the_tr
         f.state()
             .remember_drive_tree(remembered.clone(), epoch, &session)
     );
+    let trash = assemble_protocol::drive_trash::Listing {
+        items: Vec::new(),
+        total: 0,
+        page: 1,
+        page_size: 20,
+    };
+    assert!(
+        f.state()
+            .remember_drive_trash(trash.clone(), epoch, &session)
+    );
+    let reading = f.state().trash_queries.begin("trash-query", true, &session);
+    let flat = f.sender.drive(&RequestOptions::new(&f.hold)).await.unwrap();
+    assert!(f.state().remember_drive(flat.clone(), epoch, &session));
     f.start_receiving();
     until("folder upload to finish", || {
         view_of(&f, &ids[0]).phase == TransferPhase::Complete
@@ -1450,6 +1463,22 @@ async fn queued_folder_upload_keeps_its_target_and_session_cleanup_clears_the_tr
     assert_eq!(on_the_drive(&f, &file.file.id).await, bytes);
     f.state().end_session();
     assert!(f.state().snapshot().drive_tree.is_none());
+    assert!(reading.is_cancelled());
+    assert!(f.state().snapshot().drive_trash.is_none());
+    assert!(
+        !f.state()
+            .remember_drive(flat, epoch, &CancellationToken::new())
+    );
+    assert!(f.state().snapshot().drive.is_none());
+    assert!(
+        !f.state()
+            .remember_drive_trash(trash.clone(), epoch, &session)
+    );
+    assert!(
+        !f.state()
+            .remember_drive_trash(trash, epoch, &CancellationToken::new())
+    );
+    assert!(f.state().snapshot().drive_trash.is_none());
     assert!(
         !f.state()
             .remember_drive_tree(remembered.clone(), epoch, &session)

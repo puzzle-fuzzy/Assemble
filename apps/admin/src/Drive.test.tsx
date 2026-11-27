@@ -204,7 +204,14 @@ test("云盘显示全站文件与真实容量，搜索分页、详情弹窗和�
     [...host.querySelectorAll('section[aria-label="服务器存储空间"] dd')].map(
       (value) => value.textContent,
     ),
-  ).toEqual(["64 GiB", "64 GiB", "256 GiB / 1 TiB", "2 GiB"]);
+  ).toEqual([
+    "64 GiB",
+    "64 GiB",
+    "256 GiB / 1 TiB",
+    "2 GiB",
+    "暂不可用",
+    "暂不可用",
+  ]);
   expect(host.querySelector("time")?.getAttribute("datetime")).toBe(
     files[0].createdAt,
   );
@@ -245,6 +252,106 @@ test("云盘显示全站文件与真实容量，搜索分页、详情弹窗和�
     expect(request.init?.cache).toBe("no-store");
     expect(request.init?.signal).toBeInstanceOf(AbortSignal);
   }
+});
+
+test("所属账户回收站只读浏览，同源分页和面包屑保留，不提供恢复清理或下载", async () => {
+  const batch = {
+    id: "trash-1",
+    rootId: "folder-1",
+    kind: "folder",
+    name: "旧资料<中文>",
+    originalLocation: [],
+    deletedAt: "2026-11-27T08:00:00Z",
+    version: 1,
+    fileCount: 1,
+    folderCount: 1,
+    size: 12,
+  };
+  handle = (path) => {
+    if (path.startsWith("/v1/admin/drive/tree?"))
+      return json({
+        current: null,
+        ancestors: [],
+        items: [],
+        total: 0,
+        page: 1,
+        pageSize: 20,
+        usedBytes: 12,
+        limitBytes: 1024,
+      });
+    if (path.startsWith("/v1/admin/drive/trash/trash-1?"))
+      return json({
+        batch,
+        current: {
+          id: batch.rootId,
+          parentId: null,
+          kind: "folder",
+          name: batch.name,
+          size: null,
+          version: 2,
+          createdAt: batch.deletedAt,
+        },
+        ancestors: [],
+        items: [
+          {
+            id: "old-file",
+            parentId: batch.rootId,
+            kind: "file",
+            name: "内容<原文>.txt",
+            size: 12,
+            version: 2,
+            createdAt: batch.deletedAt,
+          },
+        ],
+        total: 1,
+        page: 1,
+        pageSize: 20,
+      });
+    if (path.startsWith("/v1/admin/drive/trash?"))
+      return json({ items: [batch], total: 1, page: 1, pageSize: 20 });
+    return response(path);
+  };
+  const host = await renderDrive();
+  await click(button(host, files[0].accountDisplayName));
+  await settle();
+  expect(
+    requests.some((item) => item.path.startsWith("/v1/admin/drive/trash")),
+  ).toBe(false);
+  await act(async () =>
+    button(host, "回收站").dispatchEvent(
+      new KeyboardEvent("keydown", { key: "Enter", bubbles: true }),
+    ),
+  );
+  await settle();
+  await waitForText(host, batch.name);
+  const queried = requests.find((item) =>
+    item.path.startsWith("/v1/admin/drive/trash?"),
+  );
+  expect(queried?.path).toContain("accountId=owner-1");
+  expect(queried?.path).toContain("pageSize=20");
+  expect(queried?.init?.credentials).toBe("same-origin");
+  expect(queried?.init?.cache).toBe("no-store");
+  await click(button(host, batch.name));
+  await waitForText(host, "内容<原文>.txt");
+  const panel = host.querySelector<HTMLElement>(
+    '[role="tabpanel"][data-state="active"]',
+  );
+  expect(panel?.querySelector("a[download]") === null).toBe(true);
+  expect(
+    panel?.querySelector(
+      'tbody [aria-haspopup="menu"][data-slot="dropdown-menu-trigger"]',
+    ) === null,
+  ).toBe(true);
+  expect(panel?.textContent).not.toContain("永久清理");
+  expect(panel?.textContent).not.toContain("恢复");
+  expect(host.querySelector('[data-slot="breadcrumb-page"]')?.textContent).toBe(
+    batch.name,
+  );
+  expect(
+    requests.every((item) => !item.init?.method || item.init.method === "GET"),
+  ).toBe(true);
+  await act(async () => setLanguage("en"));
+  expect(panel?.textContent).toContain("内容<原文>.txt");
 });
 
 test("管理员下载只生成同源文件标识地址，不把特殊字符变成路径或查询参数", () => {

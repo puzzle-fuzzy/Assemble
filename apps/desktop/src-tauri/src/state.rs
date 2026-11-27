@@ -329,6 +329,7 @@ pub struct Snapshot {
     /// 云盘里的文件与空间。没登录时为 `None`。
     pub drive: Option<DriveView>,
     pub drive_tree: Option<assemble_protocol::drive_tree::Listing>,
+    pub drive_trash: Option<assemble_protocol::drive_trash::Listing>,
     /// Windows 右键菜单"用 Assemble 发送"的状态。
     pub send_menu: SendMenuState,
     pub receive: ReceiveView,
@@ -457,6 +458,7 @@ pub struct View {
     /// 云盘最近一次的名单；拿不到时留着上一份。
     drive: Option<DriveListing>,
     drive_tree: Option<assemble_protocol::drive_tree::Listing>,
+    drive_trash: Option<assemble_protocol::drive_trash::Listing>,
     /// 右键菜单的状态：由设置与本机的注册表决定。启动时定下，改动时更新。
     send_menu: SendMenuState,
     receive: ReceiveView,
@@ -510,6 +512,7 @@ impl View {
             draft: self.registry.draft_view(),
             drive: self.drive.as_ref().map(DriveView::from),
             drive_tree: self.drive_tree.clone(),
+            drive_trash: self.drive_trash.clone(),
             send_menu: self.send_menu,
             receive: self.receive.clone(),
             launch_at_login,
@@ -536,6 +539,7 @@ impl View {
             registry: Registry::default(),
             drive: None,
             drive_tree: None,
+            drive_trash: None,
             send_menu: SendMenuState::Unsupported,
             receive: ReceiveView {
                 custom_folder: None,
@@ -555,6 +559,7 @@ impl View {
 pub struct AppState<R: tauri::Runtime = tauri::Wry> {
     pub file_previews: crate::drive_preview::Previews,
     pub drive_queries: crate::drive_tree::Queries,
+    pub trash_queries: crate::drive_tree::Queries,
     pub remote_runtime: crate::remote::Runtime,
     transfer_history: Mutex<crate::transfer_history::HistoryStore>,
     system_inbox: Mutex<crate::system_notifications::Inbox>,
@@ -605,6 +610,7 @@ impl<R: tauri::Runtime> AppState<R> {
             transfer_history: Mutex::new(crate::transfer_history::HistoryStore::new(&origin)),
             file_previews: crate::drive_preview::Previews::default(),
             drive_queries: crate::drive_tree::Queries::default(),
+            trash_queries: crate::drive_tree::Queries::default(),
             remote_runtime: crate::remote::Runtime::default(),
             system_inbox: Mutex::new(crate::system_notifications::Inbox::default()),
             app,
@@ -921,6 +927,7 @@ impl<R: tauri::Runtime> AppState<R> {
     pub fn end_session(&self) {
         self.file_previews.close(None);
         self.drive_queries.clear();
+        self.trash_queries.clear();
         self.remote_runtime.cancel_all();
         self.set_remote(assemble_protocol::remote::RemoteView::default());
         self.transfer_history
@@ -938,6 +945,7 @@ impl<R: tauri::Runtime> AppState<R> {
         self.registry(Registry::clear);
         self.set_drive(None);
         self.set_drive_tree(None);
+        self.update(|view| view.drive_trash = None);
         self.set_planner(None);
         // 托盘里点过的"新建提醒…"也不留给下一个登录的人：不该一登录就冒出一张表单。
         self.set_planner_compose(None);
@@ -1154,8 +1162,40 @@ impl<R: tauri::Runtime> AppState<R> {
         self.update(|view| view.drive = listing);
     }
 
+    pub fn remember_drive(
+        &self,
+        listing: DriveListing,
+        epoch: u64,
+        cancel: &CancellationToken,
+    ) -> bool {
+        let mut applied = false;
+        self.update(|view| {
+            if !cancel.is_cancelled() && *self.session_changes().borrow() == epoch {
+                view.drive = Some(listing);
+                applied = true;
+            }
+        });
+        applied
+    }
+
     pub fn set_drive_tree(&self, listing: Option<assemble_protocol::drive_tree::Listing>) {
         self.update(|view| view.drive_tree = listing);
+    }
+
+    pub fn remember_drive_trash(
+        &self,
+        listing: assemble_protocol::drive_trash::Listing,
+        epoch: u64,
+        cancel: &CancellationToken,
+    ) -> bool {
+        let mut applied = false;
+        self.update(|view| {
+            if !cancel.is_cancelled() && *self.session_changes().borrow() == epoch {
+                view.drive_trash = Some(listing);
+                applied = true;
+            }
+        });
+        applied
     }
 
     /// 核对和写入持同一把视图锁：退出清空之后，迟到结果不能重新写回旧目录。

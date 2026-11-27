@@ -34,6 +34,12 @@ pub struct AdminOverview {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AdminStorage {
+    /// 回收文件的逻辑字节；仍计入原账户配额。
+    #[serde(default)]
+    pub trash_bytes: u64,
+    /// 按摘要去重且没有其他引用的可回收物理量。
+    #[serde(default)]
+    pub reclaimable_bytes: Option<u64>,
     /// 与全站预算相同：按摘要去重后的内容总量，包含等待清理的无引用内容。
     pub content_bytes: u64,
     pub budget_bytes: u64,

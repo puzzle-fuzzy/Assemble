@@ -94,6 +94,7 @@ mod tests {
                 "accounts",
                 "activity_subjects",
                 "audit_log",
+                "blob_cleanup",
                 "blobs",
                 "desktop_auth_codes",
                 "device_pairings",
@@ -103,6 +104,7 @@ mod tests {
                 "drive_files",
                 "drive_folder_requests",
                 "drive_folders",
+                "drive_trash",
                 "email_actions",
                 "email_rate_limits",
                 "github_identities",
@@ -216,6 +218,83 @@ mod tests {
         std::fs::write(&blocked, b"x").unwrap();
         let error = open(&blocked.join("nested")).await.unwrap_err();
         assert!(matches!(error, DbError::Directory(_)), "{error}");
+    }
+
+    #[tokio::test]
+    async fn trash_upgrade_preserves_populated_n2_hierarchy_versions_and_audits() {
+        let dir = tempfile::tempdir().unwrap();
+        let old = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect_with(
+                SqliteConnectOptions::new()
+                    .filename(dir.path().join(DATABASE_FILE))
+                    .create_if_missing(true)
+                    .foreign_keys(true),
+            )
+            .await
+            .unwrap();
+        let preceding = sqlx::migrate::Migrator {
+            migrations: std::borrow::Cow::Owned(
+                sqlx::migrate!("./migrations")
+                    .migrations
+                    .iter()
+                    .filter(|migration| migration.version < 16)
+                    .cloned()
+                    .collect(),
+            ),
+            ..sqlx::migrate::Migrator::DEFAULT
+        };
+        preceding.run(&old).await.unwrap();
+        sqlx::query("INSERT INTO accounts(id,username,display_name,password_hash,created_at) VALUES('owner','owner','Owner','unused-test-hash',123)").execute(&old).await.unwrap();
+        for (id, parent) in [("parent", None), ("child", Some("parent"))] {
+            sqlx::query("INSERT INTO drive_folders(id,account_id,parent_id,name,version,created_at,updated_at) VALUES(?,'owner',?,?,4,123,456)")
+                .bind(id).bind(parent).bind(id).execute(&old).await.unwrap();
+        }
+        let digest = "a".repeat(64);
+        sqlx::query("INSERT INTO blobs(sha256,size,refcount,created_at) VALUES(?,0,1,123)")
+            .bind(&digest)
+            .execute(&old)
+            .await
+            .unwrap();
+        sqlx::query("INSERT INTO drive_files(id,account_id,parent_id,name,size,sha256,version,created_at,updated_at) VALUES('file','owner','child','旧<文件>',0,?,7,123,456)").bind(&digest).execute(&old).await.unwrap();
+        crate::audit::record(&old, Some("owner"), None, "drive.created", Some("file")).await;
+        let audit_before: String =
+            sqlx::query_scalar("SELECT snapshot FROM audit_log WHERE action='drive.created'")
+                .fetch_one(&old)
+                .await
+                .unwrap();
+        old.close().await;
+        let new = open(dir.path()).await.unwrap();
+        let folders:Vec<(String,Option<String>,i64,i64,i64)> = sqlx::query_as("SELECT id,parent_id,version,created_at,updated_at FROM active_drive_folders ORDER BY id").fetch_all(&new).await.unwrap();
+        assert_eq!(
+            folders,
+            [
+                ("child".into(), Some("parent".into()), 4, 123, 456),
+                ("parent".into(), None, 4, 123, 456)
+            ]
+        );
+        let file:(String,String,i64,i64,i64,Option<String>,Option<i64>)=sqlx::query_as("SELECT parent_id,sha256,version,created_at,updated_at,trash_id,restored_at FROM active_drive_files WHERE id='file'").fetch_one(&new).await.unwrap();
+        assert_eq!(file, ("child".into(), digest, 7, 123, 456, None, None));
+        let refs: i64 = sqlx::query_scalar("SELECT refcount FROM blobs")
+            .fetch_one(&new)
+            .await
+            .unwrap();
+        assert_eq!(refs, 1);
+        let audit_after: String =
+            sqlx::query_scalar("SELECT snapshot FROM audit_log WHERE action='drive.created'")
+                .fetch_one(&new)
+                .await
+                .unwrap();
+        assert_eq!(audit_before, audit_after);
+        let empty: i64 = sqlx::query_scalar(
+            "SELECT (SELECT count(*) FROM drive_trash)+(SELECT count(*) FROM blob_cleanup)",
+        )
+        .fetch_one(&new)
+        .await
+        .unwrap();
+        assert_eq!(empty, 0);
+        new.close().await;
+        open(dir.path()).await.unwrap().close().await;
     }
 
     #[tokio::test]

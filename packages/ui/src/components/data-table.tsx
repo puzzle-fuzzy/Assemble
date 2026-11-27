@@ -298,7 +298,7 @@ export function DataTable<T extends { id: string }>({
                 </span>
               ),
               cell: ({ row }) =>
-                management ? null : (
+                management || rowActions(row.original).length === 0 ? null : (
                   <DropdownMenu>
                     <DropdownMenuTrigger asChild>
                       <Button

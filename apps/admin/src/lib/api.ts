@@ -24,6 +24,8 @@ export interface AdminStorageAccount extends AdminAccount {
 }
 
 export interface AdminStorage {
+  trashBytes?: number;
+  reclaimableBytes?: number | null;
   contentBytes: number;
   budgetBytes: number;
   databaseBytes: number | null;

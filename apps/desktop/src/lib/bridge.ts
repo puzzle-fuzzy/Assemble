@@ -14,6 +14,16 @@ import {
   isMediaList,
 } from "@assemble/media/guard";
 import {
+  isTrashBatch,
+  isTrashDetail,
+  isTrashListing,
+  isTrashPreview,
+  isTrashPurged,
+  isTrashRestored,
+  isTrashRestorePreview,
+  type TrashSource,
+} from "@assemble/ui/lib/drive-trash";
+import {
   type DriveTreeSource,
   isDriveEntry,
   isDriveFolder,
@@ -65,6 +75,7 @@ export class BridgeError extends Error {
 }
 
 export interface Bridge {
+  driveTrash: TrashSource;
   driveTree: DriveTreeSource;
   systemNotificationsRefresh(): Promise<Snapshot>;
   systemNotificationsRead(
@@ -178,6 +189,31 @@ export interface Bridge {
 }
 
 export const bridge: Bridge = {
+  driveTrash: {
+    list: (q, page, pageSize, signal) =>
+      trashRead(
+        "drive_trash_list",
+        { q, page, pageSize },
+        isTrashListing,
+        signal,
+      ),
+    detail: (id, query, signal) =>
+      trashRead("drive_trash_detail", { id, query }, isTrashDetail, signal),
+    preview: (target, signal) =>
+      mediaInvoke("drive_trash_preview", { target }, isTrashPreview, signal),
+    move: (input) => mediaInvoke("drive_trash_move", { input }, isTrashBatch),
+    restorePreview: (id, signal) =>
+      mediaInvoke(
+        "drive_trash_restore_preview",
+        { id },
+        isTrashRestorePreview,
+        signal,
+      ),
+    restore: (id, input) =>
+      mediaInvoke("drive_trash_restore", { id, input }, isTrashRestored),
+    purge: (id, version) =>
+      mediaInvoke("drive_trash_purge", { id, version }, isTrashPurged),
+  },
   driveTree: {
     list: async (query, signal, remember = false) => {
       if (signal?.aborted)
@@ -511,6 +547,25 @@ async function mediaInvoke<T>(
       "the command response has an unknown shape",
     );
   return value;
+}
+async function trashRead<T>(
+  command: string,
+  args: Record<string, unknown>,
+  guard: (value: unknown) => value is T,
+  signal?: AbortSignal,
+): Promise<T> {
+  signal?.throwIfAborted();
+  const requestId = crypto.randomUUID();
+  const close = () => {
+    void invoke("drive_trash_cancel", { requestId }).catch(() => {});
+  };
+  signal?.addEventListener("abort", close, { once: true });
+  try {
+    return await mediaInvoke(command, { ...args, requestId }, guard, signal);
+  } finally {
+    signal?.removeEventListener("abort", close);
+    close();
+  }
 }
 function requirePrivate(scope: MediaScope): void {
   if (scope !== "private")

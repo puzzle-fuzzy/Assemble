@@ -6,9 +6,11 @@
 //!
 //! 内容与摘要对不上就不落到位：只信校验过的字节。
 
+use std::collections::HashMap;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
+use std::sync::{Arc, Mutex, PoisonError, Weak};
 use std::task::{Context, Poll};
 use std::time::{Duration, SystemTime};
 
@@ -29,6 +31,7 @@ pub const STALE_AFTER: Duration = Duration::from_hours(1);
 pub struct BlobStore {
     root: PathBuf,
     pool: SqlitePool,
+    leases: Mutex<HashMap<String, Weak<tokio::sync::Mutex<()>>>>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -93,11 +96,28 @@ impl BlobStore {
         Self {
             root: data_dir.join("blobs"),
             pool,
+            leases: Mutex::new(HashMap::new()),
         }
     }
 
     pub fn pool(&self) -> &SqlitePool {
         &self.pool
+    }
+
+    /// 发布内容到引用登记之间持有同一租约，清理不能穿过这个空窗。
+    pub async fn lease(&self, digest: &str) -> tokio::sync::OwnedMutexGuard<()> {
+        let lock = {
+            let mut leases = self.leases.lock().unwrap_or_else(PoisonError::into_inner);
+            leases.retain(|_, lease| lease.strong_count() > 0);
+            if let Some(lock) = leases.get(digest).and_then(Weak::upgrade) {
+                lock
+            } else {
+                let lock = Arc::new(tokio::sync::Mutex::new(()));
+                leases.insert(digest.to_owned(), Arc::downgrade(&lock));
+                lock
+            }
+        };
+        lock.lock_owned().await
     }
 
     /// 一份内容在磁盘上的位置。
@@ -114,7 +134,7 @@ impl BlobStore {
         size: u64,
         digest: &str,
         cancel: &CancellationToken,
-    ) -> Result<(), StoreError>
+    ) -> Result<tokio::sync::OwnedMutexGuard<()>, StoreError>
     where
         R: AsyncRead + Unpin,
     {
@@ -130,7 +150,7 @@ impl BlobStore {
         digest: &str,
         cancel: &CancellationToken,
         stall: Duration,
-    ) -> Result<(), StoreError>
+    ) -> Result<tokio::sync::OwnedMutexGuard<()>, StoreError>
     where
         R: AsyncRead + Unpin,
     {
@@ -157,12 +177,14 @@ impl BlobStore {
         )
         .await
         .map_err(store_failure)?;
+        let lease = self.lease(digest).await;
         staged.publish().await.map_err(store_failure)?;
-        Ok(())
+        Ok(lease)
     }
 
     /// 给一份内容加一个引用。表里还没有这一行时就建上。
     pub async fn retain(&self, digest: &str, size: u64) -> Result<(), sqlx::Error> {
+        let _lease = self.lease(digest).await;
         retain(&self.pool, digest, size).await
     }
 
@@ -170,6 +192,7 @@ impl BlobStore {
     ///
     /// 表里没有这份内容（比如从来没被引用过）时什么都不做。
     pub async fn release(&self, digest: &str) -> Result<bool, sqlx::Error> {
+        let _lease = self.lease(digest).await;
         let mut tx = self.pool.begin_with("BEGIN IMMEDIATE").await?;
         let written = sqlx::query(
             "UPDATE blobs SET refcount = refcount - 1 WHERE sha256 = ? AND refcount > 0",
@@ -202,6 +225,7 @@ impl BlobStore {
 
     /// 内容收完了却决定不要（比如目标设备刚好下线）：它还没被任何东西引用，直接删文件。
     pub async fn discard_unreferenced(&self, digest: &str) -> Result<(), sqlx::Error> {
+        let _lease = self.lease(digest).await;
         let referenced: Option<i64> = sqlx::query_scalar("SELECT 1 FROM blobs WHERE sha256 = ?")
             .bind(digest)
             .fetch_optional(&self.pool)
@@ -229,6 +253,7 @@ impl BlobStore {
                 let name = file.file_name().to_string_lossy().into_owned();
                 let path = file.path();
                 if is_sha256_hex(&name) {
+                    let _lease = self.lease(&name).await;
                     let referenced: Option<i64> =
                         sqlx::query_scalar("SELECT 1 FROM blobs WHERE sha256 = ?")
                             .bind(&name)
@@ -258,7 +283,7 @@ impl BlobStore {
                 }
             }
         }
-        let known: Vec<String> = sqlx::query_scalar("SELECT sha256 FROM blobs")
+        let known: Vec<String> = sqlx::query_scalar("SELECT sha256 FROM blobs WHERE refcount > 0")
             .fetch_all(&self.pool)
             .await?;
         for digest in known {
@@ -268,6 +293,62 @@ impl BlobStore {
             }
         }
         Ok(report)
+    }
+
+    /// 清理任务和扣引用同事务落盘；磁盘失败保留任务，重启后继续。
+    pub async fn cleanup(&self) -> Result<(), sqlx::Error> {
+        let jobs: Vec<String> = sqlx::query_scalar(
+            "SELECT sha256 FROM blob_cleanup ORDER BY queued_at,sha256 LIMIT 100",
+        )
+        .fetch_all(&self.pool)
+        .await?;
+        for digest in jobs {
+            if !is_sha256_hex(&digest) {
+                return Err(sqlx::Error::Protocol("invalid cleanup digest".into()));
+            }
+            let _lease = self.lease(&digest).await;
+            let referenced: bool = sqlx::query_scalar(
+                "SELECT EXISTS(SELECT 1 FROM blobs WHERE sha256=? AND refcount>0)",
+            )
+            .bind(&digest)
+            .fetch_one(&self.pool)
+            .await?;
+            if referenced {
+                sqlx::query("DELETE FROM blob_cleanup WHERE sha256=?")
+                    .bind(&digest)
+                    .execute(&self.pool)
+                    .await?;
+                continue;
+            }
+            match tokio::fs::remove_file(self.path_for(&digest)).await {
+                Ok(()) => {}
+                Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+                Err(_) => {
+                    // 首次失败记入业务审计；后续重试只增加次数，避免每分钟重复刷屏。
+                    let mut tx = self.pool.begin_with("BEGIN IMMEDIATE").await?;
+                    sqlx::query("INSERT INTO audit_log(account_id,device_id,action,target,created_at) SELECT account_id,device_id,CASE WHEN target_kind='folder' THEN 'drive.folder_cleanup_failed' ELSE 'drive.cleanup_failed' END,target_id,? FROM blob_cleanup WHERE sha256=? AND attempts=0 AND target_id IS NOT NULL")
+                        .bind(Timestamp::now().as_millis()).bind(&digest).execute(&mut *tx).await?;
+                    sqlx::query("UPDATE blob_cleanup SET attempts=attempts+1 WHERE sha256=?")
+                        .bind(&digest)
+                        .execute(&mut *tx)
+                        .await?;
+                    tx.commit().await?;
+                    tracing::warn!("blob cleanup will be retried");
+                    continue;
+                }
+            }
+            let mut tx = self.pool.begin_with("BEGIN IMMEDIATE").await?;
+            sqlx::query("DELETE FROM blobs WHERE sha256=? AND refcount=0")
+                .bind(&digest)
+                .execute(&mut *tx)
+                .await?;
+            sqlx::query("DELETE FROM blob_cleanup WHERE sha256=?")
+                .bind(&digest)
+                .execute(&mut *tx)
+                .await?;
+            tx.commit().await?;
+        }
+        Ok(())
     }
 }
 

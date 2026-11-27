@@ -20,7 +20,9 @@ use tokio_util::sync::CancellationToken;
 
 use support::*;
 
-const TOOLS: [&str; 25] = [
+const TOOLS: [&str; 27] = [
+    "assemble_drive_trash_list",
+    "assemble_drive_trash_restore",
     "assemble_drive_list",
     "assemble_drive_folder_create",
     "assemble_drive_folder_delete",

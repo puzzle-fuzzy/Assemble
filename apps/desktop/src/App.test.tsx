@@ -869,22 +869,18 @@ describe("云盘", () => {
     expect(source.calls).toEqual(["driveUpload", "driveDownload:file-1"]);
   });
 
-  test("删除要先确认，取消就什么都不做", async () => {
+  test("旧服务的平铺退路保留读取，但禁用删除并提示升级回收站", async () => {
     const source = new FakeBridge(snapshot({ phase: "signedIn" }));
     const view = await renderApp(source, "云盘");
     await settle();
 
     await click(button(view.host, "删除"));
     expect(source.calls).toEqual([]);
-    expect(button(card(view.host, "云盘"), "确认删除")).toBeDefined();
-
-    await click(button(card(view.host, "云盘"), "取消"));
-    expect(source.calls).toEqual([]);
-    expect(button(card(view.host, "云盘"), "确认删除")).toBeUndefined();
-
-    await click(button(view.host, "删除"));
-    await click(button(view.host, "确认删除"));
-    expect(source.calls).toEqual(["driveDelete:file-1"]);
+    expect(button(view.host, "删除")?.disabled).toBe(true);
+    expect(button(card(view.host, "云盘"), "确认删除") === undefined).toBe(
+      true,
+    );
+    expect(text(view.host)).toContain("服务端尚不支持回收站");
   });
 
   test("存进云盘、从云盘取回，各说各的", async () => {

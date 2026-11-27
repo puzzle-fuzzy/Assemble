@@ -114,7 +114,7 @@ pub(crate) async fn check_parent(
             return Err(ApiError::not_found());
         }
         let exists: bool = sqlx::query_scalar(
-            "SELECT EXISTS(SELECT 1 FROM drive_folders WHERE account_id=? AND id=?)",
+            "SELECT EXISTS(SELECT 1 FROM active_drive_folders WHERE account_id=? AND id=?)",
         )
         .bind(account)
         .bind(id)
@@ -145,10 +145,11 @@ pub(crate) async fn revalidate(
     }
 }
 async fn folders(tx: &mut Transaction<'_, Sqlite>, account: &str) -> Result<Vec<Folder>, ApiError> {
-    let rows: Vec<FolderRow> = sqlx::query_as("SELECT * FROM drive_folders WHERE account_id=?")
-        .bind(account)
-        .fetch_all(&mut **tx)
-        .await?;
+    let rows: Vec<FolderRow> =
+        sqlx::query_as("SELECT * FROM active_drive_folders WHERE account_id=?")
+            .bind(account)
+            .fetch_all(&mut **tx)
+            .await?;
     rows.into_iter().map(FolderRow::view).collect()
 }
 fn topology(folders: &[Folder]) -> Vec<Node> {
@@ -175,7 +176,7 @@ async fn sibling(
     except: &str,
 ) -> Result<(), ApiError> {
     let exists: bool = sqlx::query_scalar(
-        "SELECT EXISTS(SELECT 1 FROM drive_folders
+        "SELECT EXISTS(SELECT 1 FROM active_drive_folders
          WHERE account_id=? AND parent_id IS ? AND name=? AND id<>?)",
     )
     .bind(account)
@@ -195,7 +196,7 @@ async fn folder(
     account: &str,
     id: &str,
 ) -> Result<Folder, ApiError> {
-    sqlx::query_as::<_, FolderRow>("SELECT * FROM drive_folders WHERE account_id=? AND id=?")
+    sqlx::query_as::<_, FolderRow>("SELECT * FROM active_drive_folders WHERE account_id=? AND id=?")
         .bind(account)
         .bind(id)
         .fetch_optional(&mut **tx)
@@ -208,7 +209,7 @@ async fn file(
     account: &str,
     id: &str,
 ) -> Result<TreeFile, ApiError> {
-    sqlx::query_as::<_, FileRow>("SELECT * FROM drive_files WHERE account_id=? AND id=?")
+    sqlx::query_as::<_, FileRow>("SELECT * FROM active_drive_files WHERE account_id=? AND id=?")
         .bind(account)
         .bind(id)
         .fetch_optional(&mut **tx)
@@ -271,9 +272,9 @@ async fn list_for(state: &Shared, account: &str, query: &wire::Query) -> Result<
     let parent = wire::parent_id(&query.parent_id);
     let q = query.q.trim().to_ascii_lowercase();
     let total: i64 = sqlx::query_scalar(
-        "SELECT (SELECT count(*) FROM drive_folders
+        "SELECT (SELECT count(*) FROM active_drive_folders
          WHERE account_id=?1 AND parent_id IS ?2 AND instr(lower(name),?3)>0)
-         + (SELECT count(*) FROM drive_files
+         + (SELECT count(*) FROM active_drive_files
          WHERE account_id=?1 AND parent_id IS ?2 AND instr(lower(name),?3)>0 AND NOT ?4)",
     )
     .bind(account)
@@ -285,9 +286,9 @@ async fn list_for(state: &Shared, account: &str, query: &wire::Query) -> Result<
     // 只读取当前页的标识；文件再多也不先把整层内容装进内存。
     let ids: Vec<(i64, String)> = sqlx::query_as(
         "SELECT kind,id FROM (
-           SELECT 0 AS kind,id,created_at FROM drive_folders
+           SELECT 0 AS kind,id,created_at FROM active_drive_folders
            WHERE account_id=?1 AND parent_id IS ?2 AND instr(lower(name),?3)>0
-           UNION ALL SELECT 1 AS kind,id,created_at FROM drive_files
+           UNION ALL SELECT 1 AS kind,id,created_at FROM active_drive_files
            WHERE account_id=?1 AND parent_id IS ?2 AND instr(lower(name),?3)>0 AND NOT ?4
          ) ORDER BY kind,created_at DESC,id DESC LIMIT ?5 OFFSET ?6",
     )
@@ -362,7 +363,15 @@ async fn create(
         return Ok(Json(folder(&mut tx, &identity.account_id, &id).await?));
     }
     let all = folders(&mut tx, &identity.account_id).await?;
-    if all.len() >= wire::MAX_FOLDERS {
+    let total_folders: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM drive_folders WHERE account_id=?")
+            .bind(&identity.account_id)
+            .fetch_one(&mut *tx)
+            .await?;
+    if total_folders
+        >= i64::try_from(wire::MAX_FOLDERS)
+            .map_err(|_| ApiError::internal("invalid folder limit"))?
+    {
         return Err(conflict("DRIVE_FOLDER_LIMIT"));
     }
     let receipts: i64 =
@@ -593,32 +602,8 @@ async fn delete_folder(
     Path(id): Path<String>,
     Query(input): Query<Version>,
 ) -> Result<StatusCode, ApiError> {
-    let mut tx = state.pool.begin_with("BEGIN IMMEDIATE").await?;
-    revalidate(&mut tx, &identity).await?;
-    version(
-        folder(&mut tx, &identity.account_id, &id).await?.version,
-        input.version,
-    )?;
-    let nonempty: bool = sqlx::query_scalar(
-        "SELECT EXISTS(SELECT 1 FROM drive_folders WHERE account_id=? AND parent_id=?
-         UNION ALL SELECT 1 FROM drive_files WHERE account_id=? AND parent_id=?)",
-    )
-    .bind(&identity.account_id)
-    .bind(&id)
-    .bind(&identity.account_id)
-    .bind(&id)
-    .fetch_one(&mut *tx)
-    .await?;
-    if nonempty {
-        return Err(conflict("DRIVE_FOLDER_NOT_EMPTY"));
-    }
-    sqlx::query("DELETE FROM drive_folders WHERE account_id=? AND id=?")
-        .bind(&identity.account_id)
-        .bind(&id)
-        .execute(&mut *tx)
+    crate::drive_trash::legacy_delete(&state, &identity, Kind::Folder, &id, Some(input.version))
         .await?;
-    tx.commit().await?;
-    record_audit(&state, &identity, "drive.folder_deleted", &id).await;
     Ok(StatusCode::NO_CONTENT)
 }
 async fn delete_file(
@@ -627,17 +612,7 @@ async fn delete_file(
     Path(id): Path<String>,
     Query(input): Query<Version>,
 ) -> Result<StatusCode, ApiError> {
-    let mut tx = state.pool.begin_with("BEGIN IMMEDIATE").await?;
-    revalidate(&mut tx, &identity).await?;
-    let old = file(&mut tx, &identity.account_id, &id).await?;
-    version(old.version, input.version)?;
-    sqlx::query("DELETE FROM drive_files WHERE account_id=? AND id=?")
-        .bind(&identity.account_id)
-        .bind(&id)
-        .execute(&mut *tx)
+    crate::drive_trash::legacy_delete(&state, &identity, Kind::File, &id, Some(input.version))
         .await?;
-    tx.commit().await?;
-    state.blobs.release(&old.file.sha256).await?;
-    record_audit(&state, &identity, "drive.deleted", &id).await;
     Ok(StatusCode::NO_CONTENT)
 }

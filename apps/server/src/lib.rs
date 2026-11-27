@@ -21,6 +21,7 @@ pub mod devices;
 pub mod dht;
 pub mod drive;
 pub mod drive_preview;
+pub mod drive_trash;
 pub mod drive_tree;
 pub mod email_identity;
 pub mod error;

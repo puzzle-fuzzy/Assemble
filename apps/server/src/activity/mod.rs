@@ -278,7 +278,7 @@ async fn file(
     }
 
     let row:Option<FileRow>=sqlx::query_as(
-        "SELECT f.account_id,a.display_name,a.email,f.name,f.size,f.mime_type,f.created_at FROM drive_files f JOIN accounts a ON a.id=f.account_id WHERE f.id=?",
+        "SELECT f.account_id,a.display_name,a.email,f.name,f.size,f.mime_type,f.created_at FROM active_drive_files f JOIN accounts a ON a.id=f.account_id WHERE f.id=?",
     ).bind(&id).fetch_optional(&state.pool).await?;
     let row = row.ok_or_else(ApiError::not_found)?;
     Ok(Json(AdminDriveFile {

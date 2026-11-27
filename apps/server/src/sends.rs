@@ -293,7 +293,7 @@ pub async fn create(
     let stream = body.into_data_stream().map_err(std::io::Error::other);
     let mut reader = StreamReader::new(stream);
     let cancel = CancellationToken::new();
-    state
+    let lease = state
         .blobs
         .store(&mut reader, input.size, &input.sha256, &cancel)
         .await
@@ -301,6 +301,7 @@ pub async fn create(
 
     // 上传可能持续了一阵子。对方这会儿已经下线的话，这次发送同样不成立。
     if !is_online(&state, &identity.account_id, &target.id) {
+        drop(lease);
         state.blobs.discard_unreferenced(&input.sha256).await?;
         return Err(target_offline());
     }
@@ -309,11 +310,13 @@ pub async fn create(
         Ok(row) => row,
         Err(error) => {
             // 没记成发送，刚收下的内容就没人引用：别把它留在磁盘上等着清扫。
+            drop(lease);
             // 真的记上了的话，这里会看见它还被引用着，什么都不删。
             state.blobs.discard_unreferenced(&input.sha256).await?;
             return Err(error);
         }
     };
+    drop(lease);
     audit::record(
         &state.pool,
         Some(&identity.account_id),

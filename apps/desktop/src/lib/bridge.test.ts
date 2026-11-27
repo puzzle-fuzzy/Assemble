@@ -12,6 +12,7 @@ type InvokeCall = { command: string; args: Record<string, unknown> };
 
 const STATE: Snapshot = {
   driveTree: null,
+  driveTrash: null,
   remote: { sessions: [] },
   systemNotifications: { items: [], available: true },
   downloads: {
@@ -83,6 +84,124 @@ const {
 const { messageFor } = await import("@/lib/messages");
 
 describe("桥接", () => {
+  test("回收站具名命令核验响应，取消查询仅释放自己的现场，不暴露凭据或路径", async () => {
+    const target = { kind: "folder" as const, id: "folder-1", version: 1 };
+    const batch = {
+      id: "trash-1",
+      rootId: target.id,
+      kind: target.kind,
+      name: "资料<中文>",
+      originalLocation: [],
+      deletedAt: "2026-11-27T08:00:00Z",
+      version: 1,
+      fileCount: 0,
+      folderCount: 1,
+      size: 0,
+    };
+    const list = { items: [batch], total: 1, page: 1, pageSize: 20 };
+    respondWith = list;
+    expect(await bridge.driveTrash.list("资料", 1, 20)).toEqual(list);
+    const reading = calls.find((call) => call.command === "drive_trash_list");
+    expect(reading?.args).toMatchObject({ q: "资料", page: 1, pageSize: 20 });
+    expect(calls.at(-1)).toEqual({
+      command: "drive_trash_cancel",
+      args: { requestId: reading?.args.requestId },
+    });
+    const query = { parentId: "root", q: "", page: 1, pageSize: 20 };
+    const item = {
+      id: batch.rootId,
+      parentId: null,
+      kind: batch.kind,
+      name: batch.name,
+      size: null,
+      version: 2,
+      createdAt: batch.deletedAt,
+    };
+    const detail = {
+      batch,
+      current: item,
+      ancestors: [],
+      items: [],
+      total: 0,
+      page: 1,
+      pageSize: 20,
+    };
+    respondWith = detail;
+    expect(await bridge.driveTrash.detail(batch.id, query)).toEqual(detail);
+    expect(calls.at(-2)).toMatchObject({
+      command: "drive_trash_detail",
+      args: { id: batch.id, query },
+    });
+    expect(calls.at(-1)?.command).toBe("drive_trash_cancel");
+    respondWith = {
+      target,
+      name: batch.name,
+      fileCount: 0,
+      folderCount: 1,
+      size: 0,
+      revision: "a".repeat(64),
+    };
+    await bridge.driveTrash.preview?.(target);
+    expect(calls.at(-1)).toEqual({
+      command: "drive_trash_preview",
+      args: { target },
+    });
+    respondWith = batch;
+    const input = { target, revision: "a".repeat(64), requestId: "stable" };
+    await bridge.driveTrash.move?.(input);
+    expect(calls.at(-1)).toEqual({
+      command: "drive_trash_move",
+      args: { input },
+    });
+    const restored = {
+      batchId: batch.id,
+      id: batch.rootId,
+      kind: batch.kind,
+      name: batch.name,
+      parentId: null,
+      reason: "original",
+      renamed: false,
+    };
+    respondWith = {
+      ...restored,
+      version: 1,
+      revision: "b".repeat(64),
+      parentLocation: [],
+    };
+    await bridge.driveTrash.restorePreview?.(batch.id);
+    expect(calls.at(-1)).toEqual({
+      command: "drive_trash_restore_preview",
+      args: { id: batch.id },
+    });
+    respondWith = restored;
+    const restore = { version: 1, revision: "b".repeat(64) };
+    await bridge.driveTrash.restore?.(batch.id, restore);
+    expect(calls.at(-1)).toEqual({
+      command: "drive_trash_restore",
+      args: { id: batch.id, input: restore },
+    });
+    respondWith = {
+      id: batch.id,
+      logicalBytesReleased: 0,
+      cleanupPending: false,
+    };
+    await bridge.driveTrash.purge?.(batch.id, 1);
+    expect(calls.at(-1)).toEqual({
+      command: "drive_trash_purge",
+      args: { id: batch.id, version: 1 },
+    });
+    respondWith = { items: [] };
+    await expect(bridge.driveTrash.list("", 1, 20)).rejects.toMatchObject({
+      code: "INVALID_STATE",
+    });
+    const abort = new AbortController();
+    abort.abort();
+    const before = calls.length;
+    await expect(
+      bridge.driveTrash.list("", 1, 20, abort.signal),
+    ).rejects.toThrow();
+    expect(calls).toHaveLength(before);
+  });
   test("目录命令只传标识版本和名称；查询取消释放自己的现场", async () => {
     const listing = {
       current: null,

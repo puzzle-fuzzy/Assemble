@@ -94,7 +94,7 @@ async fn overview_storage_uses_real_totals_without_paths_or_credentials() {
     assert_eq!(response.status(), StatusCode::OK);
     assert_eq!(response.headers()["cache-control"], "no-store");
     let raw: Value = response.json().await.unwrap();
-    assert_eq!(raw["storage"].as_object().unwrap().len(), 8);
+    assert_eq!(raw["storage"].as_object().unwrap().len(), 10);
     let serialized = raw.to_string();
     assert!(!serialized.contains(f.dir.path().to_str().unwrap()));
     for field in ["password", "token", "digest", "csrf", "sha256"] {
@@ -102,6 +102,8 @@ async fn overview_storage_uses_real_totals_without_paths_or_credentials() {
     }
     let overview: AdminOverview = serde_json::from_value(raw).unwrap();
     assert_eq!(overview.storage.content_bytes, 640);
+    assert_eq!(overview.storage.trash_bytes, 0);
+    assert_eq!(overview.storage.reclaimable_bytes, Some(0));
     assert_eq!(
         overview.storage.budget_bytes,
         f.server.state.config.storage_budget_bytes

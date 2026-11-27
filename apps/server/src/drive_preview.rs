@@ -53,7 +53,7 @@ async fn private(request: axum::extract::Request, next: Next) -> Response {
 }
 
 async fn admin_file(state: &Shared, id: &str) -> Result<DriveRow, ApiError> {
-    sqlx::query_as("SELECT * FROM drive_files WHERE id = ?")
+    sqlx::query_as("SELECT * FROM active_drive_files WHERE id = ?")
         .bind(id)
         .fetch_optional(&state.pool)
         .await?

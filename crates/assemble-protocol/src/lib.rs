@@ -23,6 +23,7 @@ pub mod device;
 pub mod dht;
 pub mod downloads;
 pub mod drive;
+pub mod drive_trash;
 pub mod drive_tree;
 pub mod error;
 pub mod events;

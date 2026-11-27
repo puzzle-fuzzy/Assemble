@@ -3,6 +3,7 @@
 // 类型只在编译期约束 TypeScript 这一侧。真正跨过桥接的是一段 JSON，
 // 在入口处核对一次，界面就不会去渲染一个缺字段的半成品。
 
+import { isTrashListing } from "@assemble/ui/lib/drive-trash";
 import { isDriveTreeListing } from "@assemble/ui/lib/drive-tree";
 import type {
   AccountView,
@@ -342,6 +343,7 @@ export function isSnapshot(value: unknown): value is Snapshot {
     (value.draft === null || isDraftView(value.draft)) &&
     (value.drive === null || isDriveView(value.drive)) &&
     (value.driveTree === null || isDriveTreeListing(value.driveTree)) &&
+    (value.driveTrash === null || isTrashListing(value.driveTrash)) &&
     isSendMenuState(value.sendMenu) &&
     isRecord(value.receive) &&
     (value.receive.customFolder === null ||

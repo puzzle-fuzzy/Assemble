@@ -23,6 +23,17 @@ pub async fn report(config: &Config, pool: &SqlitePool) -> Result<AdminStorage, 
     let content: i64 = sqlx::query_scalar("SELECT coalesce(sum(size), 0) FROM blobs")
         .fetch_one(&mut *tx)
         .await?;
+    let trash: i64 = sqlx::query_scalar(
+        "SELECT coalesce(sum(size),0) FROM drive_files WHERE trash_id IS NOT NULL",
+    )
+    .fetch_one(&mut *tx)
+    .await?;
+    let reclaimable: i64 = sqlx::query_scalar(
+        "SELECT coalesce(sum(b.size),0) FROM blobs b WHERE b.refcount>0
+         AND b.refcount=(SELECT count(*) FROM drive_files f WHERE f.sha256=b.sha256 AND f.trash_id IS NOT NULL)
+         AND NOT EXISTS(SELECT 1 FROM active_drive_files f WHERE f.sha256=b.sha256)
+         AND NOT EXISTS(SELECT 1 FROM sends s WHERE s.sha256=b.sha256 AND s.state='offered')")
+         .fetch_one(&mut *tx).await?;
     let rows: Vec<Row> = sqlx::query_as(
         "WITH refs AS (SELECT account_id, sha256 FROM drive_files UNION SELECT account_id, sha256 FROM sends WHERE state = 'offered') \
          SELECT a.id, a.display_name, CASE WHEN a.email_verified_at IS NOT NULL THEN a.email END, a.avatar_url, sum(b.size) AS used \
@@ -60,6 +71,8 @@ pub async fn report(config: &Config, pool: &SqlitePool) -> Result<AdminStorage, 
     let budget_warning = u128::from(content_bytes) * 100
         >= u128::from(config.storage_budget_bytes) * u128::from(config.storage_warn_percent);
     Ok(AdminStorage {
+        trash_bytes: bytes(trash)?,
+        reclaimable_bytes: Some(bytes(reclaimable)?),
         content_bytes,
         budget_bytes: config.storage_budget_bytes,
         database_bytes,

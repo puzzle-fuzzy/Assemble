@@ -1,5 +1,6 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@assemble/ui/card";
 import { DataTable, type DataTableColumn } from "@assemble/ui/data-table";
+import { useTrashTranslation } from "@assemble/ui/lib/drive-trash-i18n";
 import { Progress } from "@assemble/ui/progress";
 import type { AdminStorage, AdminStorageAccount } from "../lib/api";
 import { useOperationsTranslation } from "../lib/operations-i18n";
@@ -37,6 +38,7 @@ export function StorageWarnings({ storage }: { storage?: AdminStorage }) {
 }
 
 export function StorageOverview({ storage }: { storage?: AdminStorage }) {
+  const { t: trashText } = useTrashTranslation();
   const { t, i18n } = useOperationsTranslation();
   const format = (bytes: number | null) =>
     bytes === null
@@ -119,6 +121,22 @@ export function StorageOverview({ storage }: { storage?: AdminStorage }) {
                 </dt>
                 <dd className="font-medium tabular-nums">
                   {format(storage.diskAvailableBytes)}
+                </dd>
+              </div>
+              <div className="flex flex-col gap-2">
+                <dt className="text-sm text-muted-foreground">
+                  {trashText("trashBytes")}
+                </dt>
+                <dd className="font-medium tabular-nums">
+                  {format(storage.trashBytes ?? null)}
+                </dd>
+              </div>
+              <div className="flex flex-col gap-2">
+                <dt className="text-sm text-muted-foreground">
+                  {trashText("reclaimableBytes")}
+                </dt>
+                <dd className="font-medium tabular-nums">
+                  {format(storage.reclaimableBytes ?? null)}
                 </dd>
               </div>
             </dl>

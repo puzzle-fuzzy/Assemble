@@ -149,6 +149,10 @@ fn stop(app: &tauri::AppHandle) {
 }
 
 // 命令清单单独集中，启动函数只保留生命周期编排。
+#[allow(
+    clippy::too_many_lines,
+    reason = "具名 IPC 白名单集中登记，便于核对权限与桥接"
+)]
 fn handlers() -> impl Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool + Send + Sync + 'static {
     tauri::generate_handler![
         commands::remote_request,
@@ -208,6 +212,14 @@ fn handlers() -> impl Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool + Send + Sync +
         commands::send_to_drive,
         commands::drive_refresh,
         commands::drive_tree_list,
+        commands::drive_trash_list,
+        commands::drive_trash_detail,
+        commands::drive_trash_cancel,
+        commands::drive_trash_preview,
+        commands::drive_trash_move,
+        commands::drive_trash_restore_preview,
+        commands::drive_trash_restore,
+        commands::drive_trash_purge,
         commands::drive_tree_cancel,
         commands::drive_folder_create,
         commands::drive_tree_rename,

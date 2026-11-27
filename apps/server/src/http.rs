@@ -77,6 +77,10 @@ impl AppState {
 
 pub type Shared = Arc<AppState>;
 
+fn drive_routes() -> Router<Shared> {
+    crate::drive_tree::routes().merge(crate::drive_trash::routes())
+}
+
 /// 请求正文的大小上限：单文件上限。它是 u64 而这里是 usize，32 位平台上取饱和值。
 fn upload_limit() -> usize {
     usize::try_from(assemble_protocol::primitives::MAX_FILE_SIZE).unwrap_or(usize::MAX)
@@ -113,7 +117,7 @@ pub fn router(state: Shared) -> Router {
         .merge(crate::media::routes())
         .merge(crate::memos::routes())
         .merge(crate::drive_preview::routes())
-        .merge(crate::drive_tree::routes())
+        .merge(drive_routes())
         .merge(crate::planner::locations::routes())
         .merge(crate::remote::routes())
         // 桌面端自动更新：清单和更新包，谁都能读

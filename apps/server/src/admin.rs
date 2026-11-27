@@ -675,7 +675,7 @@ async fn drive_content(
         return Err(ApiError::not_found());
     }
     let row: crate::drive::DriveRow = sqlx::query_as(
-        "SELECT id, account_id, name, size, mime_type, sha256, created_at FROM drive_files WHERE id = ?",
+        "SELECT id, account_id, name, size, mime_type, sha256, created_at FROM active_drive_files WHERE id = ?",
     ).bind(&id).fetch_optional(&state.pool).await?.ok_or_else(ApiError::not_found)?;
     // 与普通云盘下载复用附件文件名、分段读取和类型边界；跨账户授权只在此管理员入口执行。
     Ok(crate::http::file_response(
@@ -696,7 +696,7 @@ async fn drive_files(
     // 同一读事务保证总数与当前页来自同一份目录；停用账户的文件仍须如实列出。
     let mut tx = state.pool.begin().await?;
     let total = sqlx::query_scalar(concat!(
-        "SELECT count(*) FROM drive_files f JOIN accounts a ON a.id = f.account_id WHERE ",
+        "SELECT count(*) FROM active_drive_files f JOIN accounts a ON a.id = f.account_id WHERE ",
         drive_search!()
     ))
     .bind(&query.q)
@@ -706,7 +706,7 @@ async fn drive_files(
         "SELECT f.id, f.account_id, a.display_name AS account_display_name, ",
         "CASE WHEN a.email_verified_at IS NOT NULL THEN a.email END AS account_email, ",
         "f.name, f.size, f.mime_type, f.created_at ",
-        "FROM drive_files f JOIN accounts a ON a.id = f.account_id WHERE ",
+        "FROM active_drive_files f JOIN accounts a ON a.id = f.account_id WHERE ",
         drive_search!(),
         " ORDER BY f.created_at DESC, f.id DESC LIMIT ? OFFSET ?"
     ))

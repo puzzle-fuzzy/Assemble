@@ -202,7 +202,7 @@ pub(crate) async fn upload_at(
     let stream = body.into_data_stream().map_err(std::io::Error::other);
     let mut reader = StreamReader::new(stream);
     let cancel = CancellationToken::new();
-    state
+    let lease = state
         .blobs
         .store(&mut reader, input.size, &input.sha256, &cancel)
         .await
@@ -210,6 +210,7 @@ pub(crate) async fn upload_at(
 
     match record_file(state, identity, input, name, parent).await {
         Ok(row) => {
+            drop(lease);
             audit::record(
                 &state.pool,
                 Some(&identity.account_id),
@@ -223,6 +224,7 @@ pub(crate) async fn upload_at(
         }
         // 内容收下了，记录却没记上：内容不能留着没人认。
         Err(error) => {
+            drop(lease);
             let _ = state.blobs.discard_unreferenced(&input.sha256).await;
             Err(error)
         }
@@ -295,12 +297,14 @@ pub(crate) async fn load(
     account_id: &str,
     id: &str,
 ) -> Result<DriveRow, ApiError> {
-    sqlx::query_as::<_, DriveRow>("SELECT * FROM drive_files WHERE account_id = ? AND id = ?")
-        .bind(account_id)
-        .bind(id)
-        .fetch_optional(pool)
-        .await?
-        .ok_or_else(ApiError::not_found)
+    sqlx::query_as::<_, DriveRow>(
+        "SELECT * FROM active_drive_files WHERE account_id = ? AND id = ?",
+    )
+    .bind(account_id)
+    .bind(id)
+    .fetch_optional(pool)
+    .await?
+    .ok_or_else(ApiError::not_found)
 }
 
 /// `GET /v1/drive/files`：账户云盘里的全部文件，新的在前；以及空间用了多少。
@@ -309,7 +313,7 @@ pub async fn list(
     identity: Identity,
 ) -> Result<Json<DriveListing>, ApiError> {
     let rows: Vec<DriveRow> = sqlx::query_as(
-        "SELECT * FROM drive_files WHERE account_id = ? ORDER BY created_at DESC, rowid DESC",
+        "SELECT * FROM active_drive_files WHERE account_id = ? ORDER BY created_at DESC, rowid DESC",
     )
     .bind(&identity.account_id)
     .fetch_all(&state.pool)
@@ -350,7 +354,7 @@ pub async fn rename(
     let Some(name) = input.clean_name() else {
         return Err(ApiError::invalid("the file name is not acceptable"));
     };
-    let row: DriveRow = sqlx::query_as("UPDATE drive_files SET name = ?, version = version + 1, updated_at = ? WHERE account_id = ? AND id = ? RETURNING *")
+    let row: DriveRow = sqlx::query_as("UPDATE drive_files SET name = ?, version = version + 1, updated_at = ? WHERE account_id = ? AND id = ? AND trash_id IS NULL RETURNING *")
         .bind(name)
         .bind(Timestamp::now().as_millis())
         .bind(&identity.account_id)
@@ -370,29 +374,19 @@ pub async fn rename(
     Ok(Json(renamed.view()))
 }
 
-/// `DELETE /v1/drive/files/{id}`：删掉一个文件。它是内容的最后一个引用时，内容随之释放。
+/// 旧客户端的删除也只移入回收站；不在兼容入口永久释放内容。
 pub async fn remove(
     State(state): State<Shared>,
     identity: Identity,
     Path(id): Path<String>,
 ) -> Result<StatusCode, ApiError> {
-    let row = load(&state.pool, &identity.account_id, &id).await?;
-    let deleted = sqlx::query("DELETE FROM drive_files WHERE id = ?")
-        .bind(&row.id)
-        .execute(&state.pool)
-        .await?
-        .rows_affected();
-    if deleted > 0 {
-        state.blobs.release(&row.sha256).await?;
-    }
-    audit::record(
-        &state.pool,
-        Some(&identity.account_id),
-        Some(&identity.device_id),
-        actions::DRIVE_DELETED,
-        Some(&row.id),
+    crate::drive_trash::legacy_delete(
+        &state,
+        &identity,
+        assemble_protocol::drive_tree::Kind::File,
+        &id,
+        None,
     )
-    .await;
-    tracing::info!(file = %row.id, "file removed from the drive");
+    .await?;
     Ok(StatusCode::NO_CONTENT)
 }

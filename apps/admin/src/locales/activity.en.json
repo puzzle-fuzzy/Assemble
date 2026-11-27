@@ -69,7 +69,15 @@
       "created": "Uploaded file",
       "renamed": "Renamed file",
       "deleted": "Deleted file",
-      "moved": "Moved file"
+      "moved": "Moved file",
+      "trashed": "Move file to trash",
+      "restored": "Restore file",
+      "purged": "Permanently delete file",
+      "folder_trashed": "Move folder to trash",
+      "folder_restored": "Restore folder",
+      "folder_purged": "Permanently delete folder",
+      "cleanup_failed": "Content cleanup needs retry",
+      "folder_cleanup_failed": "Folder content cleanup needs retry"
     },
     "send": {
       "created": "Sent file",

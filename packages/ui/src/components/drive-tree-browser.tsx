@@ -47,6 +47,9 @@ export interface DriveTreeLocation {
   ancestors: PageBreadcrumbAncestor[];
 }
 interface Props {
+  initialParentId?: string;
+  onTrash?: (entry: DriveEntry, done: () => void) => void;
+  removeLabel?: string;
   renderCapacity?: (listing: DriveTreeListing) => ReactNode;
   variant?: "default" | "management";
   source: DriveTreeSource;
@@ -71,6 +74,9 @@ const initial = (pageSize: number): DriveTreeQuery => ({
   pageSize,
 });
 export function DriveTreeBrowser({
+  initialParentId = "root",
+  onTrash,
+  removeLabel,
   renderCapacity,
   variant,
   source,
@@ -84,7 +90,10 @@ export function DriveTreeBrowser({
   toolbar,
 }: Props) {
   const { t } = useDriveTreeTranslation();
-  const [query, setQuery] = useState(() => initial(defaultPageSize));
+  const [query, setQuery] = useState(() => ({
+    ...initial(defaultPageSize),
+    parentId: initialParentId,
+  }));
   const [data, setData] = useState<DriveTreeListing | null>(null);
   const [loading, setLoading] = useState(true);
   const [failed, setFailed] = useState(false);
@@ -340,7 +349,17 @@ export function DriveTreeBrowser({
                 },
               ]
             : []),
-          ...(source.remove
+          ...(onTrash
+            ? [
+                {
+                  id: "trash",
+                  label: removeLabel ?? t("remove"),
+                  destructive: true,
+                  onSelect: () => onTrash(entry, retry),
+                },
+              ]
+            : []),
+          ...(!onTrash && source.remove
             ? [
                 {
                   id: "delete",

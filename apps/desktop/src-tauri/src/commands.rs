@@ -774,6 +774,180 @@ pub fn drive_tree_cancel(
     Ok(())
 }
 #[tauri::command]
+pub async fn drive_trash_list(
+    app: AppHandle,
+    window: tauri::WebviewWindow,
+    q: String,
+    page: u32,
+    page_size: u32,
+    request_id: String,
+) -> Result<assemble_protocol::drive_trash::Listing, CommandError> {
+    let state = app.state::<AppState>();
+    let call = remote_window(&window, &state)?;
+    trash_request_id(&request_id)?;
+    let cancel = state.trash_queries.begin(&request_id, true, &call.cancel);
+    let listing = call.finish(
+        &state,
+        state
+            .client
+            .drive_trash_list(&q, page, page_size, &RequestOptions::new(&cancel))
+            .await,
+    )?;
+    if !state.remember_drive_trash(listing.clone(), call.epoch, &cancel) {
+        return Err(CommandError::local("CANCELLED", "trash query cancelled"));
+    }
+    Ok(listing)
+}
+fn trash_request_id(id: &str) -> Result<(), CommandError> {
+    if assemble_protocol::primitives::is_valid_id(id) {
+        Ok(())
+    } else {
+        Err(CommandError::local(
+            "INVALID_REQUEST",
+            "invalid trash request identifier",
+        ))
+    }
+}
+async fn require_trash(state: &AppState, call: &MediaCall) -> Result<(), CommandError> {
+    match call.finish(
+        state,
+        state
+            .client
+            .drive_trash_list("", 1, 1, &RequestOptions::new(&call.cancel))
+            .await,
+    ) {
+        Ok(_) => Ok(()),
+        Err(error) if error.code == "NOT_FOUND" => Err(CommandError::local(
+            "DRIVE_TRASH_UPGRADE_REQUIRED",
+            "update the server before deleting",
+        )),
+        Err(error) => Err(error),
+    }
+}
+#[tauri::command]
+pub fn drive_trash_cancel(
+    app: AppHandle,
+    window: tauri::WebviewWindow,
+    request_id: String,
+) -> Result<(), CommandError> {
+    if window.label() != crate::state::MAIN_WINDOW {
+        return Err(CommandError::local("FORBIDDEN", "main window required"));
+    }
+    trash_request_id(&request_id)?;
+    app.state::<AppState>().trash_queries.close(&request_id);
+    Ok(())
+}
+#[tauri::command]
+pub async fn drive_trash_detail(
+    app: AppHandle,
+    window: tauri::WebviewWindow,
+    id: String,
+    query: assemble_protocol::drive_tree::Query,
+    request_id: String,
+) -> Result<assemble_protocol::drive_trash::Detail, CommandError> {
+    let state = app.state::<AppState>();
+    let call = remote_window(&window, &state)?;
+    trash_request_id(&request_id)?;
+    let cancel = state.trash_queries.begin(&request_id, false, &call.cancel);
+    let result = call.finish(
+        &state,
+        state
+            .client
+            .drive_trash_detail(&id, &query, &RequestOptions::new(&cancel))
+            .await,
+    )?;
+    if cancel.is_cancelled() {
+        return Err(CommandError::local("CANCELLED", "trash query cancelled"));
+    }
+    Ok(result)
+}
+#[tauri::command]
+pub async fn drive_trash_preview(
+    app: AppHandle,
+    window: tauri::WebviewWindow,
+    target: assemble_protocol::drive_trash::Target,
+) -> Result<assemble_protocol::drive_trash::Preview, CommandError> {
+    let state = app.state::<AppState>();
+    let call = remote_window(&window, &state)?;
+    call.finish(
+        &state,
+        state
+            .client
+            .drive_trash_preview(&target, &RequestOptions::new(&call.cancel))
+            .await,
+    )
+}
+#[tauri::command]
+pub async fn drive_trash_move(
+    app: AppHandle,
+    window: tauri::WebviewWindow,
+    input: assemble_protocol::drive_trash::Move,
+) -> Result<assemble_protocol::drive_trash::Batch, CommandError> {
+    let state = app.state::<AppState>();
+    let call = remote_window(&window, &state)?;
+    let result = call.finish(
+        &state,
+        state
+            .client
+            .drive_trash_move(&input, &RequestOptions::new(&call.cancel))
+            .await,
+    )?;
+    state.file_previews.close(None);
+    state.set_drive_tree(None);
+    state.set_drive(None);
+    Ok(result)
+}
+#[tauri::command]
+pub async fn drive_trash_restore_preview(
+    app: AppHandle,
+    window: tauri::WebviewWindow,
+    id: String,
+) -> Result<assemble_protocol::drive_trash::RestorePreview, CommandError> {
+    let state = app.state::<AppState>();
+    let call = remote_window(&window, &state)?;
+    call.finish(
+        &state,
+        state
+            .client
+            .drive_trash_restore_preview(&id, &RequestOptions::new(&call.cancel))
+            .await,
+    )
+}
+#[tauri::command]
+pub async fn drive_trash_restore(
+    app: AppHandle,
+    window: tauri::WebviewWindow,
+    id: String,
+    input: assemble_protocol::drive_trash::Restore,
+) -> Result<assemble_protocol::drive_trash::Restored, CommandError> {
+    let state = app.state::<AppState>();
+    let call = remote_window(&window, &state)?;
+    call.finish(
+        &state,
+        state
+            .client
+            .drive_trash_restore(&id, &input, &RequestOptions::new(&call.cancel))
+            .await,
+    )
+}
+#[tauri::command]
+pub async fn drive_trash_purge(
+    app: AppHandle,
+    window: tauri::WebviewWindow,
+    id: String,
+    version: i64,
+) -> Result<assemble_protocol::drive_trash::Purged, CommandError> {
+    let state = app.state::<AppState>();
+    let call = remote_window(&window, &state)?;
+    call.finish(
+        &state,
+        state
+            .client
+            .drive_trash_purge(&id, version, &RequestOptions::new(&call.cancel))
+            .await,
+    )
+}
+#[tauri::command]
 pub async fn drive_folder_create(
     app: AppHandle,
     window: tauri::WebviewWindow,
@@ -833,6 +1007,7 @@ pub async fn drive_tree_delete(
 ) -> Result<(), CommandError> {
     let state = app.state::<AppState>();
     let call = remote_window(&window, &state)?;
+    require_trash(&state, &call).await?;
     call.finish(
         &state,
         state
@@ -982,31 +1157,31 @@ pub fn drive_preview_close(
 #[tauri::command]
 pub async fn drive_delete(
     app: AppHandle,
+    window: tauri::WebviewWindow,
     file_id: String,
 ) -> Result<crate::state::Snapshot, CommandError> {
     let state = app.state::<AppState>();
-    let deleted = state
-        .client
-        .drive_delete(&file_id, &RequestOptions::new(&state.lifetime))
-        .await;
-    match deleted {
-        Ok(()) => {}
-        Err(error) => {
-            if error.is_unauthorized() {
-                session::revoked(&state);
-            }
-            tracing::debug!(%error, "a drive file could not be removed");
-            return Err(CommandError::from(&error));
-        }
-    }
+    let call = remote_window(&window, &state)?;
+    require_trash(&state, &call).await?;
+    call.finish(
+        &state,
+        state
+            .client
+            .drive_delete(&file_id, &RequestOptions::new(&call.cancel))
+            .await,
+    )?;
+    state.file_previews.close(None);
     // 以服务端的名单为准：别处的改动也一并带回来。
-    match state
-        .client
-        .drive(&RequestOptions::new(&state.lifetime))
-        .await
-    {
-        Ok(listing) => state.set_drive(Some(listing)),
-        Err(error) => tracing::debug!(%error, "the drive could not be listed after a removal"),
+    match call.finish(
+        &state,
+        state.client.drive(&RequestOptions::new(&call.cancel)).await,
+    ) {
+        Ok(listing) => {
+            state.remember_drive(listing, call.epoch, &call.cancel);
+        }
+        Err(error) => {
+            tracing::debug!(code = %error.code, "the drive could not be listed after a removal");
+        }
     }
     Ok(state.snapshot())
 }

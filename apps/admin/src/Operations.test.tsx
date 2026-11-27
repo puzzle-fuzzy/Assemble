@@ -236,7 +236,7 @@ test("无法测量的存储值保持未知，不伪装为零字节", async () =>
       storage={{ ...storage, databaseBytes: null, diskAvailableBytes: null }}
     />,
   );
-  expect(host.textContent?.match(/Unavailable/g)).toHaveLength(2);
+  expect(host.textContent?.match(/Unavailable/g)).toHaveLength(4);
   expect(host.textContent).not.toContain("NaN");
   expect(
     [...host.querySelectorAll("dd")].map((value) => value.textContent),
