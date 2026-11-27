@@ -273,12 +273,21 @@ export class FakeBridge implements Bridge {
     this.calls.push("downloadImportHls");
     return this.downloadPreview;
   }
-  async downloadStart(_preview: string, _variant: string) {
+  async downloadStart(_preview: string, _variant: string, _files?: number[]) {
     this.calls.push("downloadStart");
     return "a".repeat(32);
   }
   async downloadCancel(_id: string) {
     this.calls.push("downloadCancel");
+  }
+  async downloadPause(taskId: string) {
+    this.calls.push(`downloadPause:${taskId}`);
+  }
+  async downloadResume(taskId: string) {
+    this.calls.push(`downloadResume:${taskId}`);
+  }
+  async downloadCancelPreparation() {
+    this.calls.push("downloadCancelPreparation");
   }
   async downloadRetry(_id: string) {
     this.calls.push("downloadRetry");

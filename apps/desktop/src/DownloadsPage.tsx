@@ -9,6 +9,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@assemble/ui/card";
+import { Checkbox } from "@assemble/ui/checkbox";
 import {
   Select,
   SelectContent,
@@ -62,6 +63,8 @@ export function DownloadsPage({
   const [url, setUrl] = useState("");
   const [page, setPage] = useState("");
   const [preview, setPreview] = useState<DownloadPreview | null>(null);
+  const [fileIds, setFileIds] = useState<number[]>([]);
+  const composeRef = useRef(false);
   const [variant, setVariant] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
@@ -93,14 +96,27 @@ export function DownloadsPage({
   }
   function accept(value: DownloadPreview | null) {
     if (value) {
+      if (!composeRef.current) return;
       setPreview(value);
+      setFileIds(value.files?.map((f) => f.id) ?? []);
       setVariant(value.variants[0]?.id ?? "");
       setUrl("");
       setPage("");
     }
   }
   return (
-    <Dialog open={compose} onOpenChange={setCompose}>
+    <Dialog
+      open={compose}
+      onOpenChange={(open) => {
+        composeRef.current = open;
+        setCompose(open);
+        if (!open && pending && kind === "magnet") {
+          void source
+            .downloadCancelPreparation()
+            .catch((cause) => setError(toBridgeError(cause).code));
+        }
+      }}
+    >
       <DialogContent
         aria-describedby={undefined}
         className="max-h-[85dvh] overflow-y-auto sm:max-w-xl"
@@ -125,7 +141,7 @@ export function DownloadsPage({
                 await source.downloadPrepare({
                   kind,
                   url,
-                  pageUrl: page || null,
+                  pageUrl: kind === "hls" ? page || null : null,
                 }),
               );
             });
@@ -150,13 +166,20 @@ export function DownloadsPage({
                   <SelectGroup>
                     <SelectItem value="hls">{t("hls")}</SelectItem>
                     <SelectItem value="douyin">{t("douyin")}</SelectItem>
+                    <SelectItem value="magnet">{t("magnet")}</SelectItem>
                   </SelectGroup>
                 </SelectContent>
               </Select>
             </Field>
             <Field>
               <Label htmlFor={`${id}-url`}>
-                {t(kind === "hls" ? "hlsAddress" : "address")}
+                {t(
+                  kind === "hls"
+                    ? "hlsAddress"
+                    : kind === "magnet"
+                      ? "magnetAddress"
+                      : "address",
+                )}
               </Label>
               <Input
                 id={`${id}-url`}
@@ -192,10 +215,26 @@ export function DownloadsPage({
                 />
               </Field>
             ) : null}
+            {kind === "magnet" ? (
+              <p className="text-sm text-muted-foreground">{t("magnetHint")}</p>
+            ) : null}
             <div className="flex flex-wrap gap-2">
               <Button type="submit" disabled={pending}>
                 {t(pending ? "parsing" : "parse")}
               </Button>
+              {pending && kind === "magnet" ? (
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => {
+                    void source
+                      .downloadCancelPreparation()
+                      .catch((cause) => setError(toBridgeError(cause).code));
+                  }}
+                >
+                  {t("cancelParse")}
+                </Button>
+              ) : null}
               {kind === "hls" ? (
                 <Button
                   type="button"
@@ -230,40 +269,119 @@ export function DownloadsPage({
               <CardDescription>{preview.sourceHost}</CardDescription>
             </CardHeader>
             <CardContent>
-              <FieldGroup>
-                <Field>
-                  <Label htmlFor={`${id}-quality`}>{t("quality")}</Label>
-                  <Select
-                    value={variant}
-                    disabled={pending}
-                    onValueChange={setVariant}
+              {preview.kind === "magnet" ? (
+                <div className="space-y-3">
+                  <p className="text-sm">
+                    {t("selectedFiles", {
+                      count: fileIds.length,
+                      size: formatSize(
+                        (preview.files ?? [])
+                          .filter((f) => fileIds.includes(f.id))
+                          .reduce((n, f) => n + f.size, 0),
+                      ),
+                    })}
+                  </p>
+                  <div className="flex gap-2">
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      disabled={pending}
+                      onClick={() =>
+                        setFileIds(preview.files?.map((f) => f.id) ?? [])
+                      }
+                    >
+                      {t("selectAll")}
+                    </Button>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      disabled={pending}
+                      onClick={() => setFileIds([])}
+                    >
+                      {t("selectNone")}
+                    </Button>
+                  </div>
+                  <ul
+                    className="max-h-64 space-y-2 overflow-auto"
+                    aria-label={t("files")}
                   >
-                    <SelectTrigger id={`${id}-quality`} className="w-full">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent position="popper">
-                      <SelectGroup>
-                        {preview.variants.map((v) => (
-                          <SelectItem key={v.id} value={v.id}>
-                            {v.height ? `${v.height}p` : t("original")}
-                            {v.bandwidth
-                              ? ` · ${t("rate", { rate: Math.round(v.bandwidth / 1000) })}`
-                              : ""}
-                          </SelectItem>
-                        ))}
-                      </SelectGroup>
-                    </SelectContent>
-                  </Select>
-                </Field>
-              </FieldGroup>
+                    {(preview.files ?? []).map((file) => (
+                      <li key={file.id}>
+                        <label
+                          className="flex items-start gap-2 text-sm"
+                          htmlFor={`${id}-file-${file.id}`}
+                        >
+                          <Checkbox
+                            id={`${id}-file-${file.id}`}
+                            disabled={pending}
+                            checked={fileIds.includes(file.id)}
+                            onCheckedChange={(checked) =>
+                              setFileIds((current) =>
+                                checked === true
+                                  ? [...current, file.id]
+                                  : current.filter((id) => id !== file.id),
+                              )
+                            }
+                          />
+                          <span className="min-w-0 flex-1 break-all">
+                            {file.name}
+                          </span>
+                          <span className="shrink-0 text-muted-foreground">
+                            {formatSize(file.size)}
+                          </span>
+                        </label>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ) : (
+                <FieldGroup>
+                  <Field>
+                    <Label htmlFor={`${id}-quality`}>{t("quality")}</Label>
+                    <Select
+                      value={variant}
+                      disabled={pending}
+                      onValueChange={setVariant}
+                    >
+                      <SelectTrigger id={`${id}-quality`} className="w-full">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent position="popper">
+                        <SelectGroup>
+                          {preview.variants.map((v) => (
+                            <SelectItem key={v.id} value={v.id}>
+                              {v.height ? `${v.height}p` : t("original")}
+                              {v.bandwidth
+                                ? ` · ${t("rate", { rate: Math.round(v.bandwidth / 1000) })}`
+                                : ""}
+                            </SelectItem>
+                          ))}
+                        </SelectGroup>
+                      </SelectContent>
+                    </Select>
+                  </Field>
+                </FieldGroup>
+              )}
             </CardContent>
             <CardFooter>
               <Button
-                disabled={pending || !view?.toolsAvailable}
+                disabled={
+                  pending ||
+                  (preview.kind === "magnet"
+                    ? fileIds.length === 0
+                    : !view?.toolsAvailable)
+                }
                 onClick={() =>
                   void run(async () => {
-                    await source.downloadStart(preview.id, variant);
+                    await source.downloadStart(
+                      preview.id,
+                      variant,
+                      preview.kind === "magnet" ? fileIds : [],
+                    );
                     setPreview(null);
+                    composeRef.current = false;
                     setCompose(false);
                   })
                 }
@@ -342,7 +460,7 @@ export function DownloadsPage({
                         {t(task.phase)}
                       </p>
                     ) : null}
-                    {active ? (
+                    {active || task.phase === "paused" ? (
                       <Progress
                         value={progress}
                         aria-label={`${task.title} · ${t(task.phase)}`}
@@ -352,7 +470,12 @@ export function DownloadsPage({
                       {task.initiatedBy === "assistant" ? (
                         <span>{t("initiatedByAssistant")}</span>
                       ) : null}
-                      <span>{formatSize(task.receivedBytes)}</span>
+                      <span>
+                        {formatSize(task.receivedBytes)}
+                        {task.kind === "magnet" && task.totalBytes !== null
+                          ? ` / ${formatSize(task.totalBytes)}`
+                          : ""}
+                      </span>
                       {active && task.totalSegments !== null ? (
                         <span>
                           {t("parts", {
@@ -375,7 +498,35 @@ export function DownloadsPage({
                       </p>
                     ) : null}
                     <div className="flex flex-wrap gap-2">
-                      {active ? (
+                      {active && task.kind === "magnet" ? (
+                        <Button
+                          type="button"
+                          variant="outline"
+                          disabled={pending}
+                          onClick={() =>
+                            void run(() => source.downloadPause(task.id))
+                          }
+                        >
+                          {t("pause")}
+                        </Button>
+                      ) : null}
+                      {task.kind === "magnet" && task.phase === "paused" ? (
+                        <Button
+                          type="button"
+                          variant="outline"
+                          disabled={pending}
+                          onClick={() =>
+                            void run(() => source.downloadResume(task.id))
+                          }
+                        >
+                          {t("resume")}
+                        </Button>
+                      ) : null}
+                      {active ||
+                      (task.kind === "magnet" &&
+                        ["paused", "failed", "interrupted"].includes(
+                          task.phase,
+                        )) ? (
                         <Button
                           type="button"
                           variant="outline"
@@ -412,7 +563,7 @@ export function DownloadsPage({
                               void run(() => source.downloadOpen(task.id))
                             }
                           >
-                            {t("open")}
+                            {t(task.kind === "magnet" ? "openFolder" : "open")}
                           </Button>
                           <Button
                             type="button"

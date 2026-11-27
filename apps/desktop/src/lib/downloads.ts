@@ -1,5 +1,5 @@
 // 本机下载的公开展示契约；地址只在提交时单向交给 Rust。
-export type DownloadKind = "hls" | "douyin" | "video";
+export type DownloadKind = "hls" | "douyin" | "video" | "magnet";
 export interface DownloadInput {
   kind: DownloadKind;
   url: string;
@@ -12,6 +12,11 @@ export interface DownloadVariant {
   height: number | null;
   bandwidth: number | null;
 }
+export interface DownloadFile {
+  id: number;
+  name: string;
+  size: number;
+}
 export interface DownloadPreview {
   id: string;
   kind: DownloadKind;
@@ -19,6 +24,7 @@ export interface DownloadPreview {
   sourceHost: string;
   durationSeconds: number | null;
   variants: DownloadVariant[];
+  files?: DownloadFile[];
 }
 export type DownloadPhase =
   | "queued"
@@ -28,7 +34,8 @@ export type DownloadPhase =
   | "completed"
   | "failed"
   | "cancelled"
-  | "interrupted";
+  | "interrupted"
+  | "paused";
 export interface DownloadTask {
   /** 旧任务缺省；来源标记不包含助手身份或来源凭据。 */
   initiatedBy?: "assistant";
@@ -66,7 +73,10 @@ const optionalNumber = (value: unknown) => value === null || positive(value);
 const optionalString = (value: unknown) =>
   value === null || typeof value === "string";
 const kind = (value: unknown) =>
-  value === "hls" || value === "douyin" || value === "video";
+  value === "hls" ||
+  value === "douyin" ||
+  value === "video" ||
+  value === "magnet";
 
 export function isDownloadPreview(value: unknown): value is DownloadPreview {
   return (
@@ -78,6 +88,24 @@ export function isDownloadPreview(value: unknown): value is DownloadPreview {
     optionalNumber(value.durationSeconds) &&
     Array.isArray(value.variants) &&
     value.variants.length > 0 &&
+    (value.files === undefined ||
+      (Array.isArray(value.files) &&
+        value.files.length <= 10000 &&
+        value.files.every(
+          (f) =>
+            record(f) &&
+            Number.isInteger(f.id) &&
+            Number(f.id) >= 0 &&
+            Number(f.id) <= 0xffffffff &&
+            typeof f.name === "string" &&
+            f.name.length > 0 &&
+            f.name.length <= 2048 &&
+            Number.isSafeInteger(f.size) &&
+            Number(f.size) >= 0,
+        ) &&
+        new Set(value.files.map((f) => f.id)).size === value.files.length)) &&
+    (value.kind !== "magnet" ||
+      (Array.isArray(value.files) && value.files.length > 0)) &&
     value.variants.every(
       (v) =>
         record(v) &&
@@ -116,6 +144,7 @@ export function isDownloadsView(value: unknown): value is DownloadsView {
           "failed",
           "cancelled",
           "interrupted",
+          "paused",
         ].includes(v.phase) &&
         optionalString(v.fileName) &&
         optionalString(v.errorCode) &&
@@ -136,7 +165,7 @@ export function downloadProgress(task: DownloadTask): number | null {
       ? task.durationSeconds && task.mediaSeconds !== null
         ? task.mediaSeconds / task.durationSeconds
         : null
-      : task.phase === "downloading"
+      : ["downloading", "paused"].includes(task.phase)
         ? task.totalSegments
           ? task.completedSegments / task.totalSegments
           : task.totalBytes

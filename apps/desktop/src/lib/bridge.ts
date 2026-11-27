@@ -86,7 +86,14 @@ export interface Bridge {
     baseUrl: string | null,
     pageUrl: string | null,
   ): Promise<DownloadPreview | null>;
-  downloadStart(previewId: string, variantId: string): Promise<string>;
+  downloadStart(
+    previewId: string,
+    variantId: string,
+    fileIds?: number[],
+  ): Promise<string>;
+  downloadPause(taskId: string): Promise<void>;
+  downloadResume(taskId: string): Promise<void>;
+  downloadCancelPreparation(): Promise<void>;
   downloadCancel(taskId: string): Promise<void>;
   downloadRetry(taskId: string): Promise<void>;
   downloadSetAssistantAllowed(enabled: boolean): Promise<Snapshot>;
@@ -258,15 +265,19 @@ export const bridge: Bridge = {
     });
     return value === null ? null : requireDownloadPreview(value);
   },
-  downloadStart: async (previewId, variantId) => {
+  downloadStart: async (previewId, variantId, fileIds = []) => {
     const value = await invoke<unknown>("download_start", {
       previewId,
       variantId,
+      fileIds,
     });
     if (typeof value !== "string" || !/^[a-f0-9]{32}$/.test(value))
       throw new BridgeError("INVALID_RESPONSE", "invalid download identifier");
     return value;
   },
+  downloadPause: (taskId) => invoke<void>("download_pause", { taskId }),
+  downloadResume: (taskId) => invoke<void>("download_resume", { taskId }),
+  downloadCancelPreparation: () => invoke<void>("download_cancel_preparation"),
   downloadCancel: (taskId) => invoke<void>("download_cancel", { taskId }),
   downloadRetry: (taskId) => invoke<void>("download_retry", { taskId }),
   downloadSetAssistantAllowed: (enabled) =>

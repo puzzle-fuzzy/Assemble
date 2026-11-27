@@ -420,6 +420,11 @@ async fn staging_folders_left_by_an_interrupted_run_are_swept_and_nothing_else_i
     // 不该动的：下载好的文件、别的目录、名字像暂存目录的一个文件、名字像暂存目录的一个链接。
     std::fs::write(folder.path().join("我下的电影.mp4"), b"keep me").unwrap();
     std::fs::create_dir_all(folder.path().join("别的目录")).unwrap();
+    let resumable = folder
+        .path()
+        .join(format!(".assemble-magnet-{}", "a".repeat(32)));
+    std::fs::create_dir_all(&resumable).unwrap();
+    std::fs::write(resumable.join("piece"), b"resume").unwrap();
     std::fs::write(folder.path().join(".assemble-download-not-a-dir"), b"file").unwrap();
     #[cfg(unix)]
     std::os::unix::fs::symlink(
@@ -444,6 +449,7 @@ async fn staging_folders_left_by_an_interrupted_run_are_swept_and_nothing_else_i
         b"keep me"
     );
     assert!(folder.path().join("别的目录").is_dir());
+    assert_eq!(std::fs::read(resumable.join("piece")).unwrap(), b"resume");
     assert_eq!(
         std::fs::read(folder.path().join(".assemble-download-not-a-dir")).unwrap(),
         b"file"

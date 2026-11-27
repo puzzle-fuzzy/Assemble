@@ -184,7 +184,12 @@ async fn authorize(
         )
             .into_response();
     }
-    match tokio::time::timeout(Duration::from_secs(45), next.run(request)).await {
+    let seconds = if request.uri().path() == "/v1/assistant/downloads/preview" {
+        100
+    } else {
+        45
+    };
+    match tokio::time::timeout(Duration::from_secs(seconds), next.run(request)).await {
         Ok(reply) => reply,
         Err(_) => (
             StatusCode::REQUEST_TIMEOUT,
@@ -228,7 +233,11 @@ async fn download(
     let Ok(Json(request)) = body else {
         return Json(BrowserReply::failure(INVALID_REQUEST));
     };
-    if request.via.is_some() || !is_valid_id(&request.request_id) || request.request_id.len() > 64 {
+    if request.via.is_some()
+        || !is_valid_id(&request.request_id)
+        || request.request_id.len() > 64
+        || request.input.kind == assemble_protocol::downloads::DownloadKind::Magnet
+    {
         return Json(BrowserReply::failure(INVALID_REQUEST));
     }
     let Ok(encoded) = serde_json::to_vec(&request.input) else {
@@ -324,7 +333,13 @@ pub(crate) async fn local_request(
         .no_proxy()
         .redirect(reqwest::redirect::Policy::none())
         .connect_timeout(Duration::from_secs(2))
-        .timeout(Duration::from_secs(40))
+        .timeout(Duration::from_secs(
+            if path == "/v1/assistant/downloads/preview" {
+                100
+            } else {
+                40
+            },
+        ))
         .build()
         .map_err(|_| NOT_CONNECTED)?;
     let mut bytes = [0_u8; 32];
@@ -333,10 +348,11 @@ pub(crate) async fn local_request(
     let base = format!("http://127.0.0.1:{}", endpoint.port);
     let check = client
         .get(format!("{base}/v1/challenge?nonce={nonce}"))
+        .timeout(Duration::from_secs(5))
         .send()
         .await
         .map_err(|_| NOT_CONNECTED)?;
-    let verified: serde_json::Value = small_json(check).await?;
+    let verified: serde_json::Value = small_json(check, 8192).await?;
     let expected = proof(&endpoint.token.0, &nonce).ok_or(NOT_CONNECTED)?;
     if !verified
         .get("proof")
@@ -354,18 +370,28 @@ pub(crate) async fn local_request(
         .send()
         .await
         .map_err(|_| NOT_CONNECTED)?;
-    small_json(response).await
+    // 文件清单可明显大于视频摘要；只扩展预览应答，挑战与状态仍保持小上限。
+    small_json(
+        response,
+        if path == "/v1/assistant/downloads/preview" {
+            8 * 1024 * 1024
+        } else {
+            8192
+        },
+    )
+    .await
 }
 
 async fn small_json<T: serde::de::DeserializeOwned>(
     mut response: reqwest::Response,
+    maximum: usize,
 ) -> Result<T, &'static str> {
     if !response.status().is_success() {
         return Err(NOT_CONNECTED);
     }
     let mut bytes = Vec::new();
     while let Some(chunk) = response.chunk().await.map_err(|_| NOT_CONNECTED)? {
-        if bytes.len() + chunk.len() > 8192 {
+        if bytes.len() + chunk.len() > maximum {
             return Err(NOT_CONNECTED);
         }
         bytes.extend_from_slice(&chunk);
@@ -489,6 +515,7 @@ mod tests {
             request_id: "cancel-me".into(),
             preview_id: preview.id,
             variant_id: preview.variants[0].id.clone(),
+            file_ids: Vec::new(),
         };
         let id = crate::assistant::start(store.as_ref(), "test.cancel", &start)
             .await
@@ -504,6 +531,7 @@ mod tests {
             request_id: "ordinary-preview".into(),
             preview_id: ordinary.id.clone(),
             variant_id: ordinary.variants[0].id.clone(),
+            file_ids: Vec::new(),
         };
         assert_eq!(
             crate::assistant::start(store.as_ref(), "test.cancel", &forbidden_start)
@@ -588,6 +616,7 @@ mod tests {
             request_id: "once".into(),
             preview_id: preview.id,
             variant_id: preview.variants[0].id.clone(),
+            file_ids: Vec::new(),
         };
         let first = crate::assistant::start(store.as_ref(), "test.assistant", &start).await;
         assert!(first.ok);

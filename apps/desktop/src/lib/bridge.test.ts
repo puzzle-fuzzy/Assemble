@@ -470,7 +470,10 @@ describe("桥接", () => {
         command: "download_import_hls",
         args: { baseUrl: null, pageUrl: null },
       },
-      { command: "download_start", args: { previewId: "p", variantId: "v0" } },
+      {
+        command: "download_start",
+        args: { previewId: "p", variantId: "v0", fileIds: [] },
+      },
       { command: "download_cancel", args: { taskId: "task" } },
       { command: "download_retry", args: { taskId: "task" } },
       { command: "download_choose_folder", args: {} },
@@ -492,6 +495,22 @@ describe("桥接", () => {
     rejectWith = null;
   });
 
+  test("磁力文件选择与控制只传标识，不接受本机路径", async () => {
+    respondWith = "a".repeat(32);
+    await bridge.downloadStart("p", "magnet", [0, 2]);
+    await bridge.downloadPause("task");
+    await bridge.downloadResume("task");
+    await bridge.downloadCancelPreparation();
+    expect(calls).toEqual([
+      {
+        command: "download_start",
+        args: { previewId: "p", variantId: "magnet", fileIds: [0, 2] },
+      },
+      { command: "download_pause", args: { taskId: "task" } },
+      { command: "download_resume", args: { taskId: "task" } },
+      { command: "download_cancel_preparation", args: {} },
+    ]);
+  });
   test("每条命令使用与 Rust 侧一致的名字与参数", async () => {
     await bridge.snapshot();
     await bridge.signIn();

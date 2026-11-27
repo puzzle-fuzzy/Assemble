@@ -49,6 +49,7 @@ getrandom = "0.4"
 hmac = "0.13.0"
 mime_guess = "2.0.5"
 m3u8-rs = "6.0.1"
+librqbit = { version = "=9.1.0", default-features = false, features = ["rust-tls"] }
 md-5 = "0.11.0"
 # 桌面端更新包的签名核对（服务端发布时用；桌面应用自己那一遍在更新插件里）。
 minisign-verify = "0.3.0"
