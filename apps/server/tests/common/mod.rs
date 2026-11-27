@@ -270,6 +270,28 @@ pub struct Registered {
     pub device: Device,
     pub cancel: CancellationToken,
 }
+/// 测试只完成双方握手与核对，仍保持 pending；批准另行调用，不能用它替代人工核验。
+pub async fn prepare_remote(
+    controller: &Registered,
+    host: &Registered,
+    session: &assemble_protocol::remote::RemoteSession,
+) {
+    for _ in 0..4 {
+        host.remote_prepare_host(session, &host.options())
+            .await
+            .unwrap();
+        let pending = controller
+            .remote_poll(&session.id, 0, 0, &controller.options())
+            .await
+            .unwrap();
+        assert_eq!(
+            pending.session.phase,
+            assemble_protocol::remote::RemotePhase::Pending
+        );
+    }
+    let code = controller.remote_verification(&session.id).unwrap();
+    assert_eq!(Some(code), host.remote_verification(&session.id));
+}
 
 /// 客户端的方法直接用，不必每次都写 `.client`。
 impl std::ops::Deref for Registered {

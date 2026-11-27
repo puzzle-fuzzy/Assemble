@@ -11,19 +11,32 @@ name = "capture"
 required-features = ["native"]
 
 [features]
-native = ["dep:enigo", "dep:xcap", "dep:image", "dep:base64"]
+native = ["dep:enigo", "dep:xcap", "dep:image", "dep:arboard", "dep:openh264", "dep:cpal", "dep:opus2", "dep:screencapturekit"]
 
 [dependencies]
 assemble-protocol.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
 tokio-util.workspace = true
-base64 = { workspace = true, optional = true }
+base64.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+zeroize.workspace = true
+snow = "=0.10.0"
 image = { workspace = true, optional = true }
 
 [target.'cfg(any(target_os = "windows", target_os = "macos"))'.dependencies]
 enigo = { version = "=0.6.1", optional = true }
 xcap = { version = "=0.9.10", optional = true }
+arboard = { version = "=3.7.0", default-features = false, optional = true }
+openh264 = { version = "=0.9.10", optional = true }
+opus2 = { version = "=0.4.0", features = ["bundled"], optional = true }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+cpal = { version = "=0.18.2", optional = true }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+screencapturekit = { version = "=11.0.0", optional = true }
 
 [lints]
 workspace = true

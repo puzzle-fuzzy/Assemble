@@ -1,5 +1,7 @@
 //! 有界的原生工作线程。网络等待在调用方，键鼠只需等待当前这一帧采集完成。
-use assemble_protocol::remote::{MAX_BATCH, RemoteFrame, SequencedInput};
+use assemble_protocol::remote::{
+    ClipboardResult, ClipboardTask, MAX_BATCH, RemoteFrame, SequencedInput,
+};
 use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
@@ -12,6 +14,11 @@ pub trait Backend: 'static {
     fn frame(&mut self) -> Result<RemoteFrame, Self::Error>;
     fn apply(&mut self, input: &assemble_protocol::remote::RemoteInput) -> Result<(), Self::Error>;
     fn release_all(&mut self) -> Result<(), Self::Error>;
+    fn clipboard(&mut self, task: &ClipboardTask) -> ClipboardResult;
+    fn feedback(&mut self, elapsed: std::time::Duration);
+    fn audio(&mut self) -> assemble_protocol::remote::RemoteAudio;
+    fn shutdown(&mut self) -> Result<(), Self::Error>;
+    fn display_id(&self) -> Option<u32>;
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -29,6 +36,9 @@ type Reply<T, E> = oneshot::Sender<Result<T, WorkerError<E>>>;
 enum Job<E: std::error::Error + 'static> {
     Frame(Reply<RemoteFrame, E>),
     Inputs(Vec<SequencedInput>, Reply<u32, E>),
+    Clipboard(ClipboardTask, Reply<ClipboardResult, E>),
+    Feedback(std::time::Duration, Reply<(), E>),
+    Audio(Reply<assemble_protocol::remote::RemoteAudio, E>),
     Stop,
 }
 pub struct HostLink<E: std::error::Error + 'static> {
@@ -63,6 +73,15 @@ impl<E: std::error::Error + Send + 'static> HostLink<E> {
     }
     pub async fn inputs(&self, events: Vec<SequencedInput>) -> Result<u32, WorkerError<E>> {
         self.call(|reply| Job::Inputs(events, reply)).await
+    }
+    pub async fn clipboard(&self, task: ClipboardTask) -> Result<ClipboardResult, WorkerError<E>> {
+        self.call(|reply| Job::Clipboard(task, reply)).await
+    }
+    pub async fn feedback(&self, elapsed: std::time::Duration) -> Result<(), WorkerError<E>> {
+        self.call(|reply| Job::Feedback(elapsed, reply)).await
+    }
+    pub async fn audio(&self) -> Result<assemble_protocol::remote::RemoteAudio, WorkerError<E>> {
+        self.call(Job::Audio).await
     }
 }
 
@@ -156,10 +175,28 @@ where
                         let _ = reply.send(apply(&mut host, &events, &mut after, cancel));
                     }
                 }
+                Job::Clipboard(task, reply) => {
+                    if !reply.is_closed() {
+                        let _ = reply.send(if task.after_input > after {
+                            Err(WorkerError::Sequence)
+                        } else {
+                            Ok(host.clipboard(&task))
+                        });
+                    }
+                }
+                Job::Feedback(elapsed, reply) => {
+                    host.feedback(elapsed);
+                    let _ = reply.send(Ok(()));
+                }
+                Job::Audio(reply) => {
+                    if !reply.is_closed() {
+                        let _ = reply.send(Ok(host.audio()));
+                    }
+                }
             }
         }
     }));
-    let released = host.release_all().map_err(WorkerError::Backend);
+    let released = host.shutdown().map_err(WorkerError::Backend);
     if result.is_err() {
         return Err(WorkerError::Panicked);
     }
@@ -189,7 +226,13 @@ fn apply<B: Backend>(
         if after.checked_add(1) != Some(event.sequence) {
             return Err(WorkerError::Sequence);
         }
-        host.apply(&event.input).map_err(WorkerError::Backend)?;
+        if event.input.requires_display()
+            && (event.display_id.is_none() || event.display_id != host.display_id())
+        {
+            host.release_all().map_err(WorkerError::Backend)?;
+        } else {
+            host.apply(&event.input).map_err(WorkerError::Backend)?;
+        }
         *after = event.sequence;
     }
     Ok(*after)

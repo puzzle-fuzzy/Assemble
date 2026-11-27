@@ -32,9 +32,22 @@ pub struct Host {
     enigo: Enigo,
     pressed: Pressed,
     sequence: u32,
+    quality: crate::quality::QualityPolicy,
+    video_enabled: bool,
+    video: Option<super::video::Video>,
+    video_stream: u32,
+    audio: Option<super::audio::Capture>,
+    audio_state: assemble_protocol::remote::AudioState,
+    audio_sequence: u32,
+    audio_error: Option<&'static str>,
 }
 impl crate::worker::Backend for Host {
     type Error = NativeError;
+    fn display_id(&self) -> Option<u32> {
+        self.monitors
+            .get(self.selected)
+            .and_then(|monitor| monitor.id().ok())
+    }
     fn frame(&mut self) -> Result<RemoteFrame, NativeError> {
         Self::frame(self)
     }
@@ -43,6 +56,73 @@ impl crate::worker::Backend for Host {
     }
     fn release_all(&mut self) -> Result<(), NativeError> {
         Self::release_all(self)
+    }
+    fn clipboard(
+        &mut self,
+        task: &assemble_protocol::remote::ClipboardTask,
+    ) -> assemble_protocol::remote::ClipboardResult {
+        if self.release_all().is_err() {
+            return assemble_protocol::remote::ClipboardResult {
+                id: task.request.id.clone(),
+                status: assemble_protocol::remote::ClipboardStatus::Unavailable,
+                text: None,
+            };
+        }
+        super::clipboard::exchange(task, || {
+            let modifier = if cfg!(target_os = "macos") {
+                "Meta"
+            } else {
+                "Control"
+            };
+            let mut ok = true;
+            for (key, pressed) in [
+                (modifier, true),
+                ("v", true),
+                ("v", false),
+                (modifier, false),
+            ] {
+                if self
+                    .apply(&RemoteInput::Key {
+                        key: key.into(),
+                        pressed,
+                    })
+                    .is_err()
+                {
+                    ok = false;
+                    break;
+                }
+            }
+            self.release_all().is_ok() && ok
+        })
+    }
+    fn feedback(&mut self, elapsed: std::time::Duration) {
+        self.quality.observe(elapsed);
+    }
+    fn audio(&mut self) -> assemble_protocol::remote::RemoteAudio {
+        use assemble_protocol::remote::{AudioState, RemoteAudio};
+        if let Some(audio) = &mut self.audio {
+            if let Ok(packets) = audio.take(&mut self.audio_sequence) {
+                return RemoteAudio {
+                    state: AudioState::Active,
+                    packets,
+                };
+            }
+            audio.stop();
+            self.audio = None;
+            self.audio_state = AudioState::Unavailable;
+            self.audio_error = Some("AUDIO_CAPTURE_FAILED");
+        }
+        RemoteAudio {
+            state: self.audio_state,
+            packets: Vec::new(),
+        }
+    }
+    fn shutdown(&mut self) -> Result<(), NativeError> {
+        if let Some(mut audio) = self.audio.take() {
+            audio.stop();
+        }
+        self.video = None;
+        self.release_all()
     }
 }
 impl Host {
@@ -62,34 +142,66 @@ impl Host {
             enigo,
             pressed: Pressed::default(),
             sequence: 0,
+            quality: crate::quality::QualityPolicy::default(),
+            video_enabled: false,
+            video: None,
+            video_stream: 0,
+            audio: None,
+            audio_state: assemble_protocol::remote::AudioState::Off,
+            audio_sequence: 0,
+            audio_error: None,
         })
     }
     pub fn frame(&mut self) -> Result<RemoteFrame, NativeError> {
         let monitor = &self.monitors[self.selected];
+        let display_id = monitor.id().map_err(|_| NativeError::Capture)?;
         let source_width = monitor.width().map_err(|_| NativeError::Capture)?;
         let source_height = monitor.height().map_err(|_| NativeError::Capture)?;
+        let cursor = self.enigo.location().ok().and_then(|(x, y)| {
+            Some(assemble_protocol::remote::RemoteCursor {
+                x: crate::normalize_coordinate(monitor.x().ok()?, source_width, x)?,
+                y: crate::normalize_coordinate(monitor.y().ok()?, source_height, y)?,
+            })
+        });
         if u64::from(source_width) * u64::from(source_height) > 64_000_000 {
             return Err(NativeError::Capture);
         }
         let captured = monitor.capture_image().map_err(|_| NativeError::Capture)?;
-        let image = DynamicImage::ImageRgba8(captured).thumbnail(1600, 1000);
+        let (max_width, max_height, quality) = self.quality.profile();
+        let mut image = DynamicImage::ImageRgba8(captured).thumbnail(max_width, max_height);
+        if self.video_enabled {
+            image = image.resize_exact(
+                (image.width() & !1).max(2),
+                (image.height() & !1).max(2),
+                image::imageops::FilterType::Triangle,
+            );
+        }
         let mut width = image.width();
         let mut height = image.height();
         let mut jpeg = Vec::new();
-        JpegEncoder::new_with_quality(&mut jpeg, 65)
-            .encode_image(&image.to_rgb8())
-            .map_err(|_| NativeError::Capture)?;
-        if jpeg.len() > MAX_FRAME_BYTES {
-            jpeg.clear();
-            let small = image.thumbnail(1000, 700);
-            width = small.width();
-            height = small.height();
-            JpegEncoder::new_with_quality(&mut jpeg, 50)
-                .encode_image(&small.to_rgb8())
+        let video = if self.video_enabled {
+            self.encode_video(&image).ok()
+        } else {
+            None
+        };
+        if video.is_none() {
+            self.video_enabled = false;
+            self.video = None;
+            JpegEncoder::new_with_quality(&mut jpeg, quality)
+                .encode_image(&image.to_rgb8())
                 .map_err(|_| NativeError::Capture)?;
-        }
-        if jpeg.len() > MAX_FRAME_BYTES {
-            return Err(NativeError::Capture);
+            if jpeg.len() > MAX_FRAME_BYTES {
+                jpeg.clear();
+                let small = image.thumbnail(1000, 700);
+                width = small.width();
+                height = small.height();
+                JpegEncoder::new_with_quality(&mut jpeg, 50)
+                    .encode_image(&small.to_rgb8())
+                    .map_err(|_| NativeError::Capture)?;
+            }
+            if jpeg.len() > MAX_FRAME_BYTES {
+                return Err(NativeError::Capture);
+            }
         }
         let displays = self
             .monitors
@@ -111,29 +223,93 @@ impl Host {
         self.sequence = self.sequence.checked_add(1).ok_or(NativeError::Capture)?;
         Ok(RemoteFrame {
             sequence: self.sequence,
-            display_id: monitor.id().map_err(|_| NativeError::Capture)?,
+            display_id,
             width,
             height,
             jpeg: STANDARD.encode(jpeg),
             displays,
+            quality: self.quality.effective(),
+            requested_quality: self.quality.requested(),
+            video,
+            cursor,
         })
+    }
+    /// 手动探针只输出有限错误码，不输出设备名称或平台错误中的私有信息。
+    pub fn audio_diagnostic(&self) -> Option<&'static str> {
+        self.audio_error
+    }
+    fn encode_video(
+        &mut self,
+        image: &DynamicImage,
+    ) -> Result<assemble_protocol::remote::RemoteVideo, NativeError> {
+        let quality = self.quality.effective();
+        if self
+            .video
+            .as_ref()
+            .is_none_or(|video| !video.matches(image, quality))
+        {
+            self.video_stream = self
+                .video_stream
+                .checked_add(1)
+                .ok_or(NativeError::Capture)?;
+            self.video = Some(super::video::Video::new(image, quality, self.video_stream)?);
+        }
+        self.video
+            .as_mut()
+            .ok_or(NativeError::Capture)?
+            .encode(image)
     }
     pub fn apply(&mut self, input: &RemoteInput) -> Result<(), NativeError> {
         if !input.valid() {
             return Err(NativeError::Invalid);
         }
+        if let RemoteInput::Quality { quality } = input {
+            self.quality.select(*quality);
+            return Ok(());
+        }
+        if let RemoteInput::Video { enabled } = input {
+            self.video_enabled = *enabled;
+            self.video = None;
+            return Ok(());
+        }
+        if let RemoteInput::Audio { enabled } = input {
+            if let Some(mut audio) = self.audio.take() {
+                audio.stop();
+            }
+            self.audio_state = assemble_protocol::remote::AudioState::Off;
+            self.audio_error = None;
+            if *enabled {
+                match super::audio::Capture::open() {
+                    Ok(audio) => {
+                        self.audio = Some(audio);
+                        self.audio_state = assemble_protocol::remote::AudioState::Active;
+                    }
+                    Err(error) => {
+                        self.audio_error = Some(error);
+                        self.audio_state = assemble_protocol::remote::AudioState::Unavailable;
+                    }
+                }
+            }
+            return Ok(());
+        }
+        if matches!(input, RemoteInput::Keyframe) {
+            if let Some(video) = &mut self.video {
+                video.keyframe();
+            }
+            return Ok(());
+        }
         if let RemoteInput::Display { id } = input {
             self.release_all()?;
-            let monitors = Monitor::all().map_err(|_| NativeError::Capture)?;
-            let index = monitors
-                .iter()
-                .position(|m| m.id().ok() == Some(*id))
-                .ok_or(NativeError::Invalid)?;
-            if monitors.len() > 16 {
-                return Err(NativeError::Capture);
+            // 选择器的名单可能已经过时；目标消失不应破坏仍可采集的当前屏幕。
+            if let Ok(monitors) = Monitor::all()
+                && !monitors.is_empty()
+                && monitors.len() <= 16
+                && let Some(index) = monitors.iter().position(|m| m.id().ok() == Some(*id))
+            {
+                self.monitors = monitors;
+                self.selected = index;
+                self.video = None;
             }
-            self.monitors = monitors;
-            self.selected = index;
             return Ok(());
         }
         if matches!(input, RemoteInput::ReleaseAll) {
@@ -184,7 +360,12 @@ impl Host {
                 self.enigo.scroll(i32::from(*y), Axis::Vertical)
             }
             RemoteInput::Text { text } => self.enigo.text(text),
-            RemoteInput::Display { .. } | RemoteInput::ReleaseAll => {
+            RemoteInput::Display { .. }
+            | RemoteInput::ReleaseAll
+            | RemoteInput::Quality { .. }
+            | RemoteInput::Video { .. }
+            | RemoteInput::Audio { .. }
+            | RemoteInput::Keyframe => {
                 return Err(NativeError::Invalid);
             }
         };

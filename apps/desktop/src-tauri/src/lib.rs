@@ -149,6 +149,8 @@ fn handlers() -> impl Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool + Send + Sync +
         commands::remote_end,
         commands::remote_poll,
         commands::remote_inputs,
+        commands::remote_clipboard,
+        commands::remote_audio,
         commands::remote_fullscreen,
         commands::memo_list,
         commands::memo_get,

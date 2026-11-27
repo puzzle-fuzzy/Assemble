@@ -2,6 +2,8 @@
 #![cfg_attr(test, allow(clippy::pedantic))]
 use assemble_protocol::remote::{RemoteButton, RemoteInput};
 
+pub mod crypto;
+pub mod quality;
 pub mod worker;
 
 #[cfg(feature = "native")]
@@ -10,6 +12,13 @@ pub mod native;
 pub fn coordinate(origin: i32, length: u32, value: u16) -> i32 {
     let offset = u64::from(length.saturating_sub(1)) * u64::from(value) / u64::from(u16::MAX);
     origin.saturating_add(i32::try_from(offset).unwrap_or(i32::MAX))
+}
+pub fn normalize_coordinate(origin: i32, length: u32, point: i32) -> Option<u16> {
+    let offset = i64::from(point) - i64::from(origin);
+    if length == 0 || offset < 0 || offset >= i64::from(length) {
+        return None;
+    }
+    u16::try_from(offset * i64::from(u16::MAX) / i64::from(length.saturating_sub(1).max(1))).ok()
 }
 
 #[derive(Debug, Default)]
@@ -80,6 +89,11 @@ mod tests {
         assert_eq!(coordinate(-1920, 1920, 0), -1920);
         assert_eq!(coordinate(-1920, 1920, u16::MAX), -1);
         assert_eq!(coordinate(0, 1, u16::MAX), 0);
+        assert_eq!(normalize_coordinate(-1920, 1920, -1920), Some(0));
+        assert_eq!(normalize_coordinate(-1920, 1920, -1), Some(u16::MAX));
+        assert_eq!(normalize_coordinate(-1920, 1920, 0), None);
+        assert_eq!(normalize_coordinate(0, 1, 0), Some(0));
+        assert_eq!(normalize_coordinate(0, 0, 0), None);
     }
     #[test]
     fn releases_are_reverse_order_and_idempotent() {

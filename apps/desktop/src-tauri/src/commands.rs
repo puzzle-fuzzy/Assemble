@@ -123,6 +123,106 @@ pub async fn remote_poll(
     Ok(result)
 }
 #[tauri::command]
+pub async fn remote_audio(
+    app: AppHandle,
+    window: tauri::WebviewWindow,
+    id: String,
+    after: u32,
+) -> Result<assemble_protocol::remote::AudioPlayback, CommandError> {
+    let state = app.state::<AppState>();
+    let call = remote_window(&window, &state)?;
+    let audio = call.finish(
+        &state,
+        state
+            .client
+            .remote_audio_poll(&id, after, &crate::remote::options(&call.cancel))
+            .await,
+    )?;
+    #[cfg(any(target_os = "windows", target_os = "macos"))]
+    {
+        state.remote_runtime.decode_audio(&id, audio)
+    }
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    {
+        let _ = audio;
+        Err(CommandError::local(
+            "REMOTE_UNSUPPORTED",
+            "audio requires Windows or macOS",
+        ))
+    }
+}
+#[tauri::command]
+pub async fn remote_clipboard(
+    app: AppHandle,
+    window: tauri::WebviewWindow,
+    id: String,
+    direction: assemble_protocol::remote::ClipboardDirection,
+    paste: bool,
+) -> Result<assemble_protocol::remote::ClipboardStatus, CommandError> {
+    use assemble_protocol::remote::{
+        ClipboardDirection, ClipboardOperation, ClipboardStatus, RemotePhase, valid_clipboard,
+    };
+    use tauri_plugin_clipboard_manager::ClipboardExt;
+    let state = app.state::<AppState>();
+    let call = remote_window(&window, &state)?;
+    let view = call.finish(
+        &state,
+        state
+            .client
+            .remote_sessions(&crate::remote::options(&call.cancel))
+            .await,
+    )?;
+    if !view.sessions.iter().any(|s| {
+        s.id == id
+            && s.phase == RemotePhase::Active
+            && Some(s.controller_id.clone()) == state.device_id()
+    }) {
+        return Err(CommandError::local(
+            "REMOTE_ENDED",
+            "no active controller session",
+        ));
+    }
+    let operation = match direction {
+        ClipboardDirection::ToHost => {
+            let Ok(text) = app.clipboard().read_text() else {
+                return Ok(ClipboardStatus::Unavailable);
+            };
+            if !valid_clipboard(&text) {
+                return Ok(ClipboardStatus::TooLarge);
+            }
+            ClipboardOperation::Write { text, paste }
+        }
+        ClipboardDirection::FromHost => {
+            if paste {
+                return Err(CommandError::local(
+                    "INVALID_INPUT",
+                    "paste direction is invalid",
+                ));
+            }
+            ClipboardOperation::Read
+        }
+    };
+    let result = call.finish(
+        &state,
+        state
+            .client
+            .remote_clipboard_exchange(&id, operation, &crate::remote::options(&call.cancel))
+            .await,
+    )?;
+    if result.status == ClipboardStatus::Completed && direction == ClipboardDirection::FromHost {
+        let Some(text) = result.text else {
+            return Err(CommandError::local(
+                "INVALID_STATE",
+                "missing clipboard result",
+            ));
+        };
+        if app.clipboard().write_text(text).is_err() {
+            return Ok(ClipboardStatus::Unavailable);
+        }
+    }
+    Ok(result.status)
+}
+#[tauri::command]
 pub async fn remote_inputs(
     app: AppHandle,
     window: tauri::WebviewWindow,

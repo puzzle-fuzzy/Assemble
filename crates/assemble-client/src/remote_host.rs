@@ -31,11 +31,15 @@ fn options(cancel: &CancellationToken) -> RequestOptions<'_> {
     }
 }
 fn same_picture(a: &RemoteFrame, b: &RemoteFrame) -> bool {
-    a.display_id == b.display_id
+    a.video.is_none()
+        && b.video.is_none()
+        && a.display_id == b.display_id
         && a.width == b.width
         && a.height == b.height
         && a.jpeg == b.jpeg
         && a.displays == b.displays
+        && a.quality == b.quality
+        && a.requested_quality == b.requested_quality
 }
 impl Client {
     /// 此方法只在本机显式批准和 `remote_accept` 成功之后调用；返回前等待原生输入释放。
@@ -51,6 +55,7 @@ impl Client {
         let mut stats = HostStats::default();
         let result = {
             let input = self.host_inputs(id, link.clone(), &stop, ready, &mut stats.inputs_applied);
+            let audio = self.host_audio(id, link.clone(), &stop);
             let frames = self.host_frames(
                 id,
                 link,
@@ -59,12 +64,19 @@ impl Client {
                 &mut stats.frames_sent,
                 &mut stats.frames_unchanged,
             );
-            tokio::pin!(input, frames);
+            tokio::pin!(input, frames, audio);
             tokio::select! {biased;
                 ()=stop.cancelled()=>Ok(()),
                 result=&mut input=>result,
                 result=&mut frames=>result,
+                result=&mut audio=>result,
             }
+        };
+        let result = match result {
+            Err(HostError::Transport(error)) if error.remote_code() == Some("REMOTE_ENDED") => {
+                Ok(())
+            }
+            other => other,
         };
         stop.cancel();
         let release = worker.shutdown().await.map_err(HostError::Input);
@@ -95,6 +107,7 @@ impl Client {
         after: &mut u32,
     ) -> Result<(), HostError<E>> {
         let mut ready = Some(ready);
+        let mut clipboard_result: Option<assemble_protocol::remote::ClipboardResult> = None;
         loop {
             let poll = self.remote_poll(id, *after, 0, &options(stop)).await?;
             if poll.session.phase != RemotePhase::Active {
@@ -105,6 +118,18 @@ impl Client {
             }
             if !poll.inputs.is_empty() {
                 *after = link.inputs(poll.inputs).await.map_err(HostError::Input)?;
+            }
+            if let Some(task) = poll.clipboard {
+                if clipboard_result
+                    .as_ref()
+                    .is_none_or(|result| result.id != task.request.id)
+                {
+                    clipboard_result = Some(link.clipboard(task).await.map_err(HostError::Input)?);
+                }
+                if let Some(result) = &clipboard_result {
+                    self.remote_clipboard_result(id, result, &options(stop))
+                        .await?;
+                }
             }
             tokio::select! {biased;()=stop.cancelled()=>return Ok(()),()=tokio::time::sleep(Duration::from_millis(50))=>{}}
         }
@@ -123,7 +148,16 @@ impl Client {
         }
         let mut previous: Option<RemoteFrame> = None;
         loop {
+            let started = std::time::Instant::now();
             let frame = link.frame().await.map_err(HostError::Capture)?;
+            self.remote_security.cursor(
+                id,
+                assemble_protocol::remote::CursorUpdate {
+                    display_id: frame.display_id,
+                    position: frame.cursor,
+                },
+            )?;
+            let video = frame.video.is_some();
             if previous
                 .as_ref()
                 .is_some_and(|old| same_picture(old, &frame))
@@ -134,7 +168,31 @@ impl Client {
                 *sent += 1;
                 previous = Some(frame);
             }
-            tokio::select! {biased;()=stop.cancelled()=>return Ok(()),()=tokio::time::sleep(Duration::from_millis(100))=>{}}
+            link.feedback(started.elapsed())
+                .await
+                .map_err(HostError::Capture)?;
+            let delay = if video {
+                Duration::from_millis(33).saturating_sub(started.elapsed())
+            } else {
+                Duration::from_millis(100)
+            };
+            tokio::select! {biased;()=stop.cancelled()=>return Ok(()),()=tokio::time::sleep(delay)=>{}}
+        }
+    }
+    async fn host_audio<E: std::error::Error + Send + 'static>(
+        &self,
+        id: &str,
+        link: HostLink<E>,
+        stop: &CancellationToken,
+    ) -> Result<(), HostError<E>> {
+        let mut previous = assemble_protocol::remote::AudioState::Off;
+        loop {
+            let audio = link.audio().await.map_err(HostError::Input)?;
+            if audio.state != previous || !audio.packets.is_empty() {
+                self.remote_audio_upload(id, &audio, &options(stop)).await?;
+                previous = audio.state;
+            }
+            tokio::select! {biased;()=stop.cancelled()=>return Ok(()),()=tokio::time::sleep(Duration::from_millis(20))=>{}}
         }
     }
 }

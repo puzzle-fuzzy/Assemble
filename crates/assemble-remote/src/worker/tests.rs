@@ -22,6 +22,9 @@ struct Fake {
 }
 impl Backend for Fake {
     type Error = Failed;
+    fn display_id(&self) -> Option<u32> {
+        Some(1)
+    }
     fn frame(&mut self) -> Result<RemoteFrame, Failed> {
         self.observed.entered.notify_one();
         if let Some(gate) = self.gate.take() {
@@ -29,6 +32,10 @@ impl Backend for Fake {
         }
         assert!(!self.panic_frame, "test frame panic");
         Ok(RemoteFrame {
+            cursor: None,
+            video: None,
+            quality: assemble_protocol::remote::RemoteQuality::Balanced,
+            requested_quality: assemble_protocol::remote::RemoteQuality::Auto,
             sequence: 1,
             display_id: 1,
             width: 1,
@@ -50,6 +57,20 @@ impl Backend for Fake {
         self.observed.released.fetch_add(1, Ordering::SeqCst);
         Ok(())
     }
+    fn clipboard(&mut self, task: &ClipboardTask) -> ClipboardResult {
+        ClipboardResult {
+            id: task.request.id.clone(),
+            status: assemble_protocol::remote::ClipboardStatus::Unavailable,
+            text: None,
+        }
+    }
+    fn feedback(&mut self, _elapsed: std::time::Duration) {}
+    fn audio(&mut self) -> assemble_protocol::remote::RemoteAudio {
+        assemble_protocol::remote::RemoteAudio::default()
+    }
+    fn shutdown(&mut self) -> Result<(), Failed> {
+        self.release_all()
+    }
 }
 fn factory(
     observed: Arc<Observed>,
@@ -67,9 +88,46 @@ fn factory(
 }
 fn event(sequence: u32) -> SequencedInput {
     SequencedInput {
+        display_id: None,
         sequence,
         input: RemoteInput::ReleaseAll,
     }
+}
+#[tokio::test]
+async fn old_display_inputs_are_released_and_discarded_instead_of_hitting_the_new_screen() {
+    let observed = Arc::new(Observed::default());
+    let worker = HostWorker::start(
+        factory(observed.clone(), None, false),
+        CancellationToken::new(),
+    )
+    .await
+    .unwrap();
+    let link = worker.link();
+    let key = RemoteInput::Key {
+        key: "a".into(),
+        pressed: true,
+    };
+    assert_eq!(
+        link.inputs(vec![SequencedInput {
+            sequence: 1,
+            display_id: Some(2),
+            input: key.clone()
+        }])
+        .await
+        .unwrap(),
+        1
+    );
+    assert!(observed.inputs.lock().unwrap().is_empty());
+    assert_eq!(observed.released.load(Ordering::SeqCst), 1);
+    link.inputs(vec![SequencedInput {
+        sequence: 2,
+        display_id: Some(1),
+        input: key.clone(),
+    }])
+    .await
+    .unwrap();
+    assert_eq!(*observed.inputs.lock().unwrap(), vec![key]);
+    worker.shutdown().await.unwrap();
 }
 
 #[tokio::test]

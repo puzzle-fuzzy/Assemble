@@ -122,6 +122,22 @@ describe("桥接", () => {
     expect(calls.at(-1)?.command).toBe("remote_end");
     await remoteBridge.fullscreen(false);
     expect(calls.at(-1)?.command).toBe("remote_fullscreen");
+    respondWith = { state: "active", packets: [] };
+    await remoteBridge.audio("remote-1", 7);
+    expect(calls.at(-1)).toEqual({
+      command: "remote_audio",
+      args: { id: "remote-1", after: 7 },
+    });
+    respondWith = "completed";
+    await remoteBridge.clipboard("remote-1", "toHost", true);
+    expect(calls.at(-1)).toEqual({
+      command: "remote_clipboard",
+      args: { id: "remote-1", direction: "toHost", paste: true },
+    });
+    respondWith = { text: "must stay in Rust" };
+    await expect(
+      remoteBridge.clipboard("remote-1", "fromHost", false),
+    ).rejects.toMatchObject({ code: "INVALID_STATE" });
   });
   test("备忘录契约与具名桥接：复制只传标识，失败响应与取消不交给页面", async () => {
     expect(isMemo(memoSamples.memo)).toBe(true);

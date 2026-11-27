@@ -271,6 +271,7 @@ pub struct Client {
     origin: Arc<ServerOrigin>,
     http: HttpClient,
     bearer: Arc<Mutex<Option<SecretString>>>,
+    pub(crate) remote_security: crate::remote_secure::Sessions,
 }
 
 impl Client {
@@ -284,6 +285,7 @@ impl Client {
             origin: Arc::new(origin),
             http,
             bearer: Arc::new(Mutex::new(None)),
+            remote_security: crate::remote_secure::Sessions::default(),
         })
     }
 
@@ -293,6 +295,7 @@ impl Client {
 
     /// 换用新的设备令牌；传 `None` 表示已退出。
     pub fn set_bearer(&self, token: Option<SecretString>) {
+        self.remote_security.clear();
         *self.bearer.lock().unwrap_or_else(PoisonError::into_inner) = token;
     }
 

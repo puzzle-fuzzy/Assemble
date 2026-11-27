@@ -21,19 +21,25 @@ export function remotePoint(
   };
 }
 export class RemoteInputQueue {
-  private queue: RemoteInput[] = [];
+  private queue: Omit<SequencedInput, "sequence">[] = [];
   private sequence = 0;
   private sending = false;
   private stopped = false;
+  private waiters = new Set<(sent: boolean) => void>();
   constructor(
     private send: (events: SequencedInput[]) => Promise<void>,
     private failed: () => void,
   ) {}
-  push(input: RemoteInput) {
+  push(input: RemoteInput, displayId?: number) {
     if (this.stopped) return;
-    if (input.type === "move" && this.queue.at(-1)?.type === "move")
-      this.queue[this.queue.length - 1] = input;
-    else this.queue.push(input);
+    const pending = displayId === undefined ? { input } : { input, displayId };
+    if (
+      input.type === "move" &&
+      this.queue.at(-1)?.input.type === "move" &&
+      this.queue.at(-1)?.displayId === displayId
+    )
+      this.queue[this.queue.length - 1] = pending;
+    else this.queue.push(pending);
     if (this.queue.length > 128) {
       this.stop();
       this.failed();
@@ -44,6 +50,23 @@ export class RemoteInputQueue {
   stop() {
     this.stopped = true;
     this.queue = [];
+    this.resolve(false);
+  }
+  release() {
+    this.queue = this.queue.filter(
+      ({ input }) =>
+        !["move", "button", "key", "scroll", "text"].includes(input.type),
+    );
+    this.push({ type: "releaseAll" });
+  }
+  drain(): Promise<boolean> {
+    if (this.stopped) return Promise.resolve(false);
+    if (!this.sending && !this.queue.length) return Promise.resolve(true);
+    return new Promise((resolve) => this.waiters.add(resolve));
+  }
+  private resolve(sent: boolean) {
+    for (const resolve of this.waiters) resolve(sent);
+    this.waiters.clear();
   }
   private async flush() {
     if (this.sending || this.stopped) return;
@@ -52,7 +75,7 @@ export class RemoteInputQueue {
       while (this.queue.length && !this.stopped) {
         const batch = this.queue
           .splice(0, 32)
-          .map((input) => ({ sequence: ++this.sequence, input }));
+          .map((pending) => ({ sequence: ++this.sequence, ...pending }));
         await this.send(batch);
       }
     } catch {
@@ -62,8 +85,22 @@ export class RemoteInputQueue {
       }
     } finally {
       this.sending = false;
+      if (!this.queue.length) this.resolve(!this.stopped);
     }
   }
+}
+export function clipboardShortcut(input: {
+  key: string;
+  code: string;
+  ctrlKey: boolean;
+  metaKey: boolean;
+  altKey: boolean;
+}): boolean {
+  return (
+    !input.altKey &&
+    input.ctrlKey !== input.metaKey &&
+    (input.code === "KeyV" || input.key.toLowerCase() === "v")
+  );
 }
 const named = new Set([
   "Enter",

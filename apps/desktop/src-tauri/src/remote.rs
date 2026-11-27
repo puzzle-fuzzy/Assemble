@@ -16,6 +16,8 @@ struct Worker {
 pub struct Runtime {
     worker: Mutex<Option<Worker>>,
     transition: tokio::sync::Mutex<()>,
+    #[cfg(any(target_os = "windows", target_os = "macos"))]
+    playback: Mutex<Option<(String, assemble_remote::native::Playback)>>,
 }
 impl Runtime {
     pub fn cancel_all(&self) {
@@ -55,6 +57,38 @@ impl Runtime {
             worker.cancel.cancel();
             let _ = worker.task.await;
         }
+        #[cfg(any(target_os = "windows", target_os = "macos"))]
+        {
+            let mut playback = self.playback.lock().unwrap_or_else(PoisonError::into_inner);
+            if playback
+                .as_ref()
+                .is_some_and(|(session, _)| id.is_none_or(|id| id == session))
+            {
+                *playback = None;
+            }
+        }
+    }
+    #[cfg(any(target_os = "windows", target_os = "macos"))]
+    pub fn decode_audio(
+        &self,
+        id: &str,
+        audio: assemble_protocol::remote::RemoteAudio,
+    ) -> Result<assemble_protocol::remote::AudioPlayback, CommandError> {
+        let mut playback = self.playback.lock().unwrap_or_else(PoisonError::into_inner);
+        if playback.as_ref().is_none_or(|(session, _)| session != id) {
+            *playback = Some((
+                id.into(),
+                assemble_remote::native::Playback::open().map_err(|_| {
+                    CommandError::local("REMOTE_AUDIO_FAILED", "audio decoder unavailable")
+                })?,
+            ));
+        }
+        playback
+            .as_mut()
+            .ok_or_else(|| CommandError::local("REMOTE_AUDIO_FAILED", "audio decoder unavailable"))?
+            .1
+            .decode(audio)
+            .map_err(|_| CommandError::local("REMOTE_AUDIO_FAILED", "audio decoding failed"))
     }
 }
 pub fn options(cancel: &CancellationToken) -> RequestOptions<'_> {
@@ -183,10 +217,21 @@ pub fn start(app: &AppHandle) {
             let cancel = state.session_cancel();
             let own = state.device_id();
             if own.is_some() {
-                if let Ok(view) = state.client.remote_sessions(&options(&cancel)).await
+                if let Ok(mut view) = state.client.remote_sessions(&options(&cancel)).await
                     && !cancel.is_cancelled()
                     && state.device_id() == own
                 {
+                    for session in &mut view.sessions {
+                        if session.host_id == own.as_deref().unwrap_or_default()
+                            && session.phase == RemotePhase::Pending
+                        {
+                            let _ = state
+                                .client
+                                .remote_prepare_host(session, &options(&cancel))
+                                .await;
+                            session.verification = state.client.remote_verification(&session.id);
+                        }
+                    }
                     let incoming = view.sessions.iter().any(|s| {
                         s.host_id == own.as_deref().unwrap_or_default()
                             && s.phase == RemotePhase::Pending

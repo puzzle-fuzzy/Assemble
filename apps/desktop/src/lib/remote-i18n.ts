@@ -19,6 +19,7 @@ export function remoteError(error: unknown): string {
       "REMOTE_CAPTURE_FAILED",
       "REMOTE_INPUT_FAILED",
       "REMOTE_BUSY",
+      "REMOTE_CLIPBOARD_BUSY",
       "DEVICE_OFFLINE",
       "REMOTE_ENDED",
       "REMOTE_UNSUPPORTED",

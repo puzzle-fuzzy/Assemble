@@ -1,12 +1,14 @@
 //! 同账户远程桌面中转。内存会话、最新一帧和有界输入；重启即失效。
 use crate::{auth::Identity, error::ApiError, http::Shared};
 use assemble_protocol::primitives::Timestamp;
-use assemble_protocol::remote::{
-    MAX_BATCH, MAX_FRAME_BASE64, MAX_FRAME_BYTES, MAX_INPUTS, PEER_TIMEOUT_MS, REQUEST_TTL_MS,
-    RemoteBatch, RemoteFrame, RemotePhase, RemotePoll, RemoteRequest, RemoteSession, RemoteView,
-    SequencedInput,
+use assemble_protocol::remote::secure::{
+    Handshake, MAX_SEALED_BASE64, SECURE_VERSION, Sealed, WireAudio, WireBatch, WireCreate,
+    WireFrame, WireInput, WirePoll, WirePollRequest,
 };
-use assemble_protocol::remote::{RemoteEnd, RemoteEndReason};
+use assemble_protocol::remote::{
+    MAX_BATCH, MAX_INPUTS, PEER_TIMEOUT_MS, REQUEST_TTL_MS, RemoteEnd, RemoteEndReason,
+    RemotePhase, RemoteSession, RemoteView,
+};
 use axum::extract::{DefaultBodyLimit, Path, Query, State};
 use axum::http::{StatusCode, header};
 use axum::response::{IntoResponse, Response};
@@ -15,6 +17,10 @@ use axum::{Json, Router};
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use std::collections::{HashMap, VecDeque};
 use std::sync::{Mutex, PoisonError};
+
+mod audio;
+mod clipboard;
+mod handshake;
 
 #[derive(Default)]
 pub struct RemoteSessions {
@@ -30,22 +36,41 @@ struct Entry {
     session: RemoteSession,
     controller_seen: i64,
     host_seen: i64,
-    frame: Option<RemoteFrame>,
-    inputs: VecDeque<SequencedInput>,
+    frames: VecDeque<WireFrame>,
+    inputs: VecDeque<WireInput>,
     input_sequence: u32,
     frame_at: i64,
+    clipboard: Option<clipboard::Exchange>,
+    audio: WireAudio,
+    audio_sequence: u32,
+    handshake: Handshake,
+    host_keepalive: Option<Sealed>,
+    controller_keepalive: Option<Sealed>,
 }
 impl Entry {
+    fn frame_bytes(&self) -> usize {
+        self.frames.iter().map(|frame| frame.packet.bytes()).sum()
+    }
     fn end(&mut self, reason: RemoteEndReason) {
         if self.session.phase == RemotePhase::Ended {
             return;
         }
         self.session.phase = RemotePhase::Ended;
         self.session.end_reason = Some(reason);
-        self.frame = None;
+        self.frames.clear();
         self.inputs.clear();
+        self.clipboard = None;
+        self.audio = WireAudio::default();
+        self.host_keepalive = None;
+        self.controller_keepalive = None;
+        self.handshake.offer.clear();
+        self.handshake.response = None;
+        self.handshake.finish = None;
     }
     fn expire(&mut self, now: i64) {
+        if let Some(exchange) = &mut self.clipboard {
+            exchange.expire(now);
+        }
         let expired = match self.session.phase {
             RemotePhase::Pending => now - self.session.created_at.as_millis() > REQUEST_TTL_MS,
             RemotePhase::Active => {
@@ -95,10 +120,30 @@ pub fn routes() -> Router<Shared> {
         .route("/v1/remote/sessions", get(list).post(create))
         .route("/v1/remote/sessions/{id}/accept", post(accept))
         .route("/v1/remote/sessions/{id}/end", post(end))
-        .route("/v1/remote/sessions/{id}/poll", get(poll))
+        .route("/v1/remote/sessions/{id}/poll", post(poll))
+        .route(
+            "/v1/remote/sessions/{id}/handshake",
+            get(handshake::read).post(handshake::write),
+        )
         .route("/v1/remote/sessions/{id}/frame", post(frame))
         .route("/v1/remote/sessions/{id}/inputs", post(inputs))
-        .layer(DefaultBodyLimit::max(MAX_FRAME_BASE64 + 32 * 1024))
+        .route(
+            "/v1/remote/sessions/{id}/audio",
+            get(audio::poll).post(audio::upload),
+        )
+        .route(
+            "/v1/remote/sessions/{id}/clipboard",
+            post(clipboard::request),
+        )
+        .route(
+            "/v1/remote/sessions/{id}/clipboard/result",
+            post(clipboard::result),
+        )
+        .route(
+            "/v1/remote/sessions/{id}/clipboard/{request}",
+            get(clipboard::status),
+        )
+        .layer(DefaultBodyLimit::max(MAX_SEALED_BASE64 * 2))
 }
 fn no_store(value: impl serde::Serialize) -> Response {
     ([(header::CACHE_CONTROL, "no-store")], Json(value)).into_response()
@@ -120,8 +165,15 @@ async fn list(State(state): State<Shared>, identity: Identity) -> Result<Respons
 async fn create(
     State(state): State<Shared>,
     identity: Identity,
-    Json(input): Json<RemoteRequest>,
+    Json(input): Json<WireCreate>,
 ) -> Result<Response, ApiError> {
+    if input.version != SECURE_VERSION
+        || STANDARD
+            .decode(&input.offer)
+            .map_or(true, |bytes| bytes.len() < 32 || bytes.len() > 2048)
+    {
+        return Err(ApiError::invalid("invalid secure remote offer"));
+    }
     let host = crate::devices::find(&state.pool, &identity.account_id, &input.host_id)
         .await?
         .ok_or_else(ApiError::not_found)?;
@@ -145,6 +197,7 @@ async fn create(
         phase: RemotePhase::Pending,
         created_at: now,
         end_reason: None,
+        verification: None,
     };
     {
         let mut entries = state
@@ -152,19 +205,23 @@ async fn create(
             .entries
             .lock()
             .unwrap_or_else(PoisonError::into_inner);
-        // 重试返回原请求，不延长确认时限。任一电脑同时最多参加一个会话，避免控制回路。
-        if let Some(existing) = entries.values().find(|e| {
-            e.account == identity.account_id
-                && e.session.phase != RemotePhase::Ended
-                && e.session.controller_id == identity.device_id
-                && e.session.host_id == input.host_id
+        if let Some(existing) = entries.values_mut().find(|entry| {
+            entry.account == identity.account_id
+                && entry.session.phase != RemotePhase::Ended
+                && entry.session.controller_id == identity.device_id
+                && entry.session.host_id == input.host_id
         }) {
-            return Ok(no_store(existing.session.clone()));
+            if existing.handshake.offer == input.offer {
+                return Ok(no_store(existing.session.clone()));
+            }
+            if existing.session.phase == RemotePhase::Pending {
+                existing.end(RemoteEndReason::Stopped);
+            }
         }
         if entries.len() >= 128
-            || entries.values().any(|e| {
-                e.session.phase != RemotePhase::Ended
-                    && [&e.session.host_id, &e.session.controller_id]
+            || entries.values().any(|entry| {
+                entry.session.phase != RemotePhase::Ended
+                    && [&entry.session.host_id, &entry.session.controller_id]
                         .iter()
                         .any(|id| **id == session.host_id || **id == session.controller_id)
             })
@@ -181,10 +238,21 @@ async fn create(
                 session: session.clone(),
                 controller_seen: now.as_millis(),
                 host_seen: now.as_millis(),
-                frame: None,
+                frames: VecDeque::new(),
                 inputs: VecDeque::new(),
                 input_sequence: 0,
                 frame_at: 0,
+                clipboard: None,
+                audio: WireAudio::default(),
+                audio_sequence: 0,
+                handshake: Handshake {
+                    session: session.clone(),
+                    offer: input.offer,
+                    response: None,
+                    finish: None,
+                },
+                host_keepalive: None,
+                controller_keepalive: None,
             },
         );
     }
@@ -259,6 +327,12 @@ async fn accept(
             return Err(ApiError::conflict("REMOTE_ENDED", "request expired"));
         }
         if e.session.phase == RemotePhase::Pending {
+            if e.handshake.finish.is_none() {
+                return Err(ApiError::conflict(
+                    "REMOTE_SECURITY_PENDING",
+                    "secure handshake is incomplete",
+                ));
+            }
             e.session.phase = RemotePhase::Active;
             let now = Timestamp::now().as_millis();
             e.controller_seen = now;
@@ -338,52 +412,81 @@ async fn end(
     .await;
     Ok(StatusCode::NO_CONTENT)
 }
-#[derive(Default, serde::Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct PollQuery {
-    #[serde(default)]
-    after: u32,
-    #[serde(default)]
-    frame_after: u32,
+fn valid_packet(packet: &Sealed, max: usize) -> bool {
+    packet.valid()
+        && packet.bytes() <= max
+        && packet.chunks.iter().all(|chunk| {
+            STANDARD
+                .decode(chunk)
+                .is_ok_and(|bytes| (16..=61_456).contains(&bytes.len()))
+        })
 }
 async fn poll(
     State(state): State<Shared>,
     identity: Identity,
     Path(id): Path<String>,
-    Query(query): Query<PollQuery>,
+    Json(query): Json<WirePollRequest>,
 ) -> Result<Response, ApiError> {
     authorize(&state, &identity, &id).await?;
+    if !valid_packet(&query.keepalive, 4096) {
+        return Err(ApiError::invalid("invalid secure keepalive"));
+    }
     let mut entries = state
         .remote
         .entries
         .lock()
         .unwrap_or_else(PoisonError::into_inner);
-    let e = entries.get_mut(&id).ok_or_else(ApiError::not_found)?;
-    let host = e.session.host_id == identity.device_id;
+    let entry = entries.get_mut(&id).ok_or_else(ApiError::not_found)?;
+    let host = entry.session.host_id == identity.device_id;
+    let mut result = WirePoll {
+        session: entry.session.clone(),
+        frames: Vec::new(),
+        inputs: Vec::new(),
+        clipboard: None,
+        keepalive: None,
+    };
+    if entry.session.phase == RemotePhase::Ended {
+        return Ok(no_store(result));
+    }
+    if entry.handshake.finish.is_none() {
+        return Err(ApiError::conflict(
+            "REMOTE_SECURITY_PENDING",
+            "secure handshake is incomplete",
+        ));
+    }
     let now = Timestamp::now().as_millis();
     if host {
-        e.host_seen = now;
+        entry.host_seen = now;
+        entry.host_keepalive = Some(query.keepalive);
+        result.keepalive.clone_from(&entry.controller_keepalive);
     } else {
-        e.controller_seen = now;
+        entry.controller_seen = now;
+        entry.controller_keepalive = Some(query.keepalive);
+        result.keepalive.clone_from(&entry.host_keepalive);
     }
-    let mut result = RemotePoll {
-        session: e.session.clone(),
-        frame: None,
-        inputs: Vec::new(),
-    };
-    if e.session.phase == RemotePhase::Active {
+    if entry.session.phase == RemotePhase::Active {
         if host {
-            if query.after > e.input_sequence {
+            if query.after > entry.input_sequence {
                 return Err(ApiError::invalid("invalid input acknowledgement"));
             }
-            e.inputs.retain(|event| event.sequence > query.after);
-            result.inputs = e.inputs.iter().take(MAX_BATCH).cloned().collect();
-        } else {
-            result.frame = e
-                .frame
+            entry.inputs.retain(|event| event.sequence > query.after);
+            result.inputs = entry.inputs.iter().take(MAX_BATCH).cloned().collect();
+            result.clipboard = entry
+                .clipboard
                 .as_ref()
-                .filter(|f| f.sequence > query.frame_after)
-                .cloned();
+                .filter(|exchange| {
+                    exchange.result.packet.is_none()
+                        && !exchange.result.expired
+                        && exchange.task.after_input <= query.after
+                })
+                .map(|exchange| exchange.task.clone());
+        } else {
+            result.frames = entry
+                .frames
+                .iter()
+                .filter(|frame| frame.sequence > query.frame_after)
+                .cloned()
+                .collect();
         }
     }
     Ok(no_store(result))
@@ -392,90 +495,104 @@ async fn frame(
     State(state): State<Shared>,
     identity: Identity,
     Path(id): Path<String>,
-    Json(frame): Json<RemoteFrame>,
+    Json(frame): Json<WireFrame>,
 ) -> Result<StatusCode, ApiError> {
     authorize(&state, &identity, &id).await?;
-    if !frame.valid() {
-        return Err(ApiError::invalid("invalid remote frame"));
-    }
-    let bytes = STANDARD
-        .decode(&frame.jpeg)
-        .map_err(|_| ApiError::invalid("invalid jpeg encoding"))?;
-    if bytes.len() > MAX_FRAME_BYTES {
-        return Err(ApiError::invalid("frame exceeds limit"));
-    }
-    let size =
-        image::ImageReader::with_format(std::io::Cursor::new(&bytes), image::ImageFormat::Jpeg)
-            .into_dimensions()
-            .map_err(|_| ApiError::invalid("invalid jpeg"))?;
-    if size != (frame.width, frame.height) {
-        return Err(ApiError::invalid("frame dimensions disagree"));
+    if frame.sequence == 0 || !valid_packet(&frame.packet, MAX_SEALED_BASE64) {
+        return Err(ApiError::invalid("invalid encrypted frame"));
     }
     let mut entries = state
         .remote
         .entries
         .lock()
         .unwrap_or_else(PoisonError::into_inner);
-    let e = entries.get_mut(&id).ok_or_else(ApiError::not_found)?;
-    e.active()?;
-    if e.session.host_id != identity.device_id {
+    let available = (32usize * 1024 * 1024).saturating_sub(
+        entries
+            .iter()
+            .filter(|(key, _)| **key != id)
+            .map(|(_, entry)| entry.frame_bytes())
+            .sum::<usize>(),
+    );
+    if frame.packet.bytes() > available {
+        return Err(ApiError::new(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "REMOTE_BUSY",
+            "remote frame budget exhausted",
+        ));
+    }
+    let entry = entries.get_mut(&id).ok_or_else(ApiError::not_found)?;
+    entry.active()?;
+    if entry.session.host_id != identity.device_id {
         return Err(ApiError::new(
             StatusCode::FORBIDDEN,
             "FORBIDDEN",
             "only the host may send frames",
         ));
     }
-    if e.frame
-        .as_ref()
+    if entry
+        .frames
+        .back()
         .is_some_and(|last| frame.sequence <= last.sequence)
     {
         return Ok(StatusCode::NO_CONTENT);
     }
     let now = Timestamp::now().as_millis();
-    if now - e.frame_at < 60 {
+    if now - entry.frame_at < 20 {
         return Err(ApiError::new(
             StatusCode::TOO_MANY_REQUESTS,
             "REMOTE_RATE_LIMITED",
             "frame rate exceeded",
         ));
     }
-    e.frame_at = now;
-    e.frame = Some(frame);
+    entry.frame_at = now;
+    entry.frames.push_back(frame);
+    while entry.frames.len() > assemble_protocol::remote::MAX_VIDEO_FRAMES
+        || entry.frame_bytes() > available.min(MAX_SEALED_BASE64 * 4)
+    {
+        entry.frames.pop_front();
+    }
     Ok(StatusCode::NO_CONTENT)
 }
 async fn inputs(
     State(state): State<Shared>,
     identity: Identity,
     Path(id): Path<String>,
-    Json(batch): Json<RemoteBatch>,
+    Json(batch): Json<WireBatch>,
 ) -> Result<StatusCode, ApiError> {
     authorize(&state, &identity, &id).await?;
     if batch.events.is_empty()
         || batch.events.len() > MAX_BATCH
-        || batch.events.iter().any(|event| event.sequence == 0)
+        || batch
+            .events
+            .iter()
+            .any(|event| event.sequence == 0 || !valid_packet(&event.packet, 48 * 1024))
         || batch
             .events
             .windows(2)
             .any(|pair| pair[0].sequence.checked_add(1) != Some(pair[1].sequence))
-        || batch.events.iter().any(|event| !event.input.valid())
     {
-        return Err(ApiError::invalid("invalid remote inputs"));
+        return Err(ApiError::invalid("invalid encrypted inputs"));
     }
     let mut entries = state
         .remote
         .entries
         .lock()
         .unwrap_or_else(PoisonError::into_inner);
-    let e = entries.get_mut(&id).ok_or_else(ApiError::not_found)?;
-    e.active()?;
-    if e.session.controller_id != identity.device_id {
+    let buffered: usize = entries
+        .values()
+        .flat_map(|entry| &entry.inputs)
+        .map(|event| event.packet.bytes())
+        .sum();
+    let entry = entries.get_mut(&id).ok_or_else(ApiError::not_found)?;
+    entry.active()?;
+    if entry.session.controller_id != identity.device_id {
         return Err(ApiError::new(
             StatusCode::FORBIDDEN,
             "FORBIDDEN",
             "only the controller may send inputs",
         ));
     }
-    let mut next = e.input_sequence;
+    let mut next = entry.input_sequence;
     for event in &batch.events {
         if event.sequence > next {
             if next.checked_add(1) != Some(event.sequence) {
@@ -487,16 +604,22 @@ async fn inputs(
     let count = batch
         .events
         .iter()
-        .filter(|event| event.sequence > e.input_sequence)
+        .filter(|event| event.sequence > entry.input_sequence)
         .count();
-    if e.inputs.len() + count > MAX_INPUTS {
-        e.end(RemoteEndReason::InputFailed);
+    let incoming: usize = batch
+        .events
+        .iter()
+        .filter(|event| event.sequence > entry.input_sequence)
+        .map(|event| event.packet.bytes())
+        .sum();
+    if entry.inputs.len() + count > MAX_INPUTS || buffered + incoming > 16 * 1024 * 1024 {
+        entry.end(RemoteEndReason::InputFailed);
         return Err(ApiError::conflict("REMOTE_ENDED", "input queue overflow"));
     }
     for event in batch.events {
-        if event.sequence > e.input_sequence {
-            e.input_sequence = event.sequence;
-            e.inputs.push_back(event);
+        if event.sequence > entry.input_sequence {
+            entry.input_sequence = event.sequence;
+            entry.inputs.push_back(event);
         }
     }
     Ok(StatusCode::NO_CONTENT)
@@ -506,27 +629,43 @@ async fn inputs(
 mod tests {
     use super::*;
     fn entry(now: i64) -> Entry {
+        let session = RemoteSession {
+            id: "session".into(),
+            controller_id: "controller".into(),
+            controller_name: "Windows".into(),
+            host_id: "host".into(),
+            host_name: "Mac".into(),
+            phase: RemotePhase::Pending,
+            created_at: Timestamp::from_millis(now).unwrap(),
+            end_reason: None,
+            verification: None,
+        };
         Entry {
             account: "account".into(),
-            session: RemoteSession {
-                id: "session".into(),
-                controller_id: "controller".into(),
-                controller_name: "Windows".into(),
-                host_id: "host".into(),
-                host_name: "Mac".into(),
-                phase: RemotePhase::Pending,
-                created_at: Timestamp::from_millis(now).unwrap(),
-                end_reason: None,
-            },
+            session: session.clone(),
             controller_seen: now,
             host_seen: now,
-            frame: None,
-            inputs: VecDeque::from([SequencedInput {
+            frames: VecDeque::new(),
+            inputs: VecDeque::from([WireInput {
                 sequence: 1,
-                input: assemble_protocol::remote::RemoteInput::ReleaseAll,
+                packet: Sealed {
+                    nonce: 0,
+                    chunks: vec!["AA==".into()],
+                },
             }]),
             input_sequence: 1,
             frame_at: 0,
+            clipboard: None,
+            audio: WireAudio::default(),
+            audio_sequence: 0,
+            handshake: Handshake {
+                session,
+                offer: String::new(),
+                response: None,
+                finish: None,
+            },
+            host_keepalive: None,
+            controller_keepalive: None,
         }
     }
     #[test]

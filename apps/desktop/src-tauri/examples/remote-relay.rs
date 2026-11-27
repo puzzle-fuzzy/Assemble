@@ -33,6 +33,9 @@ mod probe {
     }
     impl Backend for Tracked {
         type Error = NativeError;
+        fn display_id(&self) -> Option<u32> {
+            self.native.display_id()
+        }
         fn frame(&mut self) -> std::result::Result<RemoteFrame, NativeError> {
             let frame = self.native.frame()?;
             let mut hashes = self.hashes.lock().map_err(|_| NativeError::Capture)?;
@@ -48,8 +51,24 @@ mod probe {
         fn release_all(&mut self) -> std::result::Result<(), NativeError> {
             self.native.release_all()
         }
+        fn clipboard(
+            &mut self,
+            task: &assemble_protocol::remote::ClipboardTask,
+        ) -> assemble_protocol::remote::ClipboardResult {
+            self.native.clipboard(task)
+        }
+        fn feedback(&mut self, elapsed: Duration) {
+            self.native.feedback(elapsed);
+        }
+        fn audio(&mut self) -> assemble_protocol::remote::RemoteAudio {
+            self.native.audio()
+        }
+        fn shutdown(&mut self) -> std::result::Result<(), NativeError> {
+            self.native.shutdown()
+        }
     }
     pub async fn run(fixture: &common::Fixture) -> Result<()> {
+        let video = std::env::args().any(|argument| argument == "--video");
         let platform = assemble_protocol::primitives::Platform::current();
         let controller = common::register(fixture, 'a', "local probe controller", platform).await;
         let host = common::register(fixture, 'b', "local probe host", platform).await;
@@ -64,6 +83,7 @@ mod probe {
             )
             .await?;
         let hashes = Hashes::default();
+        common::prepare_remote(&controller, &host, &session).await;
         let captured = hashes.clone();
         let worker = HostWorker::start(
             move || {
@@ -79,26 +99,55 @@ mod probe {
             let _ = worker.shutdown().await;
             return Err(error.into());
         }
+        if video
+            && let Err(error) = controller
+                .remote_inputs(
+                    &session.id,
+                    &RemoteBatch {
+                        events: vec![SequencedInput {
+                            sequence: 1,
+                            display_id: None,
+                            input: RemoteInput::Video { enabled: true },
+                        }],
+                    },
+                    &controller.options(),
+                )
+                .await
+        {
+            let _ = worker.shutdown().await;
+            return Err(error.into());
+        }
         let cancel = CancellationToken::new();
         let until = cancel.clone();
         let client = host.client.clone();
         let id = session.id.clone();
         let driver = tokio::spawn(async move { client.run_remote_host(&id, worker, &until).await });
-        let result = exchange(&controller, &host, &session.id, &hashes).await;
+        let result = exchange(
+            &controller,
+            &host,
+            &session.id,
+            &hashes,
+            if video { 2 } else { 1 },
+        )
+        .await;
         cancel.cancel();
         let stats = driver.await??;
         let frame = result?;
-        if stats.inputs_applied != 1 || stats.frames_sent == 0 {
+        if stats.inputs_applied != if video { 2 } else { 1 } || stats.frames_sent == 0 {
             return Err("native relay work was not acknowledged".into());
         }
         println!(
-            "native_relay_ok width={} height={} displays={} encoded_bytes={} sent={} unchanged={} release_all_ok ended_ok",
+            "native_relay_ok width={} height={} displays={} encoded_bytes={} sent={} unchanged={} h264={} encrypted=true release_all_ok ended_ok",
             frame.width,
             frame.height,
             frame.displays.len(),
-            frame.jpeg.len(),
+            frame
+                .video
+                .as_ref()
+                .map_or(frame.jpeg.len(), |video| video.data.len()),
             stats.frames_sent,
-            stats.frames_unchanged
+            stats.frames_unchanged,
+            frame.video.is_some()
         );
         drop(stream);
         Ok(())
@@ -108,13 +157,19 @@ mod probe {
         host: &common::Registered,
         id: &str,
         hashes: &Hashes,
+        release_sequence: u32,
     ) -> Result<RemoteFrame> {
         let frame = tokio::time::timeout(Duration::from_secs(5), async {
             loop {
                 let received = controller
                     .remote_poll(id, 0, 0, &controller.options())
                     .await?;
-                if let Some(frame) = received.frame {
+                if let Some(frame) = received.frame.or_else(|| {
+                    received
+                        .frames
+                        .into_iter()
+                        .find(|frame| frame.video.as_ref().is_some_and(|video| video.keyframe))
+                }) {
                     return std::result::Result::<_, assemble_client::ClientError>::Ok(frame);
                 }
                 tokio::time::sleep(Duration::from_millis(25)).await;
@@ -134,7 +189,8 @@ mod probe {
                 id,
                 &RemoteBatch {
                     events: vec![SequencedInput {
-                        sequence: 1,
+                        display_id: None,
+                        sequence: release_sequence,
                         input: RemoteInput::ReleaseAll,
                     }],
                 },

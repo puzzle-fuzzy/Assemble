@@ -1,13 +1,10 @@
 use super::*;
+use crate::remote_secure::Sessions;
+use assemble_protocol::remote::secure::{Channel, WireFrame, WirePoll, WirePollRequest};
 use assemble_protocol::{primitives::Timestamp, remote::*};
 use assemble_remote::worker::Backend;
 use assemble_store::secret::SecretString;
-use axum::{
-    Json, Router,
-    extract::{Query, State},
-    http::StatusCode,
-    routing::{get, post},
-};
+use axum::{Json, Router, extract::State, http::StatusCode, routing::post};
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 
@@ -16,6 +13,7 @@ use std::sync::{Arc, Mutex};
 struct Failed;
 #[derive(Default)]
 struct Probe {
+    security: Sessions,
     offer_input: AtomicBool,
     block_upload: AtomicBool,
     fail_capture: AtomicBool,
@@ -33,6 +31,9 @@ struct Probe {
 struct Fake(Arc<Probe>);
 impl Backend for Fake {
     type Error = Failed;
+    fn display_id(&self) -> Option<u32> {
+        Some(self.0.display.load(Ordering::SeqCst))
+    }
     fn frame(&mut self) -> Result<RemoteFrame, Failed> {
         if self.0.fail_capture.load(Ordering::SeqCst) {
             return Err(Failed);
@@ -40,6 +41,10 @@ impl Backend for Fake {
         let sequence = self.0.captured.fetch_add(1, Ordering::SeqCst) + 1;
         self.0.changed.notify_one();
         Ok(RemoteFrame {
+            cursor: None,
+            video: None,
+            quality: RemoteQuality::Balanced,
+            requested_quality: RemoteQuality::Auto,
             sequence,
             display_id: self.0.display.load(Ordering::SeqCst),
             width: 1,
@@ -67,6 +72,20 @@ impl Backend for Fake {
         self.0.released.fetch_add(1, Ordering::SeqCst);
         Ok(())
     }
+    fn clipboard(&mut self, task: &ClipboardTask) -> ClipboardResult {
+        ClipboardResult {
+            id: task.request.id.clone(),
+            status: ClipboardStatus::Unavailable,
+            text: None,
+        }
+    }
+    fn feedback(&mut self, _elapsed: Duration) {}
+    fn audio(&mut self) -> RemoteAudio {
+        RemoteAudio::default()
+    }
+    fn shutdown(&mut self) -> Result<(), Failed> {
+        self.release_all()
+    }
 }
 fn session(pending: bool) -> RemoteSession {
     RemoteSession {
@@ -82,29 +101,44 @@ fn session(pending: bool) -> RemoteSession {
         },
         created_at: Timestamp::now(),
         end_reason: None,
+        verification: None,
     }
 }
-#[derive(serde::Deserialize)]
-struct Ack {
-    #[serde(default)]
-    after: u32,
-}
-async fn poll(State(probe): State<Arc<Probe>>, Query(query): Query<Ack>) -> Json<RemotePoll> {
+async fn poll(
+    State(probe): State<Arc<Probe>>,
+    Json(query): Json<WirePollRequest>,
+) -> Json<WirePoll> {
+    probe.security.test_observe("session", &query.keepalive);
     let inputs = if probe.offer_input.load(Ordering::SeqCst) && query.after == 0 {
-        vec![SequencedInput {
-            sequence: 1,
-            input: RemoteInput::Display { id: 2 },
-        }]
+        vec![
+            probe
+                .security
+                .input(
+                    "session",
+                    &SequencedInput {
+                        display_id: None,
+                        sequence: 1,
+                        input: RemoteInput::Display { id: 2 },
+                    },
+                )
+                .unwrap(),
+        ]
     } else {
         Vec::new()
     };
-    Json(RemotePoll {
+    Json(WirePoll {
         session: session(probe.pending.load(Ordering::SeqCst)),
-        frame: None,
         inputs,
+        clipboard: None,
+        frames: Vec::new(),
+        keepalive: Some(probe.security.test_heartbeat("session")),
     })
 }
-async fn upload(State(probe): State<Arc<Probe>>) -> StatusCode {
+async fn upload(State(probe): State<Arc<Probe>>, Json(frame): Json<WireFrame>) -> StatusCode {
+    let _: RemoteFrame = probe
+        .security
+        .open("session", &frame.packet, Channel::Frame, frame.sequence)
+        .unwrap();
     probe.uploaded.fetch_add(1, Ordering::SeqCst);
     probe.upload_entered.notify_one();
     probe.changed.notify_one();
@@ -125,10 +159,14 @@ struct Server {
 }
 impl Server {
     async fn start() -> Self {
-        let probe = Arc::new(Probe::default());
+        let (host, controller) = Sessions::test_pair(&session(false));
+        let probe = Arc::new(Probe {
+            security: controller,
+            ..Probe::default()
+        });
         probe.display.store(1, Ordering::SeqCst);
         let router = Router::new()
-            .route("/v1/remote/sessions/session/poll", get(poll))
+            .route("/v1/remote/sessions/session/poll", post(poll))
             .route("/v1/remote/sessions/session/frame", post(upload))
             .route("/v1/remote/sessions/session/end", post(end))
             .with_state(probe.clone());
@@ -144,8 +182,9 @@ impl Server {
                 .await
                 .unwrap();
         });
-        let client = Client::new(origin).unwrap();
+        let mut client = Client::new(origin).unwrap();
         client.set_bearer(Some(SecretString::new("synthetic-test-session")));
+        client.remote_security = host;
         Self {
             client,
             probe,

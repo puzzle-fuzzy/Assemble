@@ -18,7 +18,13 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 
 import { isSnapshot, isUpdateView } from "@/lib/guard";
 import { isMemo, isMemoList, type MemoBridge } from "@/lib/memos";
-import { isRemotePoll, isRemoteSession, type RemoteBridge } from "@/lib/remote";
+import {
+  isAudioPlayback,
+  isClipboardStatus,
+  isRemotePoll,
+  isRemoteSession,
+  type RemoteBridge,
+} from "@/lib/remote";
 import type {
   LaunchState,
   ReminderContent,
@@ -368,6 +374,14 @@ export const memoBridge: MemoBridge = {
 };
 
 export const remoteBridge: RemoteBridge = {
+  audio: (id, after) =>
+    mediaInvoke("remote_audio", { id, after }, isAudioPlayback),
+  clipboard: (id, direction, paste) =>
+    mediaInvoke(
+      "remote_clipboard",
+      { id, direction, paste },
+      isClipboardStatus,
+    ),
   request: (hostId) =>
     mediaInvoke("remote_request", { hostId }, isRemoteSession),
   approve: (id) => mediaInvoke("remote_approve", { id }, isRemoteSession),

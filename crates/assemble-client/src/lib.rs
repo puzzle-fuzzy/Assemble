@@ -22,6 +22,7 @@ pub mod login;
 pub mod media;
 pub mod remote;
 pub mod remote_host;
+mod remote_secure;
 
 pub use assemble_protocol::origin::{OriginError, ServerOrigin};
 pub use client::{

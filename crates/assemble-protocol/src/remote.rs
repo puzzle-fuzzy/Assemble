@@ -2,12 +2,32 @@
 use crate::primitives::Timestamp;
 use serde::{Deserialize, Serialize};
 
+mod clipboard;
+pub use clipboard::*;
+mod audio;
+pub use audio::*;
+pub mod secure;
+
 pub const MAX_FRAME_BYTES: usize = 512 * 1024;
 pub const MAX_FRAME_BASE64: usize = MAX_FRAME_BYTES.div_ceil(3) * 4;
 pub const MAX_INPUTS: usize = 128;
 pub const MAX_BATCH: usize = 32;
 pub const REQUEST_TTL_MS: i64 = 60_000;
 pub const PEER_TIMEOUT_MS: i64 = 5_000;
+pub const MAX_VIDEO_FRAMES: usize = 8;
+
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum RemoteQuality {
+    #[default]
+    Auto,
+    Smooth,
+    Balanced,
+    Sharp,
+}
+pub fn balanced_quality() -> RemoteQuality {
+    RemoteQuality::Balanced
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -47,6 +67,8 @@ pub struct RemoteSession {
     pub created_at: Timestamp,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub end_reason: Option<RemoteEndReason>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub verification: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -79,16 +101,59 @@ pub struct RemoteFrame {
     pub height: u32,
     pub jpeg: String,
     pub displays: Vec<RemoteDisplay>,
+    #[serde(default = "balanced_quality")]
+    pub quality: RemoteQuality,
+    #[serde(default)]
+    pub requested_quality: RemoteQuality,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub video: Option<RemoteVideo>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cursor: Option<RemoteCursor>,
+}
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct RemoteCursor {
+    pub x: u16,
+    pub y: u16,
+}
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CursorUpdate {
+    pub display_id: u32,
+    pub position: Option<RemoteCursor>,
+}
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct RemoteVideo {
+    pub stream: u32,
+    pub codec: String,
+    pub keyframe: bool,
+    pub timestamp: u64,
+    pub data: String,
+}
+impl RemoteVideo {
+    pub fn valid(&self) -> bool {
+        self.stream > 0
+            && self.codec.len() == 11
+            && self.codec.starts_with("avc1.")
+            && self.codec.as_bytes()[5..].iter().all(u8::is_ascii_hexdigit)
+            && self.timestamp <= 9_007_199_254_740_991
+            && !self.data.is_empty()
+            && self.data.len() <= MAX_FRAME_BASE64
+    }
 }
 impl RemoteFrame {
     pub fn valid(&self) -> bool {
         self.sequence > 0
+            && self.quality != RemoteQuality::Auto
             && self.width > 0
             && self.height > 0
             && self.width <= 1920
             && self.height <= 1920
-            && !self.jpeg.is_empty()
-            && self.jpeg.len() <= MAX_FRAME_BASE64
+            && self.video.as_ref().map_or_else(
+                || !self.jpeg.is_empty() && self.jpeg.len() <= MAX_FRAME_BASE64,
+                |video| self.jpeg.is_empty() && video.valid(),
+            )
             && !self.displays.is_empty()
             && self.displays.len() <= 16
             && self.displays.iter().any(|d| d.id == self.display_id)
@@ -125,6 +190,10 @@ pub enum RemoteInput {
     Text { text: String },
     Display { id: u32 },
     ReleaseAll,
+    Quality { quality: RemoteQuality },
+    Video { enabled: bool },
+    Keyframe,
+    Audio { enabled: bool },
 }
 pub fn valid_key(key: &str) -> bool {
     (key.chars().count() == 1 && key.chars().all(|c| !c.is_control()))
@@ -163,6 +232,16 @@ pub fn valid_key(key: &str) -> bool {
         )
 }
 impl RemoteInput {
+    pub fn requires_display(&self) -> bool {
+        matches!(
+            self,
+            Self::Move { .. }
+                | Self::Button { .. }
+                | Self::Key { .. }
+                | Self::Scroll { .. }
+                | Self::Text { .. }
+        )
+    }
     pub fn valid(&self) -> bool {
         match self {
             Self::Key { key, .. } => valid_key(key),
@@ -176,6 +255,8 @@ impl RemoteInput {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct SequencedInput {
     pub sequence: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub display_id: Option<u32>,
     pub input: RemoteInput,
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -189,4 +270,10 @@ pub struct RemotePoll {
     pub session: RemoteSession,
     pub frame: Option<RemoteFrame>,
     pub inputs: Vec<SequencedInput>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub clipboard: Option<ClipboardTask>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub frames: Vec<RemoteFrame>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cursor: Option<CursorUpdate>,
 }

@@ -1,2 +1,60 @@
 @import "@assemble/ui/styles.css";
 @source "../../../../packages/media/src";
+
+/* 原生全屏时只显示远端工作区；隐藏的导航退出全屏后自动恢复。 */
+body:has([data-remote-fullscreen]) [data-slot="sidebar"],
+body:has([data-remote-fullscreen]) main > header,
+body:has([data-remote-fullscreen])
+  main
+  [class~="@container"]
+  > :not(#view-remote) {
+  display: none;
+}
+body:has([data-remote-fullscreen]) main [class~="@container"] {
+  padding: 0;
+  gap: 0;
+}
+[data-remote-fullscreen] {
+  position: relative;
+  height: 100dvh;
+  gap: 0;
+  overflow: hidden;
+}
+[data-remote-fullscreen] [data-remote-viewport] {
+  flex: 1;
+  min-height: 0;
+  height: 100%;
+  max-height: none;
+  border-radius: 0;
+}
+[data-remote-fullscreen][data-remote-scaling="fit"]
+  [data-remote-viewport]
+  > :is(img, canvas) {
+  max-height: 100%;
+}
+[data-remote-fullscreen] [data-remote-toolbar],
+[data-remote-fullscreen] [data-remote-text] {
+  position: absolute;
+  inset-inline: 0;
+  z-index: 1;
+  padding: 0.75rem;
+  background: var(--background);
+}
+[data-remote-fullscreen] [data-remote-toolbar] {
+  top: 0;
+}
+[data-remote-fullscreen] [data-remote-text] {
+  bottom: 0;
+}
+[data-remote-fullscreen] > p {
+  position: absolute;
+  inset-inline-start: 0.75rem;
+  bottom: 5.5rem;
+  z-index: 1;
+}
+[data-controls-hidden] [data-remote-toolbar],
+[data-controls-hidden] [data-remote-text],
+[data-controls-hidden] > p {
+  opacity: 0;
+  pointer-events: none;
+}
