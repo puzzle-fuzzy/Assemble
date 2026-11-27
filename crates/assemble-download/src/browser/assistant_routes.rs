@@ -19,6 +19,8 @@ pub(super) fn router() -> Router<Arc<BridgeState>> {
         .route("/v1/assistant/downloads/start", post(start))
         .route("/v1/downloads/{id}", get(status))
         .route("/v1/downloads/{id}/cancel", post(cancel))
+        .route("/v1/downloads/{id}/pause", post(pause))
+        .route("/v1/downloads/{id}/resume", post(resume))
 }
 
 async fn preview(
@@ -59,7 +61,10 @@ async fn start(
     }
     // 与扩展不同的命名空间；相同键重试只能返回同一任务，不能吞掉参数变化。
     let key = format!("assistant:{}", request.request_id);
-    let digest = format!("{}:{}", request.preview_id, request.variant_id);
+    let digest = format!(
+        "{}:{}:{:?}",
+        request.preview_id, request.variant_id, request.file_ids
+    );
     let mut accepted = state.accepted.lock().await;
     accepted.retain(|_, (_, at, _)| at.elapsed() < Duration::from_mins(10));
     if let Some((previous, _, task)) = accepted.get(&key) {
@@ -78,7 +83,7 @@ async fn start(
     Json(
         match state
             .manager
-            .start_assistant(&request.preview_id, &request.variant_id)
+            .start_assistant_selected(&request.preview_id, &request.variant_id, &request.file_ids)
             .await
         {
             Ok(id) => {
@@ -113,14 +118,35 @@ async fn cancel(State(state): State<Arc<BridgeState>>, Path(id): Path<String>) -
     if !valid(&id) {
         return Json(Reply::failure(INVALID_REQUEST));
     }
-    Json(
-        match state
-            .manager
-            .assistant_task(&id)
-            .and_then(|_| state.manager.cancel(&id))
-        {
-            Ok(()) => Reply::success(),
-            Err(error) => Reply::failure(error.code()),
-        },
-    )
+    if let Err(error) = state.manager.assistant_task(&id) {
+        return Json(Reply::failure(error.code()));
+    }
+    Json(match state.manager.cancel_selected(&id).await {
+        Ok(()) => Reply::success(),
+        Err(error) => Reply::failure(error.code()),
+    })
+}
+async fn pause(State(state): State<Arc<BridgeState>>, Path(id): Path<String>) -> Json<Reply> {
+    if !valid(&id) {
+        return Json(Reply::failure(INVALID_REQUEST));
+    }
+    if let Err(error) = state.manager.assistant_task(&id) {
+        return Json(Reply::failure(error.code()));
+    }
+    Json(match state.manager.pause(&id).await {
+        Ok(()) => Reply::success(),
+        Err(error) => Reply::failure(error.code()),
+    })
+}
+async fn resume(State(state): State<Arc<BridgeState>>, Path(id): Path<String>) -> Json<Reply> {
+    if !valid(&id) {
+        return Json(Reply::failure(INVALID_REQUEST));
+    }
+    if let Err(error) = state.manager.assistant_task(&id) {
+        return Json(Reply::failure(error.code()));
+    }
+    Json(match state.manager.resume(&id).await {
+        Ok(()) => Reply::success(),
+        Err(error) => Reply::failure(error.code()),
+    })
 }

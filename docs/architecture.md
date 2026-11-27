@@ -31,7 +31,7 @@
   crates/assemble-protocol（类型）   assemble-schedule（日程出现规则，两端共用）
 
   Codex、ZCode ── MCP（标准输入输出）──▶ apps/mcp（assemble-mcp）──▶ crates/assemble-client ──▶ apps/server
-                                          具名工具：日程与提醒、通知标已读、私人备忘录、本机下载预览/开始/状态
+                                          具名工具：日程与提醒、通知标已读、私人备忘录、本机下载预览/开始/状态/暂停/继续/取消
 
   手机 ── apps/ios（SwiftUI + AssembleCore）── HTTP：只拉名单，不开事件流 ──▶ apps/server
 ```

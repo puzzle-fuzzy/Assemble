@@ -47,6 +47,17 @@ fn reply() -> Value {
 async fn fake_preview(headers: HeaderMap, Json(body): Json<Value>) -> Json<Value> {
     authenticated(&headers);
     assert_eq!(body["via"], "assistant");
+    if body["input"]["kind"] == "magnet" {
+        let mut result = reply();
+        result["preview"] = json!({"id":"magnet-preview","kind":"magnet","title":"公共资料","sourceHost":"BitTorrent","durationSeconds":null,"variants":[{"id":"magnet","width":null,"height":null,"bandwidth":null}],"files":[{"id":1,"name":"目录/说明.txt","size":50}]});
+        // 覆盖超过旧 8 KiB 上限的真实文件清单，不截断选择项。
+        result["preview"]["files"] = json!(
+            (0..512)
+                .map(|id| json!({"id":id,"name":format!("目录/说明-{id}.txt"),"size":50}))
+                .collect::<Vec<_>>()
+        );
+        return Json(result);
+    }
     assert_eq!(body["input"]["kind"], "hls");
     assert!(body["input"].get("path").is_none());
     let mut result = reply();
@@ -54,12 +65,24 @@ async fn fake_preview(headers: HeaderMap, Json(body): Json<Value>) -> Json<Value
     Json(result)
 }
 
+async fn fake_control(headers: HeaderMap) -> Json<Value> {
+    authenticated(&headers);
+    Json(reply())
+}
+
 async fn fake_start(headers: HeaderMap, Json(body): Json<Value>) -> Json<Value> {
     authenticated(&headers);
-    assert_eq!(
-        body,
-        json!({"requestId":"once","previewId":"preview-1","variantId":"hd"})
-    );
+    if body["previewId"] == "magnet-preview" {
+        assert_eq!(
+            body,
+            json!({"requestId":"magnet-once","previewId":"magnet-preview","variantId":"magnet","fileIds":[1]})
+        );
+    } else {
+        assert_eq!(
+            body,
+            json!({"requestId":"once","previewId":"preview-1","variantId":"hd"})
+        );
+    }
     let mut result = reply();
     result["taskId"] = json!("task-1");
     Json(result)
@@ -108,6 +131,36 @@ async fn assert_download_cases(
     client: &rmcp::service::RunningService<rmcp::service::RoleClient, ()>,
 ) {
     let cases = [
+        (
+            "assemble_download_preview",
+            json!({"kind":"magnet","url":"magnet:?xt=urn:btih:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}),
+            false,
+            "目录/说明-1.txt",
+        ),
+        (
+            "assemble_download_start",
+            json!({"requestId":"magnet-once","previewId":"magnet-preview","variantId":"magnet","fileIds":[1]}),
+            false,
+            "task-1",
+        ),
+        (
+            "assemble_download_pause",
+            json!({"id":"task-1"}),
+            false,
+            "true",
+        ),
+        (
+            "assemble_download_resume",
+            json!({"id":"task-1"}),
+            false,
+            "true",
+        ),
+        (
+            "assemble_download_cancel",
+            json!({"id":"task-1"}),
+            false,
+            "true",
+        ),
         (
             "assemble_download_preview",
             json!({"kind":"hls","url":"https://example.test/video.m3u8"}),
@@ -162,7 +215,7 @@ async fn assert_download_cases(
 }
 
 #[tokio::test]
-async fn three_mcp_tools_use_the_authenticated_bridge_and_never_return_secrets() {
+async fn download_tools_use_the_authenticated_bridge_and_never_return_secrets() {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let store = Arc::new(MemorySecretStore::new());
     store
@@ -179,6 +232,9 @@ async fn three_mcp_tools_use_the_authenticated_bridge_and_never_return_secrets()
         .route("/v1/assistant/downloads/preview", post(fake_preview))
         .route("/v1/assistant/downloads/start", post(fake_start))
         .route("/v1/downloads/task-1", get(fake_status))
+        .route("/v1/downloads/task-1/pause", post(fake_control))
+        .route("/v1/downloads/task-1/resume", post(fake_control))
+        .route("/v1/downloads/task-1/cancel", post(fake_control))
         .route("/v1/downloads/task-complete", get(fake_completed))
         .route(
             "/v1/downloads/off",

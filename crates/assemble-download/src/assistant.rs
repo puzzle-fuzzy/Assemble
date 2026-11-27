@@ -84,3 +84,23 @@ pub async fn cancel(store: &dyn SecretStore, app_id: &str, id: &str) -> Reply {
     )
     .await
 }
+
+pub async fn pause(store: &dyn SecretStore, app_id: &str, id: &str) -> Reply {
+    control(store, app_id, id, "pause").await
+}
+pub async fn resume(store: &dyn SecretStore, app_id: &str, id: &str) -> Reply {
+    control(store, app_id, id, "resume").await
+}
+async fn control(store: &dyn SecretStore, app_id: &str, id: &str, action: &str) -> Reply {
+    if !is_valid_id(id) || id.len() > 64 {
+        return Reply::failure(crate::browser::INVALID_REQUEST);
+    }
+    exchange(
+        store,
+        app_id,
+        reqwest::Method::POST,
+        &format!("/v1/downloads/{id}/{action}"),
+        None,
+    )
+    .await
+}

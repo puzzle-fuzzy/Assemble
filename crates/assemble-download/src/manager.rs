@@ -72,11 +72,13 @@ struct State {
 }
 
 pub struct DownloadManager {
-    state: Mutex<State>,
+    state: Arc<Mutex<State>>,
     history_path: PathBuf,
     pub(crate) network: Network,
     tools: MediaTools,
-    slots: Semaphore,
+    slots: Arc<Semaphore>,
+    magnet: Arc<crate::magnet::MagnetManager>,
+    starting: tokio::sync::Mutex<()>,
     lifetime: CancellationToken,
     changed: Arc<dyn Fn(DownloadsView) + Send + Sync>,
 }
@@ -105,24 +107,46 @@ impl DownloadManager {
             record.view.bytes_per_second = 0;
         }
         write_private_json(&history_path, &history).map_err(|_| DownloadError::Storage)?;
-        Ok(Arc::new(Self {
-            state: Mutex::new(State {
-                assistant_allowed: true,
-                browser_task_id: None,
-                history,
-                prepared: HashMap::new(),
-                jobs: HashMap::new(),
-                cancels: HashMap::new(),
-                handles: Vec::new(),
-                emitted: Instant::now(),
+        let slots = Arc::new(Semaphore::new(2));
+        let state = Arc::new(Mutex::new(State {
+            assistant_allowed: true,
+            browser_task_id: None,
+            history,
+            prepared: HashMap::new(),
+            jobs: HashMap::new(),
+            cancels: HashMap::new(),
+            handles: Vec::new(),
+            emitted: Instant::now(),
+        }));
+        let changed: Arc<dyn Fn(DownloadsView) + Send + Sync> = Arc::new(changed);
+        let callback = Arc::clone(&changed);
+        let current = Arc::clone(&state);
+        let available = tools.available();
+        let magnet = crate::magnet::MagnetManager::open(
+            history_path.with_extension("magnet.json"),
+            Arc::clone(&slots),
+            Arc::new(move |tasks| {
+                let view = {
+                    let state = current
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner);
+                    download_view(&state, available, tasks)
+                };
+                callback(view);
             }),
+        )?;
+        let manager = Arc::new(Self {
+            state,
             history_path,
             network: Network::default(),
             tools,
-            slots: Semaphore::new(2),
+            slots,
+            magnet,
+            starting: tokio::sync::Mutex::new(()),
             lifetime: CancellationToken::new(),
-            changed: Arc::new(changed),
-        }))
+            changed,
+        });
+        Ok(manager)
     }
 
     /// 清掉上次崩溃留下的暂存目录。返回清掉了几个。
@@ -137,6 +161,7 @@ impl DownloadManager {
         if !self.lock().jobs.is_empty() {
             return 0;
         }
+        self.magnet.sweep_completed().await;
         let folder = self.lock().history.folder.clone();
         if assemble_device::validate_directory(&folder).await.is_err() {
             return 0;
@@ -170,22 +195,7 @@ impl DownloadManager {
             .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
     fn view_of(&self, state: &State) -> DownloadsView {
-        DownloadsView {
-            assistant_allowed: state.assistant_allowed,
-            browser_task_id: state.browser_task_id.clone(),
-            folder_name: state
-                .history
-                .folder
-                .file_name()
-                .map_or_default(|v| v.to_string_lossy().into_owned()),
-            tools_available: self.tools.available(),
-            tasks: state
-                .history
-                .records
-                .iter()
-                .map(|r| r.view.clone())
-                .collect(),
-        }
+        download_view(state, self.tools.available(), self.magnet.tasks())
     }
     pub fn view(&self) -> DownloadsView {
         self.view_of(&self.lock())
@@ -206,6 +216,20 @@ impl DownloadManager {
 
     pub async fn prepare_assistant(&self, input: DownloadInput) -> Result<DownloadPreview> {
         self.ensure_assistant_allowed()?;
+        if input.kind == DownloadKind::Magnet {
+            if input.page_url.is_some() || input.title.is_some() {
+                return Err(DownloadError::InvalidSource);
+            }
+            let preview = self
+                .magnet
+                .prepare(&input.url, Some(DownloadInitiator::Assistant))
+                .await?;
+            if let Err(error) = self.ensure_assistant_allowed() {
+                self.magnet.discard_preview(&preview.id);
+                return Err(error);
+            }
+            return Ok(preview);
+        }
         let preview = self.prepare(input).await?;
         let mut state = self.lock();
         if !state.assistant_allowed {
@@ -222,12 +246,10 @@ impl DownloadManager {
 
     pub fn assistant_task(&self, id: &str) -> Result<DownloadTask> {
         self.ensure_assistant_allowed()?;
-        self.lock()
-            .history
-            .records
-            .iter()
-            .find(|r| r.view.id == id && r.view.initiated_by == Some(DownloadInitiator::Assistant))
-            .map(|r| r.view.clone())
+        self.view()
+            .tasks
+            .into_iter()
+            .find(|r| r.id == id && r.initiated_by == Some(DownloadInitiator::Assistant))
             .ok_or(DownloadError::Expired)
     }
     fn persist(&self, state: &State) -> Result<()> {
@@ -255,12 +277,19 @@ impl DownloadManager {
     }
 
     pub async fn prepare(&self, input: DownloadInput) -> Result<DownloadPreview> {
+        if input.kind == DownloadKind::Magnet {
+            if input.page_url.is_some() || input.title.is_some() {
+                return Err(DownloadError::InvalidSource);
+            }
+            return self.magnet.prepare(&input.url, None).await;
+        }
         let request_headers = headers(if input.kind == DownloadKind::Douyin {
             Some("https://www.douyin.com/")
         } else {
             input.page_url.as_deref()
         })?;
         let (title, host, sources, duration) = match input.kind {
+            DownloadKind::Magnet => return Err(DownloadError::InvalidSource),
             DownloadKind::Hls => {
                 let url = source_url(input.url.trim())?;
                 let host = url
@@ -407,6 +436,7 @@ impl DownloadManager {
                 DownloadKind::Hls => "HLS",
                 DownloadKind::Douyin => "Douyin",
                 DownloadKind::Video => "Video",
+                DownloadKind::Magnet => "Magnet",
             }
             .to_owned()
         } else {
@@ -419,6 +449,7 @@ impl DownloadManager {
             source_host: host,
             duration_seconds: duration,
             variants: sources.iter().map(|(v, _)| v.clone()).collect(),
+            files: Vec::new(),
         };
         let mut state = self.lock();
         state
@@ -441,7 +472,7 @@ impl DownloadManager {
     }
 
     pub async fn start(self: &Arc<Self>, preview_id: &str, variant_id: &str) -> Result<String> {
-        self.start_as(preview_id, variant_id, None).await
+        self.start_selected(preview_id, variant_id, &[]).await
     }
 
     pub async fn start_assistant(
@@ -450,8 +481,98 @@ impl DownloadManager {
         variant_id: &str,
     ) -> Result<String> {
         self.ensure_assistant_allowed()?;
-        self.start_as(preview_id, variant_id, Some(DownloadInitiator::Assistant))
+        self.start_assistant_selected(preview_id, variant_id, &[])
             .await
+    }
+
+    pub async fn start_selected(
+        self: &Arc<Self>,
+        preview_id: &str,
+        variant_id: &str,
+        file_ids: &[u32],
+    ) -> Result<String> {
+        self.start_selected_as(preview_id, variant_id, file_ids, None)
+            .await
+    }
+    pub async fn start_assistant_selected(
+        self: &Arc<Self>,
+        preview_id: &str,
+        variant_id: &str,
+        file_ids: &[u32],
+    ) -> Result<String> {
+        self.ensure_assistant_allowed()?;
+        self.start_selected_as(
+            preview_id,
+            variant_id,
+            file_ids,
+            Some(DownloadInitiator::Assistant),
+        )
+        .await
+    }
+    async fn start_selected_as(
+        self: &Arc<Self>,
+        preview_id: &str,
+        variant_id: &str,
+        file_ids: &[u32],
+        by: Option<DownloadInitiator>,
+    ) -> Result<String> {
+        let _starting = self.starting.lock().await;
+        if by.is_some() {
+            self.ensure_assistant_allowed()?;
+        }
+        if self
+            .view()
+            .tasks
+            .iter()
+            .filter(|t| {
+                t.phase.active()
+                    || (t.kind == DownloadKind::Magnet
+                        && matches!(
+                            t.phase,
+                            DownloadPhase::Paused
+                                | DownloadPhase::Failed
+                                | DownloadPhase::Interrupted
+                        ))
+            })
+            .count()
+            >= 20
+        {
+            return Err(DownloadError::Busy);
+        }
+        if self.magnet.owns_preview(preview_id) {
+            if variant_id != "magnet" {
+                return Err(DownloadError::InvalidSource);
+            }
+            let folder = self.lock().history.folder.clone();
+            return self.magnet.start(preview_id, file_ids, folder, by).await;
+        }
+        if !file_ids.is_empty() {
+            return Err(DownloadError::InvalidSource);
+        }
+        self.start_as(preview_id, variant_id, by).await
+    }
+    pub fn cancel_preparation(&self) {
+        self.magnet.cancel_preparation();
+    }
+    pub async fn pause(&self, id: &str) -> Result<()> {
+        self.magnet.pause(id).await
+    }
+    pub async fn resume(self: &Arc<Self>, id: &str) -> Result<()> {
+        self.magnet.resume(id).await
+    }
+    pub async fn cancel_selected(&self, id: &str) -> Result<()> {
+        if self.magnet.owns(id) {
+            self.magnet.cancel(id).await
+        } else {
+            self.cancel(id)
+        }
+    }
+    pub async fn retry_selected(self: &Arc<Self>, id: &str) -> Result<()> {
+        if self.magnet.owns(id) {
+            self.magnet.resume(id).await
+        } else {
+            self.retry(id)
+        }
     }
 
     async fn start_as(
@@ -787,6 +908,9 @@ impl DownloadManager {
     }
 
     pub async fn completed_path(&self, id: &str) -> Result<PathBuf> {
+        if self.magnet.owns(id) {
+            return self.magnet.completed_path(id).await;
+        }
         let path = self
             .lock()
             .history
@@ -807,10 +931,33 @@ impl DownloadManager {
     /// 退出先取消，再等待网络请求与媒体子进程真正结束；不能只依赖析构。
     pub async fn shutdown(&self) {
         self.lifetime.cancel();
+        self.magnet.shutdown().await;
         let handles = std::mem::take(&mut self.lock().handles);
         for handle in handles {
             let _ = handle.await;
         }
+    }
+}
+
+fn download_view(state: &State, available: bool, magnet: Vec<DownloadTask>) -> DownloadsView {
+    let mut tasks: Vec<_> = state
+        .history
+        .records
+        .iter()
+        .map(|r| r.view.clone())
+        .chain(magnet)
+        .collect();
+    tasks.sort_by_key(|a| std::cmp::Reverse(a.created_at.as_millis()));
+    DownloadsView {
+        assistant_allowed: state.assistant_allowed,
+        browser_task_id: state.browser_task_id.clone(),
+        folder_name: state
+            .history
+            .folder
+            .file_name()
+            .map_or_default(|v| v.to_string_lossy().into_owned()),
+        tools_available: available,
+        tasks,
     }
 }
 
@@ -819,6 +966,14 @@ fn rate(bytes: u64, started: Instant) -> u64 {
 }
 
 async fn seal(path: &Path, cancel: &CancellationToken) -> Result<String> {
+    seal_with_limit(path, cancel, crate::MAX_BYTES, false).await
+}
+pub(super) async fn seal_with_limit(
+    path: &Path,
+    cancel: &CancellationToken,
+    limit: u64,
+    allow_empty: bool,
+) -> Result<String> {
     let mut file = tokio::fs::OpenOptions::new()
         .read(true)
         .write(true)
@@ -835,11 +990,11 @@ async fn seal(path: &Path, cancel: &CancellationToken) -> Result<String> {
         }
         hash.update(&bytes[..length]);
         count += length as u64;
-        if count > crate::MAX_BYTES {
+        if count > limit {
             return Err(DownloadError::Limit);
         }
     }
-    if count == 0 {
+    if count == 0 && !allow_empty {
         return Err(DownloadError::InvalidMedia);
     }
     let digest = assemble_protocol::primitives::to_hex(&hash.finalize());

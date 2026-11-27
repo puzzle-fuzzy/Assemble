@@ -315,25 +315,48 @@ pub async fn download_start(
     app: AppHandle,
     preview_id: String,
     variant_id: String,
+    file_ids: Option<Vec<u32>>,
 ) -> Result<String, CommandError> {
     app.state::<std::sync::Arc<assemble_download::DownloadManager>>()
-        .start(&preview_id, &variant_id)
+        .start_selected(&preview_id, &variant_id, &file_ids.unwrap_or_default())
         .await
         .map_err(Into::into)
 }
 
 #[tauri::command]
-pub fn download_cancel(app: AppHandle, task_id: String) -> Result<(), CommandError> {
+pub async fn download_cancel(app: AppHandle, task_id: String) -> Result<(), CommandError> {
     app.state::<std::sync::Arc<assemble_download::DownloadManager>>()
-        .cancel(&task_id)
+        .cancel_selected(&task_id)
+        .await
         .map_err(Into::into)
 }
 
 #[tauri::command]
-pub fn download_retry(app: AppHandle, task_id: String) -> Result<(), CommandError> {
+pub async fn download_retry(app: AppHandle, task_id: String) -> Result<(), CommandError> {
     app.state::<std::sync::Arc<assemble_download::DownloadManager>>()
-        .retry(&task_id)
+        .retry_selected(&task_id)
+        .await
         .map_err(Into::into)
+}
+
+#[tauri::command]
+pub async fn download_pause(app: AppHandle, task_id: String) -> Result<(), CommandError> {
+    app.state::<std::sync::Arc<assemble_download::DownloadManager>>()
+        .pause(&task_id)
+        .await
+        .map_err(Into::into)
+}
+#[tauri::command]
+pub async fn download_resume(app: AppHandle, task_id: String) -> Result<(), CommandError> {
+    app.state::<std::sync::Arc<assemble_download::DownloadManager>>()
+        .resume(&task_id)
+        .await
+        .map_err(Into::into)
+}
+#[tauri::command]
+pub fn download_cancel_preparation(app: AppHandle) {
+    app.state::<std::sync::Arc<assemble_download::DownloadManager>>()
+        .cancel_preparation();
 }
 
 #[tauri::command]

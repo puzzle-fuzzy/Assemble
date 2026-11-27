@@ -193,6 +193,9 @@ fn handlers() -> impl Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool + Send + Sync +
         commands::download_import_hls,
         commands::download_start,
         commands::download_cancel,
+        commands::download_pause,
+        commands::download_resume,
+        commands::download_cancel_preparation,
         commands::download_retry,
         commands::download_choose_folder,
         commands::download_open,
@@ -500,7 +503,11 @@ fn init_logging(sink: Sink) {
 }
 
 fn allowed_log_target(target: &str) -> bool {
-    target != "enigo" && !target.starts_with("enigo::")
+    target != "enigo"
+        && !target.starts_with("enigo::")
+        && !target.starts_with("librqbit")
+        && target != "reqwest"
+        && !target.starts_with("reqwest::")
 }
 
 #[cfg(test)]
@@ -526,6 +533,8 @@ mod tests {
         tracing::subscriber::with_default(subscriber, || {
             tracing::debug!(target:"enigo::win::win_impl","synthetic-input-must-not-appear");
             tracing::info!(target:"enigo","synthetic-input-must-not-appear");
+            tracing::info!(target:"librqbit::torrent","synthetic-input-must-not-appear");
+            tracing::trace!(target:"reqwest::connect","synthetic-input-must-not-appear");
             tracing::info!(target:"assemble_desktop_lib","normal-diagnostic");
         });
         let logged = std::fs::read_to_string(dir.path().join("desktop.log")).unwrap();

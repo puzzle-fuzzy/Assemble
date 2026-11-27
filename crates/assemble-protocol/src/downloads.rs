@@ -10,6 +10,7 @@ pub enum DownloadKind {
     Hls,
     Douyin,
     Video,
+    Magnet,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -39,6 +40,14 @@ pub struct DownloadVariant {
     pub bandwidth: Option<u64>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DownloadFile {
+    pub id: u32,
+    pub name: String,
+    pub size: u64,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DownloadPreview {
@@ -48,6 +57,8 @@ pub struct DownloadPreview {
     pub source_host: String,
     pub duration_seconds: Option<f64>,
     pub variants: Vec<DownloadVariant>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub files: Vec<DownloadFile>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -61,6 +72,7 @@ pub enum DownloadPhase {
     Failed,
     Cancelled,
     Interrupted,
+    Paused,
 }
 
 impl DownloadPhase {
@@ -128,6 +140,8 @@ pub struct AssistantDownloadStart {
     pub request_id: String,
     pub preview_id: String,
     pub variant_id: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub file_ids: Vec<u32>,
 }
 
 /// 只投影安全展示字段；来源 URL、系统凭据与落盘路径永远不在这里。
@@ -160,5 +174,17 @@ impl AssistantDownloadReply {
             error_code: Some(code.to_owned()),
             ..Self::success()
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn video_start_preserves_the_v1_request_for_older_desktops() {
+        let legacy = serde_json::json!({"requestId":"once","previewId":"preview","variantId":"hd"});
+        let start: AssistantDownloadStart = serde_json::from_value(legacy.clone()).unwrap();
+        assert!(start.file_ids.is_empty());
+        assert_eq!(serde_json::to_value(start).unwrap(), legacy);
     }
 }

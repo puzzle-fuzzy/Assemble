@@ -5,6 +5,7 @@ pub mod assistant;
 pub mod browser;
 mod douyin;
 mod hls;
+mod magnet;
 mod manager;
 mod media;
 mod network;
@@ -48,6 +49,10 @@ pub enum DownloadError {
     NoSpace,
     #[error("assistant downloads are disabled")]
     AssistantDisabled,
+    #[error("download credentials cannot be stored securely")]
+    CredentialsUnavailable,
+    #[error("torrent metadata is unavailable")]
+    MetadataUnavailable,
 }
 
 impl DownloadError {
@@ -66,6 +71,8 @@ impl DownloadError {
             Self::Expired => "DOWNLOAD_EXPIRED",
             Self::Busy => "DOWNLOAD_BUSY",
             Self::NoSpace => "DOWNLOAD_NO_SPACE",
+            Self::CredentialsUnavailable => "DOWNLOAD_CREDENTIALS_UNAVAILABLE",
+            Self::MetadataUnavailable => "DOWNLOAD_METADATA_UNAVAILABLE",
             Self::AssistantDisabled => "DOWNLOAD_ASSISTANT_DISABLED",
         }
     }

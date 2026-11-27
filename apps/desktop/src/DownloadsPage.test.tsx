@@ -240,3 +240,53 @@ test("未知长度保持不定进度，下载和合并只使用真实计数", ()
   ).toBe(30);
   expect(downloadProgress({ ...task, phase: "verifying" })).toBeNull();
 });
+
+test("磁力文件选择不依赖 FFmpeg，开始只提交选中的文件标识", async () => {
+  const source = new FakeBridge(snapshot());
+  source.current.downloads.toolsAvailable = false;
+  source.downloadPreview = {
+    id: "magnet-preview",
+    kind: "magnet",
+    title: "公开资料",
+    sourceHost: "BitTorrent",
+    durationSeconds: null,
+    variants: [{ id: "magnet", width: null, height: null, bandwidth: null }],
+    files: [
+      { id: 0, name: "目录/视频.bin", size: 1024 },
+      { id: 2, name: "说明.txt", size: 10 },
+    ],
+  };
+  let selection: number[] | undefined;
+  source.downloadStart = async (_id, _variant, ids) => {
+    selection = ids;
+    return "task";
+  };
+  const view = await render(
+    <DownloadsPage source={source} view={source.current.downloads} />,
+  );
+  await click(button(view.host, "新建下载"));
+  const dialog = currentDialog();
+  const trigger = dialog.querySelector<HTMLElement>('[role="combobox"]');
+  await act(async () =>
+    trigger?.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }),
+    ),
+  );
+  await settle();
+  const option = [
+    ...document.querySelectorAll<HTMLElement>('[role="option"]'),
+  ].find((v) => v.textContent?.trim() === "磁力链");
+  await click(option);
+  expect(text(dialog)).toContain("上传限速 256 KiB/秒");
+  await typeInto(dialog, `magnet:?xt=urn:btih:${"a".repeat(40)}`);
+  await click(button(dialog, "解析地址"));
+  expect(source.downloadInput?.kind).toBe("magnet");
+  expect(dialog.querySelectorAll('[role="checkbox"]')).toHaveLength(2);
+  await click(button(dialog, "取消全选"));
+  expect(button(dialog, "开始下载")?.disabled).toBe(true);
+  const checkbox = dialog.querySelector<HTMLElement>('[role="checkbox"]');
+  await click(checkbox ?? undefined);
+  expect(button(dialog, "开始下载")?.disabled).toBe(false);
+  await click(button(dialog, "开始下载"));
+  expect(selection).toEqual([0]);
+});

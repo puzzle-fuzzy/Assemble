@@ -14,6 +14,7 @@ pub enum Kind {
     Hls,
     Douyin,
     Video,
+    Magnet,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -31,6 +32,8 @@ pub struct Start {
     pub request_id: String,
     pub preview_id: String,
     pub variant_id: String,
+    #[serde(default)]
+    pub file_ids: Vec<u32>,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -70,6 +73,7 @@ pub async fn preview(store: &dyn SecretStore, input: Preview) -> Result<String, 
         Kind::Hls => DownloadKind::Hls,
         Kind::Douyin => DownloadKind::Douyin,
         Kind::Video => DownloadKind::Video,
+        Kind::Magnet => DownloadKind::Magnet,
     };
     result(
         &assistant::preview(
@@ -95,6 +99,7 @@ pub async fn start(store: &dyn SecretStore, input: Start) -> Result<String, Fail
                 request_id: input.request_id,
                 preview_id: input.preview_id,
                 variant_id: input.variant_id,
+                file_ids: input.file_ids,
             },
         )
         .await,
@@ -103,4 +108,14 @@ pub async fn start(store: &dyn SecretStore, input: Start) -> Result<String, Fail
 
 pub async fn status(store: &dyn SecretStore, input: &Status) -> Result<String, Failure> {
     result(&assistant::status(store, assistant::DESKTOP_APP_ID, &input.id).await)
+}
+
+pub async fn pause(store: &dyn SecretStore, input: &Status) -> Result<String, Failure> {
+    result(&assistant::pause(store, assistant::DESKTOP_APP_ID, &input.id).await)
+}
+pub async fn resume(store: &dyn SecretStore, input: &Status) -> Result<String, Failure> {
+    result(&assistant::resume(store, assistant::DESKTOP_APP_ID, &input.id).await)
+}
+pub async fn cancel(store: &dyn SecretStore, input: &Status) -> Result<String, Failure> {
+    result(&assistant::cancel(store, assistant::DESKTOP_APP_ID, &input.id).await)
 }
