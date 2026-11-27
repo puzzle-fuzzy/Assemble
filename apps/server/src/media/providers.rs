@@ -503,16 +503,19 @@ impl Providers {
                 return Err(invalid());
             }
             let posters = data["posters"].as_array().ok_or_else(invalid)?;
-            if posters.len() > MAX_IMAGES {
-                return Err(unavailable("MEDIA_GALLERY_TOO_LARGE"));
-            }
-            let mut images = BTreeMap::new();
+            let mut seen = BTreeSet::new();
+            let mut images = Vec::new();
             for poster in posters {
+                if images.len() == MAX_IMAGES {
+                    break;
+                }
                 let image = tmdb_image(poster.get("file_path").and_then(Value::as_str))?
                     .ok_or_else(invalid)?;
-                images.insert(image.url.clone(), image);
+                if seen.insert(image.url.clone()) {
+                    images.push(image);
+                }
             }
-            return Ok(images.into_values().collect());
+            return Ok(images);
         }
         let mut ids = BTreeSet::new();
         let mut start = 0_usize;
@@ -537,18 +540,16 @@ impl Providers {
             let html = String::from_utf8(reply.bytes).map_err(|_| invalid())?;
             let (page, more) = parse_douban_posters(&html, &identity.external_id)?;
             for photo_id in page {
+                if ids.len() == MAX_IMAGES {
+                    break;
+                }
                 ids.insert(photo_id);
             }
-            if ids.len() > MAX_IMAGES {
-                return Err(unavailable("MEDIA_GALLERY_TOO_LARGE"));
-            }
-            if !more {
+            // 上限约束本次取图预算，不把仍有下一页当成同步失败；重复页面也不能无限翻页。
+            if !more || ids.len() == MAX_IMAGES || start + 30 > MAX_IMAGES {
                 break;
             }
             start += 30;
-            if start > MAX_IMAGES {
-                return Err(unavailable("MEDIA_GALLERY_TOO_LARGE"));
-            }
         }
         let mut result = Vec::new();
         for id in ids {

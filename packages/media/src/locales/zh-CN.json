@@ -93,7 +93,10 @@
     "selectPoster": "设为封面",
     "currentPoster": "当前封面",
     "syncGallery": "同步来源图集",
-    "galleryHint": "从已关联的资料源同步图片；只有完成校验的图片会出现在这里。",
+    "galleryCount": "{{count}} 张图片",
+    "syncGalleryLimit": "从关联来源更新图片，每次最多同步 100 张。",
+    "syncingGallery": "正在同步",
+    "retryGallery": "重试同步",
     "noGallery": "还没有图集",
     "createTitle": "添加影视条目",
     "editTitle": "编辑影视条目",
@@ -111,6 +114,14 @@
     "chooseImage": "查看第 {{number}} 张海报",
     "galleryImage": "{{title}} 的图集 {{number}}",
     "retryImage": "重新加载图片"
+  },
+  "gallerySync": {
+    "queued": "等待同步",
+    "running": "正在同步",
+    "completed": "图片已同步",
+    "failed": "同步失败",
+    "cancelled": "同步已取消",
+    "interrupted": "同步已中断"
   },
   "import": {
     "title": "搜索资料并导入",
@@ -148,7 +159,7 @@
     "DOUBAN_VERIFICATION_REQUIRED": "豆瓣限制了此次访问，请稍后重试或使用其他资料源。",
     "MEDIA_CATALOG_RATE_LIMITED": "资料查询繁忙，请一分钟后重试。",
     "MEDIA_FILMOGRAPHY_TOO_LARGE": "来源作品列表超出本次处理上限。",
-    "MEDIA_GALLERY_TOO_LARGE": "来源图集超过 100 张上限，本次未替换图集。",
+    "MEDIA_GALLERY_TOO_LARGE": "来源图片过多，请重新同步，每次最多同步 100 张。",
     "MEDIA_SOURCE_REQUIRED": "条目还没有关联资料源，无法同步图集。",
     "MEDIA_BUSY": "导入任务繁忙，请稍后重试。",
     "MEDIA_JOB_CANCELLED": "任务已取消，可以重新导入。",

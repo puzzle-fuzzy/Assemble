@@ -8,6 +8,7 @@ import {
 import type { MediaClient } from "@assemble/media/client";
 import { MediaCollectionsManager } from "@assemble/media/components/collections";
 import { MediaEditor } from "@assemble/media/components/editor";
+import { MediaGalleryEditor } from "@assemble/media/components/gallery";
 import { MediaImport } from "@assemble/media/components/import";
 import { MediaDetails } from "@assemble/media/components/media-details";
 import { MediaWorkspace } from "@assemble/media/components/workspace";
@@ -1315,7 +1316,164 @@ describe("影视业务界面与权限", () => {
       version: 3,
       assetId: "asset-public",
     });
-    expect(button(dialog, "当前封面").disabled).toBe(true);
+    expect(dialog.textContent).toContain("当前封面");
+    expect(
+      [...dialog.querySelectorAll("button")].some(
+        (item) => item.textContent === "当前封面",
+      ),
+    ).toBe(false);
+  });
+  test("图集精简说明和刷新，失败只给同步原因，明确重试使用新任务", async () => {
+    let synced = false;
+    const image = {
+      assetId: "cover-existing",
+      width: 600,
+      height: 900,
+      contentType: "image/jpeg",
+    };
+    const latest = { ...entry, poster: image };
+    handle = (path, init) =>
+      path === `/v1/admin/media/entries/${entry.id}`
+        ? json({ item: latest })
+        : path.endsWith(`/${entry.id}/gallery`)
+          ? json({ entryId: entry.id, version: entry.version, items: [image] })
+          : path.endsWith(`/${entry.id}/gallery/sync`) &&
+              init?.method === "POST"
+            ? json({
+                ...initialJob,
+                id: "private-job-id",
+                status: synced ? "completed" : "failed",
+                stage: null,
+                errorCode: synced ? null : "SOURCE_UNAVAILABLE",
+              })
+            : response(path);
+    await render(
+      <MediaGalleryEditor
+        client={createBrowserMediaClient("shared", {
+          readMode: "admin",
+          csrfToken: () => session.csrfToken,
+        })}
+        entry={latest}
+        imageLoader={browserImageLoader}
+        onClose={() => {}}
+        onUpdated={() => {}}
+      />,
+    );
+    const dialog = document.querySelector<HTMLElement>('[role="dialog"]');
+    if (!dialog) throw new Error("missing gallery");
+    await waitForText(dialog, "1 张图片");
+    expect(dialog.textContent).not.toContain("关闭窗口");
+    expect(dialog.textContent).not.toContain("校验的图片");
+    expect(
+      [...dialog.querySelectorAll("button")].some(
+        (item) => item.textContent === "刷新",
+      ),
+    ).toBe(false);
+    await click(button(dialog, "同步来源图集"));
+    await waitForText(dialog, "同步失败");
+    expect(dialog.textContent).not.toContain("private-job-id");
+    expect(dialog.textContent).not.toContain("任务失败");
+    expect(dialog.querySelector('[role="progressbar"]')).toBeNull();
+    synced = true;
+    await click(button(dialog, "重试同步"));
+    await waitForText(dialog, "图片已同步");
+    const syncs = requests.filter(({ path }) => path.endsWith("/gallery/sync"));
+    expect(syncs).toHaveLength(2);
+    expect(JSON.parse(String(syncs[0].init?.body)).requestId).not.toBe(
+      JSON.parse(String(syncs[1].init?.body)).requestId,
+    );
+    await act(async () => setLanguage("en"));
+    expect(dialog.textContent).toContain("Images synced");
+    expect(dialog.textContent).toContain("Current poster");
+  });
+
+  test("图集版本冲突提供按需重载，重载后同步采用最新版本", async () => {
+    let version = 3;
+    handle = (path, init) =>
+      path === `/v1/admin/media/entries/${entry.id}`
+        ? json({ item: { ...entry, version } })
+        : path.endsWith(`/${entry.id}/gallery`)
+          ? json({ entryId: entry.id, version, items: [] })
+          : path.endsWith(`/${entry.id}/gallery/sync`) &&
+              init?.method === "POST"
+            ? json({
+                ...initialJob,
+                stage: null,
+                errorCode: "VERSION_CONFLICT",
+              })
+            : response(path);
+    await render(
+      <MediaGalleryEditor
+        client={createBrowserMediaClient("shared", {
+          readMode: "admin",
+          csrfToken: () => session.csrfToken,
+        })}
+        entry={entry}
+        imageLoader={browserImageLoader}
+        onClose={() => {}}
+        onUpdated={() => {}}
+      />,
+    );
+    const dialog = document.querySelector<HTMLElement>('[role="dialog"]');
+    if (!dialog) throw new Error("missing gallery");
+    await waitForText(dialog, "0 张图片");
+    await click(button(dialog, "同步来源图集"));
+    await waitForText(dialog, "同步失败");
+    expect(button(dialog, "重试同步").disabled).toBe(true);
+    version = 4;
+    await click(button(dialog, "载入最新资料"));
+    await waitFor(() => !button(dialog, "同步来源图集").disabled, "新版图集");
+    await click(button(dialog, "同步来源图集"));
+    const syncs = requests.filter(({ path }) => path.endsWith("/gallery/sync"));
+    expect(JSON.parse(String(syncs.at(-1)?.init?.body)).version).toBe(4);
+  });
+  test("图集提交结果未知时仅显示一个重试入口，并沿用原请求标识", async () => {
+    let attempts = 0;
+    handle = (path, init) => {
+      if (path.endsWith(`/${entry.id}/gallery`))
+        return json({ entryId: entry.id, version: entry.version, items: [] });
+      if (
+        path.endsWith(`/${entry.id}/gallery/sync`) &&
+        init?.method === "POST"
+      ) {
+        if (++attempts === 1) throw new Error("connection lost");
+        return json({
+          ...initialJob,
+          status: "completed",
+          stage: null,
+          errorCode: null,
+        });
+      }
+      return response(path);
+    };
+    await render(
+      <MediaGalleryEditor
+        client={createBrowserMediaClient("shared", {
+          readMode: "admin",
+          csrfToken: () => session.csrfToken,
+        })}
+        entry={entry}
+        imageLoader={browserImageLoader}
+        onClose={() => {}}
+        onUpdated={() => {}}
+      />,
+    );
+    const dialog = document.querySelector<HTMLElement>('[role="dialog"]');
+    if (!dialog) throw new Error("missing gallery");
+    await waitForText(dialog, "0 张图片");
+    await click(button(dialog, "同步来源图集"));
+    await waitForText(dialog, "重试同步");
+    expect(
+      [...dialog.querySelectorAll("button")].filter((item) =>
+        item.textContent?.includes("重试"),
+      ),
+    ).toHaveLength(1);
+    await click(button(dialog, "重试同步"));
+    await waitForText(dialog, "图片已同步");
+    const syncs = requests.filter(({ path }) => path.endsWith("/gallery/sync"));
+    expect(JSON.parse(String(syncs[0].init?.body))).toEqual(
+      JSON.parse(String(syncs[1].init?.body)),
+    );
   });
   test("切换英语翻译当前片库和详情，保留筛选值且不重复请求", async () => {
     const client = createBrowserMediaClient("shared", { readMode: "admin" });

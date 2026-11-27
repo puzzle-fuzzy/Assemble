@@ -381,7 +381,7 @@ async fn run_gallery(
     if entry.version != version {
         return Err(crate::planner::version_conflict());
     }
-    // 完整来源列表全部取回后才替换；当前封面仍作为有效引用保留。
+    // 本次预算内选中的来源图片全部校验后才替换；当前封面仍作为有效引用保留。
     if let Some(poster) = &entry.poster
         && !images.iter().any(|i| i.asset_id == poster.asset_id)
     {

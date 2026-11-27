@@ -35,23 +35,49 @@ export async function watchMediaJob(
   }
   return job;
 }
-export function MediaJobStatus({ job }: { job: MediaJob }) {
+export function MediaJobStatus({
+  job,
+  compact = false,
+}: {
+  job: MediaJob;
+  compact?: boolean;
+}) {
   const { t } = useMediaTranslation();
   const known =
     job.completedItems !== null &&
     job.totalItems !== null &&
     job.totalItems > 0;
   return (
-    <div role="status" aria-live="polite" className="flex flex-col gap-2">
+    <div
+      role={compact && job.status === "failed" ? "alert" : "status"}
+      aria-live="polite"
+      className="flex flex-col gap-2"
+    >
       <div className="flex flex-wrap items-center gap-2">
-        <Badge variant={job.status === "failed" ? "destructive" : "secondary"}>
-          {t(`import.${job.status}`)}
-        </Badge>
-        {job.stage && (
+        {compact ? (
+          <span
+            className={
+              job.status === "failed"
+                ? "text-sm font-medium text-destructive"
+                : "text-sm text-muted-foreground"
+            }
+          >
+            {isActiveJob(job) && job.stage
+              ? t(`import.${job.stage}`)
+              : t(`gallerySync.${job.status}`)}
+          </span>
+        ) : (
+          <Badge
+            variant={job.status === "failed" ? "destructive" : "secondary"}
+          >
+            {t(`import.${job.status}`)}
+          </Badge>
+        )}
+        {job.stage && !compact && (
           <span className="text-sm">{t(`import.${job.stage}`)}</span>
         )}
       </div>
-      {known && (
+      {known && (!compact || isActiveJob(job)) && (
         <>
           <Progress
             value={Math.min(
@@ -68,9 +94,11 @@ export function MediaJobStatus({ job }: { job: MediaJob }) {
           </p>
         </>
       )}
-      <p className="break-all text-xs text-muted-foreground">
-        {t("import.jobId", { id: job.id })}
-      </p>
+      {!compact && (
+        <p className="break-all text-xs text-muted-foreground">
+          {t("import.jobId", { id: job.id })}
+        </p>
+      )}
       {job.errorCode && (
         <p className="text-sm text-destructive">
           {t(`error.${job.errorCode}`, { defaultValue: t("error.generic") })}

@@ -1519,6 +1519,9 @@ async fn source_response(
         assert!(!headers.contains_key("authorization"));
     }
     calls.lock().await.push(path.clone());
+    if path.ends_with("/broken-gallery.png") {
+        return ([("content-type", "image/png")], "invalid image").into_response();
+    }
     if path.ends_with("/poster-3001.png")
         && calls
             .lock()
@@ -1557,6 +1560,14 @@ async fn source_response(
         json!({"results":[tmdb.clone()]})
     } else if path == "api.tmdb.org/3/movie/42" {
         tmdb
+    } else if path == "api.tmdb.org/3/movie/43/images" {
+        let mut posters: Vec<_> = (4100..4225)
+            .map(|id| json!({"file_path":format!("/poster-{id}.png")}))
+            .collect();
+        posters.insert(0, posters[0].clone());
+        json!({"id":43,"posters":posters})
+    } else if path == "api.tmdb.org/3/movie/44/images" {
+        json!({"id":44,"posters":[{"file_path":"/poster-4100.png"},{"file_path":"/broken-gallery.png"}]})
     } else if path == "api.tmdb.org/3/movie/42/images" {
         json!({"id":42,"posters":[{"file_path":"/poster.png","width":12,"height":16}]})
     } else if path == "api.tmdb.org/3/person/7" {
@@ -1576,6 +1587,18 @@ async fn source_response(
         let start = query.get("start").unwrap().parse::<u64>().unwrap();
         let works:Vec<_>=(start..11.min(start+10)).map(|n|json!({"roles":["演员 (饰 主角)"],"work":{"id":42+n,"type":"movie","title":format!("作品{n}"),"year":"2026","cover":{"url":format!("https://img3.doubanio.com/view/photo/l/public/p{}.png",42+n)}}})).collect();
         json!({"start":start,"count":10,"total":11,"works":works})
+    } else if path == "movie.douban.com/subject/43/photos" {
+        let start: usize = query.get("start").unwrap().parse().unwrap();
+        let rows = (5000 + start..5030 + start)
+            .map(|id| format!("<li data-id='{id}'></li>"))
+            .collect::<String>();
+        return ([("content-type","text/html")], format!("<h1>海报</h1><a href='/subject/43/'>电影</a><ul class='poster-col3'>{rows}</ul><a rel='next'>下一页</a>")).into_response();
+    } else if let Some(id) = path
+        .strip_prefix("m.douban.com/rexxar/api/v2/photo/")
+        .and_then(|id| id.parse::<u32>().ok())
+        .filter(|id| *id >= 5000)
+    {
+        json!({"id":id,"owner_uri":"douban://douban.com/movie/43","photo_type":"poster","image":{"large":{"url":format!("https://img3.doubanio.com/view/photo/l/public/p{id}.png")}}})
     } else if path == "movie.douban.com/subject/42/photos" {
         return ([("content-type","text/html")],"<h1>电影 海报</h1><a href='/subject/42/'>电影</a><ul class='poster-col3'><li data-id='9'></li></ul>").into_response();
     } else if path == "m.douban.com/rexxar/api/v2/photo/9" {
@@ -1654,6 +1677,162 @@ async fn both_sources_search_metadata_cast_actor_pagination_and_gallery_use_real
             .iter()
             .any(|p| p.ends_with("celebrity/7/works"))
     );
+    source.stop().await;
+}
+
+#[tokio::test]
+async fn oversized_galleries_are_bounded_and_deduplicated_without_failing() {
+    let source = SourceFixture::start().await;
+    for provider in [MediaProvider::Tmdb, MediaProvider::Douban] {
+        let images = source
+            .providers
+            .gallery(&MediaIdentity {
+                provider,
+                media_type: MediaType::Movie,
+                external_id: "43".into(),
+            })
+            .await
+            .unwrap();
+        assert_eq!(images.len(), providers::MAX_IMAGES);
+        let unique: std::collections::BTreeSet<_> = images.iter().map(|image| &image.url).collect();
+        assert_eq!(unique.len(), providers::MAX_IMAGES);
+        if provider == MediaProvider::Tmdb {
+            assert!(images.first().unwrap().url.ends_with("/poster-4100.png"));
+            assert!(images.last().unwrap().url.ends_with("/poster-4199.png"));
+        }
+    }
+    let calls = source.calls.lock().await;
+    assert_eq!(
+        calls
+            .iter()
+            .filter(|path| path.as_str() == "movie.douban.com/subject/43/photos")
+            .count(),
+        4
+    );
+    assert_eq!(
+        calls
+            .iter()
+            .filter(|path| path.starts_with("m.douban.com/rexxar/api/v2/photo/5"))
+            .count(),
+        100
+    );
+    assert!(!calls.iter().any(|path| path.ends_with("photo/5100")));
+    drop(calls);
+    source.stop().await;
+}
+
+#[tokio::test]
+async fn gallery_jobs_publish_the_bounded_batch_preserve_the_cover_and_keep_old_images_on_failure()
+{
+    let source = SourceFixture::start().await;
+    let h = Harness::start(Some(source.providers.clone())).await;
+    for external_id in ["43", "44"] {
+        let imported: MediaJob = serde_json::from_value(
+            value(
+                h.write(reqwest::Method::POST, "/v1/media/private/imports", "alice")
+                    .json(&MediaImport {
+                        identity: MediaIdentity {
+                            provider: MediaProvider::Tmdb,
+                            media_type: MediaType::Movie,
+                            external_id: external_id.into(),
+                        },
+                        request_id: format!("gallery-import-{external_id}"),
+                    })
+                    .send()
+                    .await
+                    .unwrap(),
+            )
+            .await,
+        )
+        .unwrap();
+        let imported = wait_job(
+            &h,
+            &format!("/v1/media/private/jobs/{}", imported.id),
+            "alice",
+        )
+        .await;
+        assert_eq!(imported.status, MediaJobStatus::Completed);
+        let entry_id = imported.entry_id.unwrap();
+        let entry_path = format!("/v1/media/private/entries/{entry_id}");
+        let mut entry: MediaEntry = serde_json::from_value(
+            value(h.cookie(&entry_path, "alice").send().await.unwrap()).await["item"].clone(),
+        )
+        .unwrap();
+        let poster = assets::store(&h.state.pool, "alice", png(), false)
+            .await
+            .unwrap();
+        let mut tx = h.state.pool.begin().await.unwrap();
+        assets::link(&mut tx, &entry_id, std::slice::from_ref(&poster), "gallery")
+            .await
+            .unwrap();
+        entry.poster = Some(poster.clone());
+        let entry = store::save(&mut tx, entry).await.unwrap();
+        tx.commit().await.unwrap();
+        let queued: MediaJob = serde_json::from_value(
+            value(
+                h.write(
+                    reqwest::Method::POST,
+                    &format!("{entry_path}/gallery/sync"),
+                    "alice",
+                )
+                .json(&MediaSync {
+                    version: entry.version,
+                    request_id: format!("bounded-gallery-{external_id}"),
+                })
+                .send()
+                .await
+                .unwrap(),
+            )
+            .await,
+        )
+        .unwrap();
+        let done = wait_job_for(
+            &h,
+            &format!("/v1/media/private/jobs/{}", queued.id),
+            "alice",
+            10_000,
+        )
+        .await;
+        assert_eq!(
+            done.status,
+            if external_id == "43" {
+                MediaJobStatus::Completed
+            } else {
+                MediaJobStatus::Failed
+            }
+        );
+        let gallery: MediaGallery = serde_json::from_value(
+            value(
+                h.cookie(&format!("{entry_path}/gallery"), "alice")
+                    .send()
+                    .await
+                    .unwrap(),
+            )
+            .await,
+        )
+        .unwrap();
+        assert_eq!(
+            gallery.items.len(),
+            if external_id == "43" { 101 } else { 1 }
+        );
+        let latest: MediaEntry = serde_json::from_value(
+            value(h.cookie(&entry_path, "alice").send().await.unwrap()).await["item"].clone(),
+        )
+        .unwrap();
+        assert_eq!(latest.poster.unwrap().asset_id, poster.asset_id);
+        if external_id == "44" {
+            assert_eq!(gallery.version, entry.version);
+        }
+    }
+    assert!(
+        !source
+            .calls
+            .lock()
+            .await
+            .iter()
+            .any(|path| path.ends_with("/poster-4200.png"))
+    );
+    h.stop().await;
     source.stop().await;
 }
 
@@ -1839,7 +2018,10 @@ async fn excess_public_metadata_concurrency_is_rejected_without_queueing_externa
     h.stop().await;
 }
 async fn wait_job(h: &Harness, path: &str, user: &str) -> MediaJob {
-    for _ in 0..200 {
+    wait_job_for(h, path, user, 200).await
+}
+async fn wait_job_for(h: &Harness, path: &str, user: &str, attempts: usize) -> MediaJob {
+    for _ in 0..attempts {
         let mut request = h.cookie(path, user);
         if path.starts_with("/v1/admin/") {
             request = request.header("sec-fetch-site", "same-origin");

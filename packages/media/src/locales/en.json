@@ -93,7 +93,10 @@
     "selectPoster": "Set as poster",
     "currentPoster": "Current poster",
     "syncGallery": "Sync catalog gallery",
-    "galleryHint": "Sync images from linked catalogs. Images appear only after validation.",
+    "galleryCount": "Images: {{count}}",
+    "syncGalleryLimit": "Update images from the linked source, up to 100 per sync.",
+    "syncingGallery": "Syncing",
+    "retryGallery": "Retry sync",
     "noGallery": "No gallery images yet",
     "createTitle": "Add a media entry",
     "editTitle": "Edit media entry",
@@ -111,6 +114,14 @@
     "chooseImage": "View poster {{number}}",
     "galleryImage": "{{title}} gallery image {{number}}",
     "retryImage": "Reload image"
+  },
+  "gallerySync": {
+    "queued": "Sync queued",
+    "running": "Syncing",
+    "completed": "Images synced",
+    "failed": "Sync failed",
+    "cancelled": "Sync cancelled",
+    "interrupted": "Sync interrupted"
   },
   "import": {
     "title": "Find and import catalog data",
@@ -148,7 +159,7 @@
     "DOUBAN_VERIFICATION_REQUIRED": "Douban restricted this request. Try later or use another catalog.",
     "MEDIA_CATALOG_RATE_LIMITED": "Catalog queries are busy. Try again in one minute.",
     "MEDIA_FILMOGRAPHY_TOO_LARGE": "The filmography exceeds the processing limit.",
-    "MEDIA_GALLERY_TOO_LARGE": "The gallery exceeds the 100-image limit. It has not been replaced.",
+    "MEDIA_GALLERY_TOO_LARGE": "The source has too many images. Retry to sync up to 100 images.",
     "MEDIA_SOURCE_REQUIRED": "Link a catalog source before syncing the gallery.",
     "MEDIA_BUSY": "Import tasks are busy. Try again later.",
     "MEDIA_JOB_CANCELLED": "The task was cancelled. You can import again.",
