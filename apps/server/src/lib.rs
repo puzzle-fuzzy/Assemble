@@ -35,6 +35,7 @@ pub mod pairing;
 pub mod planner;
 pub mod presence;
 pub mod register;
+pub mod releases;
 pub mod secrets;
 pub mod sends;
 pub mod source;

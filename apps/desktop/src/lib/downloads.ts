@@ -30,6 +30,8 @@ export type DownloadPhase =
   | "cancelled"
   | "interrupted";
 export interface DownloadTask {
+  /** 旧任务缺省；来源标记不包含助手身份或来源凭据。 */
+  initiatedBy?: "assistant";
   id: string;
   kind: DownloadKind;
   title: string;
@@ -48,6 +50,7 @@ export interface DownloadTask {
   createdAt: string;
 }
 export interface DownloadsView {
+  assistantAllowed: boolean;
   /** 旧开发预览缺少此定位信号时按未触发处理。 */
   browserTaskId?: string | null;
   folderName: string;
@@ -89,6 +92,7 @@ export function isDownloadsView(value: unknown): value is DownloadsView {
   return (
     record(value) &&
     typeof value.folderName === "string" &&
+    typeof value.assistantAllowed === "boolean" &&
     (value.browserTaskId === undefined ||
       optionalString(value.browserTaskId)) &&
     typeof value.toolsAvailable === "boolean" &&
@@ -97,6 +101,7 @@ export function isDownloadsView(value: unknown): value is DownloadsView {
       (v) =>
         record(v) &&
         typeof v.id === "string" &&
+        (v.initiatedBy === undefined || v.initiatedBy === "assistant") &&
         kind(v.kind) &&
         typeof v.title === "string" &&
         typeof v.sourceHost === "string" &&

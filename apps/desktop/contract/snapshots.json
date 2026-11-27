@@ -42,9 +42,11 @@
           "durationSeconds": 3.5,
           "errorCode": null,
           "retryable": false,
-          "createdAt": "2026-11-25T08:00:00.000Z"
+          "createdAt": "2026-11-25T08:00:00.000Z",
+          "initiatedBy": "assistant"
         }
-      ]
+      ],
+      "assistantAllowed": false
     },
     "systemNotifications": {
       "items": [],
@@ -77,7 +79,8 @@
       "browserTaskId": null,
       "folderName": "",
       "toolsAvailable": false,
-      "tasks": []
+      "tasks": [],
+      "assistantAllowed": true
     },
     "systemNotifications": {
       "items": [],
@@ -120,7 +123,21 @@
         "online": true
       }
     ],
-    "transfers": [],
+    "transfers": [
+      {
+        "id": "history-interrupted",
+        "direction": "out",
+        "peer": "MacBook",
+        "name": "报告.pdf",
+        "size": 1024,
+        "phase": "failed",
+        "progress": 0.0,
+        "savedAs": null,
+        "failure": "interrupted",
+        "retryable": false,
+        "target": "device"
+      }
+    ],
     "draft": null,
     "drive": null,
     "sendMenu": "enabled",
@@ -228,7 +245,8 @@
       "browserTaskId": null,
       "folderName": "",
       "toolsAvailable": false,
-      "tasks": []
+      "tasks": [],
+      "assistantAllowed": true
     },
     "systemNotifications": {
       "items": [],
@@ -264,7 +282,8 @@
       "browserTaskId": null,
       "folderName": "",
       "toolsAvailable": false,
-      "tasks": []
+      "tasks": [],
+      "assistantAllowed": true
     },
     "systemNotifications": {
       "items": [],
@@ -300,7 +319,8 @@
       "browserTaskId": null,
       "folderName": "",
       "toolsAvailable": false,
-      "tasks": []
+      "tasks": [],
+      "assistantAllowed": true
     },
     "systemNotifications": {
       "items": [],
@@ -365,7 +385,8 @@
       "browserTaskId": null,
       "folderName": "",
       "toolsAvailable": false,
-      "tasks": []
+      "tasks": [],
+      "assistantAllowed": true
     },
     "systemNotifications": {
       "items": [],
@@ -516,7 +537,8 @@
       "browserTaskId": null,
       "folderName": "",
       "toolsAvailable": false,
-      "tasks": []
+      "tasks": [],
+      "assistantAllowed": true
     },
     "systemNotifications": {
       "items": [],
@@ -746,7 +768,8 @@
       "browserTaskId": null,
       "folderName": "",
       "toolsAvailable": false,
-      "tasks": []
+      "tasks": [],
+      "assistantAllowed": true
     },
     "systemNotifications": {
       "items": [],
@@ -825,7 +848,8 @@
       "browserTaskId": null,
       "folderName": "",
       "toolsAvailable": false,
-      "tasks": []
+      "tasks": [],
+      "assistantAllowed": true
     },
     "systemNotifications": {
       "items": [],
@@ -922,7 +946,8 @@
       "browserTaskId": null,
       "folderName": "",
       "toolsAvailable": false,
-      "tasks": []
+      "tasks": [],
+      "assistantAllowed": true
     },
     "systemNotifications": {
       "items": [],
@@ -1155,7 +1180,8 @@
       "browserTaskId": null,
       "folderName": "",
       "toolsAvailable": false,
-      "tasks": []
+      "tasks": [],
+      "assistantAllowed": true
     },
     "systemNotifications": {
       "items": [],
@@ -1398,7 +1424,8 @@
       "browserTaskId": null,
       "folderName": "",
       "toolsAvailable": false,
-      "tasks": []
+      "tasks": [],
+      "assistantAllowed": true
     },
     "systemNotifications": {
       "items": [],
@@ -1645,7 +1672,8 @@
       "browserTaskId": null,
       "folderName": "",
       "toolsAvailable": false,
-      "tasks": []
+      "tasks": [],
+      "assistantAllowed": true
     },
     "systemNotifications": {
       "items": [],
@@ -1678,7 +1706,8 @@
       "browserTaskId": null,
       "folderName": "",
       "toolsAvailable": false,
-      "tasks": []
+      "tasks": [],
+      "assistantAllowed": true
     },
     "systemNotifications": {
       "items": [],
@@ -1711,7 +1740,8 @@
       "browserTaskId": null,
       "folderName": "",
       "toolsAvailable": false,
-      "tasks": []
+      "tasks": [],
+      "assistantAllowed": true
     },
     "systemNotifications": {
       "items": [],
@@ -1874,7 +1904,8 @@
       "browserTaskId": null,
       "folderName": "",
       "toolsAvailable": false,
-      "tasks": []
+      "tasks": [],
+      "assistantAllowed": true
     },
     "systemNotifications": {
       "items": [

@@ -18,9 +18,9 @@
     "server:accounts": "ASSEMBLE_DATA_DIR=data/local/server ASSEMBLE_PUBLIC_ORIGIN=http://127.0.0.1:8787 cargo run -p assemble-server -- list-accounts",
     "acceptance": "bun scripts/acceptance/run.ts",
     "build": "bun run --filter @assemble/desktop build && bun run sign:mac",
-    "build:frontend": "bun run --filter @assemble/desktop build:frontend && bun run admin:build && bun run media:build && bun run browser:build",
+    "build:frontend": "bun run --filter @assemble/desktop build:frontend && bun run admin:build && bun run media:build && bun run browser:build && bun run releases:build",
     "mcp": "ASSEMBLE_SERVER_ORIGIN=https://as.yxswy.com cargo build --release -p assemble-mcp && bun run sign:mac",
-    "typecheck": "bun run --filter @assemble/desktop typecheck && bun run --filter @assemble/admin typecheck && bun run --filter @assemble/media-web typecheck && bun run --filter @assemble/media typecheck && bun run --filter @assemble/ui typecheck && bun run --filter @assemble/display typecheck && bun run --filter @assemble/browser-extension typecheck && bun run typecheck:tools",
+    "typecheck": "bun run --filter @assemble/desktop typecheck && bun run --filter @assemble/admin typecheck && bun run --filter @assemble/media-web typecheck && bun run --filter @assemble/media typecheck && bun run --filter @assemble/ui typecheck && bun run --filter @assemble/display typecheck && bun run --filter @assemble/browser-extension typecheck && bun run typecheck:tools && bun run --filter @assemble/releases-web typecheck",
     "typecheck:tools": "tsc --noEmit",
     "test": "bun test",
     "lint": "biome check .",
@@ -43,7 +43,9 @@
     "browser:host": "cargo build -p assemble-desktop --bin assemble-browser-host --release && bun run sign:mac",
     "browser:install": "bun scripts/browser-extension/install-native.ts",
     "ios:test": "swift test --package-path apps/ios",
-    "ios:simulate": "bun scripts/ios/simulate.ts"
+    "ios:simulate": "bun scripts/ios/simulate.ts",
+    "releases:dev": "bun run --filter @assemble/releases-web dev",
+    "releases:build": "bun run --filter @assemble/releases-web build"
   },
   "devDependencies": {
     "@biomejs/biome": "2.6.8",

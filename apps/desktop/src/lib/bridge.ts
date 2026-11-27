@@ -59,6 +59,7 @@ export interface Bridge {
   downloadStart(previewId: string, variantId: string): Promise<string>;
   downloadCancel(taskId: string): Promise<void>;
   downloadRetry(taskId: string): Promise<void>;
+  downloadSetAssistantAllowed(enabled: boolean): Promise<Snapshot>;
   downloadChooseFolder(): Promise<void>;
   downloadOpen(taskId: string): Promise<void>;
   downloadReveal(taskId: string): Promise<void>;
@@ -94,10 +95,13 @@ export interface Bridge {
   driveUpload(): Promise<Snapshot>;
   /** 把云盘里的一个文件取回到接收位置。 */
   driveDownload(fileId: string): Promise<Snapshot>;
+  /** 给云盘文件改名；名字不是本机路径。 */
+  driveRename(fileId: string, name: string): Promise<Snapshot>;
   /** 从云盘里删掉一个文件。 */
   driveDelete(fileId: string): Promise<Snapshot>;
   /** 把主窗口叫到前面。发送面板里"请先登录"时用。 */
   openMain(): Promise<void>;
+  openPublicMedia(): Promise<void>;
   /** 取消一条传输：还没传完的停下，已经到服务端的撤回。 */
   cancelTransfer(transferId: string): Promise<void>;
   /** 再发一次。只有"文件根本没到服务端"的失败才有用。 */
@@ -167,6 +171,10 @@ export const bridge: Bridge = {
   },
   downloadCancel: (taskId) => invoke<void>("download_cancel", { taskId }),
   downloadRetry: (taskId) => invoke<void>("download_retry", { taskId }),
+  downloadSetAssistantAllowed: (enabled) =>
+    checked(() =>
+      invoke<unknown>("download_set_assistant_allowed", { enabled }),
+    ),
   downloadChooseFolder: () => invoke<void>("download_choose_folder"),
   downloadOpen: (taskId) => invoke<void>("download_open", { taskId }),
   downloadReveal: (taskId) => invoke<void>("download_reveal", { taskId }),
@@ -195,10 +203,13 @@ export const bridge: Bridge = {
   driveUpload: () => checked(() => invoke<unknown>("drive_upload")),
   driveDownload: (fileId) =>
     checked(() => invoke<unknown>("drive_download", { fileId })),
+  driveRename: (fileId, name) =>
+    checked(() => invoke<unknown>("drive_rename", { fileId, name })),
   driveDelete: (fileId) =>
     checked(() => invoke<unknown>("drive_delete", { fileId })),
   closeSendPanel: () => invoke<void>("close_send_panel"),
   openMain: () => invoke<void>("open_main"),
+  openPublicMedia: () => invoke<void>("open_public_media"),
   cancelTransfer: (transferId) =>
     invoke<void>("cancel_transfer", { transferId }),
   retryTransfer: (transferId) => invoke<void>("retry_transfer", { transferId }),
@@ -408,10 +419,15 @@ export const mediaBridge: MediaBridge = {
       ),
     catalog: (identity, signal) =>
       mediaInvoke("media_catalog", { identity }, isMediaCandidate, signal),
-    actor: (identity, mediaType, signal) =>
+    actor: (identity, mediaType, query = {}, signal) =>
       mediaInvoke(
         "media_actor",
-        { identity, mediaType },
+        {
+          identity,
+          mediaType,
+          page: query.page ?? 1,
+          pageSize: query.pageSize ?? 24,
+        },
         isMediaActorCredits,
         signal,
       ),

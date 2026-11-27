@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, mock, test } from "bun:test";
-import { createBrowserMediaClient } from "@assemble/media";
+import { createPublicMediaClient } from "@assemble/media";
 import samples from "../../../../packages/media/contract/snapshots.json";
 import {
   createHomePreloadFetch,
@@ -30,7 +30,7 @@ async function started() {
   await Promise.resolve();
 }
 const plannedPath =
-  "/v1/media/shared/entries?status=planned&page=1&pageSize=12&sort=updated";
+  "/v1/media/public/entries?status=planned&page=1&pageSize=12&sort=updated";
 function fallback() {
   return mock(async () =>
     json({ fallback: true }),
@@ -100,7 +100,7 @@ test("serialized external script starts exactly three anonymous shared shelf req
   ]);
   for (const { url, init } of calls) {
     expect(url.origin).toBe("https://assemble.example");
-    expect(url.pathname).toBe("/v1/media/shared/entries");
+    expect(url.pathname).toBe("/v1/media/public/entries");
     expect(init).toMatchObject({
       method: "GET",
       credentials: "omit",
@@ -120,6 +120,7 @@ test("preload never starts for private, detail, source, collection, or lookalike
     "/movies",
     "/movies//",
     "/movies/private",
+    "/movies/users/alice",
     "/movies/entries/shared/one",
     "/movies/entries/private/one",
     "/movies/catalog/tmdb/movie/42",
@@ -166,7 +167,7 @@ test("anonymous transport consumes each matching response once and retains DTO v
   preloadAnonymousHome();
   const otherFetch = fallback();
   const fetcher = createHomePreloadFetch({ account: null }, otherFetch);
-  const client = createBrowserMediaClient("shared", { fetch: fetcher });
+  const client = createPublicMediaClient({ fetch: fetcher });
   const query = {
     status: "planned" as const,
     page: 1,
@@ -185,7 +186,7 @@ test("invalid preloaded DTOs still fail the normal transport guard without anoth
   respond = async () => json({ items: [{ magnetUri: "invalid" }] });
   preloadAnonymousHome();
   const otherFetch = fallback();
-  const client = createBrowserMediaClient("shared", {
+  const client = createPublicMediaClient({
     fetch: createHomePreloadFetch({ account: null }, otherFetch),
   });
   await expect(
@@ -219,7 +220,7 @@ test("unmatched, credentialed, private, changed-page and cross-origin requests n
     [plannedPath, { credentials: "include" }],
     [plannedPath, { headers: { Authorization: "Bearer fixture" } }],
     [plannedPath, { headers: { Cookie: "fixture=1" } }],
-    [plannedPath.replace("/shared/", "/private/"), {}],
+    [plannedPath.replace("/public/", "/private/"), {}],
     [plannedPath.replace("page=1", "page=2"), {}],
     [plannedPath.replace("pageSize=12", "pageSize=24"), {}],
     [`https://other.example${plannedPath}`, {}],

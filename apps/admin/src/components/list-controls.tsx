@@ -9,7 +9,7 @@ export function useListQuery() {
     draft: "",
     query: "",
     page: 1,
-    pageSize: 10,
+    pageSize: 20,
   });
   return {
     ...search,

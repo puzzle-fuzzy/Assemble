@@ -23,6 +23,8 @@ use tokio_util::sync::CancellationToken;
 
 use crate::DownloadManager;
 
+mod assistant_routes;
+
 pub const NOT_CONNECTED: &str = "BROWSER_NOT_CONNECTED";
 pub const KEYCHAIN_UNAVAILABLE: &str = "BROWSER_KEYCHAIN_UNAVAILABLE";
 pub const INVALID_REQUEST: &str = "BROWSER_INVALID_REQUEST";
@@ -98,6 +100,7 @@ impl BrowserServer {
         let protected = Router::new()
             .route("/v1/download", post(download))
             .route("/v1/status", get(status))
+            .merge(assistant_routes::router())
             .layer(middleware::from_fn_with_state(
                 Arc::clone(&state),
                 authorize,
@@ -213,7 +216,7 @@ async fn download(
     let Ok(Json(request)) = body else {
         return Json(BrowserReply::failure(INVALID_REQUEST));
     };
-    if !is_valid_id(&request.request_id) || request.request_id.len() > 64 {
+    if request.via.is_some() || !is_valid_id(&request.request_id) || request.request_id.len() > 64 {
         return Json(BrowserReply::failure(INVALID_REQUEST));
     }
     let Ok(encoded) = serde_json::to_vec(&request.input) else {
@@ -272,6 +275,31 @@ async fn exchange(
     app_id: &str,
     request: Option<&BrowserDownload>,
 ) -> Result<BrowserReply, &'static str> {
+    let (method, path, body) = if let Some(request) = request {
+        (
+            reqwest::Method::POST,
+            "/v1/download",
+            Some(serde_json::to_value(request).map_err(|_| INVALID_REQUEST)?),
+        )
+    } else {
+        (reqwest::Method::GET, "/v1/status", None)
+    };
+    let reply: BrowserReply =
+        serde_json::from_value(local_request(store, app_id, method, path, body).await?)
+            .map_err(|_| NOT_CONNECTED)?;
+    if reply.version != 1 {
+        return Err(NOT_CONNECTED);
+    }
+    Ok(reply)
+}
+
+pub(crate) async fn local_request(
+    store: &dyn SecretStore,
+    app_id: &str,
+    method: reqwest::Method,
+    path: &str,
+    body: Option<serde_json::Value>,
+) -> Result<serde_json::Value, &'static str> {
     let stored = store
         .get(&key(app_id))
         .map_err(|_| KEYCHAIN_UNAVAILABLE)?
@@ -284,7 +312,7 @@ async fn exchange(
         .no_proxy()
         .redirect(reqwest::redirect::Policy::none())
         .connect_timeout(Duration::from_secs(2))
-        .timeout(Duration::from_secs(if request.is_some() { 40 } else { 3 }))
+        .timeout(Duration::from_secs(40))
         .build()
         .map_err(|_| NOT_CONNECTED)?;
     let mut bytes = [0_u8; 32];
@@ -305,21 +333,16 @@ async fn exchange(
     {
         return Err(NOT_CONNECTED);
     }
-    let builder = if let Some(request) = request {
-        client.post(format!("{base}/v1/download")).json(request)
-    } else {
-        client.get(format!("{base}/v1/status"))
-    };
+    let mut builder = client.request(method, format!("{base}{path}"));
+    if let Some(body) = body {
+        builder = builder.json(&body);
+    }
     let response = builder
         .bearer_auth(&endpoint.token.0)
         .send()
         .await
         .map_err(|_| NOT_CONNECTED)?;
-    let reply: BrowserReply = small_json(response).await?;
-    if reply.version != 1 {
-        return Err(NOT_CONNECTED);
-    }
-    Ok(reply)
+    small_json(response).await
 }
 
 async fn small_json<T: serde::de::DeserializeOwned>(
@@ -345,6 +368,252 @@ mod tests {
     use assemble_protocol::downloads::{DownloadInput, DownloadKind};
     use assemble_store::secret::MemorySecretStore;
     use std::sync::atomic::{AtomicUsize, Ordering};
+
+    #[tokio::test]
+    async fn assistant_cancel_only_accepts_its_own_authenticated_task() {
+        let folder = tempfile::tempdir().unwrap();
+        let store = Arc::new(MemorySecretStore::new());
+        let mut manager = DownloadManager::open(
+            folder.path().join("history.json"),
+            folder.path().to_owned(),
+            MediaTools::test_available(),
+            |_| {},
+        )
+        .unwrap();
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let source = format!(
+            "http://127.0.0.1:{}/video.mp4",
+            listener.local_addr().unwrap().port()
+        );
+        let server = tokio::spawn(async move {
+            axum::serve(
+                listener,
+                Router::new().route(
+                    "/video.mp4",
+                    get(|| async { std::future::pending::<StatusCode>().await }),
+                ),
+            )
+            .await
+            .unwrap();
+        });
+        Arc::get_mut(&mut manager).unwrap().network =
+            crate::network::Network::test(source.trim_end_matches("/video.mp4").to_owned());
+        let bridge =
+            BrowserServer::start(Arc::clone(&manager), store.clone(), "test.cancel", || {})
+                .await
+                .unwrap();
+        let input = DownloadInput {
+            kind: DownloadKind::Video,
+            url: source,
+            page_url: None,
+            title: None,
+        };
+        let preview = crate::assistant::preview(store.as_ref(), "test.cancel", input.clone())
+            .await
+            .preview
+            .unwrap();
+        let start = assemble_protocol::downloads::AssistantDownloadStart {
+            request_id: "cancel-me".into(),
+            preview_id: preview.id,
+            variant_id: preview.variants[0].id.clone(),
+        };
+        let id = crate::assistant::start(store.as_ref(), "test.cancel", &start)
+            .await
+            .task_id
+            .unwrap();
+        assert!(
+            crate::assistant::cancel(store.as_ref(), "test.cancel", &id)
+                .await
+                .ok
+        );
+        let ordinary = manager.prepare(input).await.unwrap();
+        let forbidden_start = assemble_protocol::downloads::AssistantDownloadStart {
+            request_id: "ordinary-preview".into(),
+            preview_id: ordinary.id.clone(),
+            variant_id: ordinary.variants[0].id.clone(),
+        };
+        assert_eq!(
+            crate::assistant::start(store.as_ref(), "test.cancel", &forbidden_start)
+                .await
+                .error_code
+                .as_deref(),
+            Some("DOWNLOAD_EXPIRED")
+        );
+        let ordinary_id = manager
+            .start(&ordinary.id, &ordinary.variants[0].id)
+            .await
+            .unwrap();
+        assert_eq!(
+            crate::assistant::status(store.as_ref(), "test.cancel", &ordinary_id)
+                .await
+                .error_code
+                .as_deref(),
+            Some("DOWNLOAD_EXPIRED")
+        );
+        assert_eq!(
+            crate::assistant::cancel(store.as_ref(), "test.cancel", &ordinary_id)
+                .await
+                .error_code
+                .as_deref(),
+            Some("DOWNLOAD_EXPIRED")
+        );
+        manager.shutdown().await;
+        assert_eq!(
+            crate::assistant::status(store.as_ref(), "test.cancel", &id)
+                .await
+                .task
+                .unwrap()
+                .phase,
+            assemble_protocol::downloads::DownloadPhase::Cancelled
+        );
+        bridge.shutdown().await;
+        server.abort();
+        let _ = server.await;
+    }
+
+    #[tokio::test]
+    async fn assistant_requires_two_steps_deduplicates_and_obeys_the_local_switch() {
+        use assemble_protocol::downloads::{
+            AssistantDownloadStart, DownloadInitiator, DownloadPhase,
+        };
+        let folder = tempfile::tempdir().unwrap();
+        let history = folder.path().join("history.json");
+        let store = Arc::new(MemorySecretStore::new());
+        let manager = DownloadManager::open(
+            history.clone(),
+            folder.path().to_owned(),
+            MediaTools::test_available(),
+            |_| {},
+        )
+        .unwrap();
+        let bridge =
+            BrowserServer::start(Arc::clone(&manager), store.clone(), "test.assistant", || {})
+                .await
+                .unwrap();
+        let input = DownloadInput {
+            kind: DownloadKind::Video,
+            url: "http://127.0.0.1:99/video.mp4?private=source".into(),
+            page_url: None,
+            title: Some("中文 <影片>".into()),
+        };
+        manager.set_assistant_allowed(false);
+        assert_eq!(
+            crate::assistant::preview(store.as_ref(), "test.assistant", input.clone())
+                .await
+                .error_code
+                .as_deref(),
+            Some("DOWNLOAD_ASSISTANT_DISABLED")
+        );
+        assert!(manager.view().tasks.is_empty());
+        manager.set_assistant_allowed(true);
+        let preview = crate::assistant::preview(store.as_ref(), "test.assistant", input)
+            .await
+            .preview
+            .unwrap();
+        assert!(manager.view().tasks.is_empty());
+        let start = AssistantDownloadStart {
+            request_id: "once".into(),
+            preview_id: preview.id,
+            variant_id: preview.variants[0].id.clone(),
+        };
+        let first = crate::assistant::start(store.as_ref(), "test.assistant", &start).await;
+        assert!(first.ok);
+        let second = crate::assistant::start(store.as_ref(), "test.assistant", &start).await;
+        assert_eq!(first.task_id, second.task_id);
+        assert_eq!(manager.view().tasks.len(), 1);
+        let id = first.task_id.unwrap();
+        let reply = crate::assistant::status(store.as_ref(), "test.assistant", &id).await;
+        assert_eq!(
+            reply.task.unwrap().initiated_by,
+            Some(DownloadInitiator::Assistant)
+        );
+        let changed = AssistantDownloadStart {
+            variant_id: "changed".into(),
+            ..start
+        };
+        assert_eq!(
+            crate::assistant::start(store.as_ref(), "test.assistant", &changed)
+                .await
+                .error_code
+                .as_deref(),
+            Some(INVALID_REQUEST)
+        );
+        let endpoint: Endpoint =
+            serde_json::from_str(store.get(&key("test.assistant")).unwrap().unwrap().expose())
+                .unwrap();
+        let response = reqwest::Client::new()
+            .get(format!(
+                "http://127.0.0.1:{}/v1/downloads/{id}",
+                endpoint.port
+            ))
+            .bearer_auth(&endpoint.token.0)
+            .header("origin", "https://example.test")
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::FORBIDDEN);
+        manager.shutdown().await;
+        let task = crate::assistant::status(store.as_ref(), "test.assistant", &id)
+            .await
+            .task
+            .unwrap();
+        assert!(matches!(
+            task.phase,
+            DownloadPhase::Failed | DownloadPhase::Cancelled
+        ));
+        let text = serde_json::to_string(&task).unwrap();
+        for forbidden in [
+            "127.0.0.1:99",
+            "private=source",
+            "history.json",
+            "token",
+            "cookie",
+        ] {
+            assert!(!text.contains(forbidden));
+        }
+        manager.set_assistant_allowed(false);
+        assert_eq!(
+            crate::assistant::start(store.as_ref(), "test.assistant", &changed)
+                .await
+                .error_code
+                .as_deref(),
+            Some("DOWNLOAD_ASSISTANT_DISABLED")
+        );
+        assert_eq!(
+            crate::assistant::cancel(store.as_ref(), "test.assistant", &id)
+                .await
+                .error_code
+                .as_deref(),
+            Some("DOWNLOAD_ASSISTANT_DISABLED")
+        );
+        assert_eq!(
+            crate::assistant::status(store.as_ref(), "test.assistant", &id)
+                .await
+                .error_code
+                .as_deref(),
+            Some("DOWNLOAD_ASSISTANT_DISABLED")
+        );
+        bridge.shutdown().await;
+        assert_eq!(
+            crate::assistant::status(store.as_ref(), "test.assistant", &id)
+                .await
+                .error_code
+                .as_deref(),
+            Some(NOT_CONNECTED)
+        );
+        let reopened = DownloadManager::open(
+            history,
+            folder.path().to_owned(),
+            MediaTools::test_available(),
+            |_| {},
+        )
+        .unwrap();
+        assert_eq!(
+            reopened.view().tasks[0].initiated_by,
+            Some(DownloadInitiator::Assistant)
+        );
+        reopened.shutdown().await;
+    }
 
     #[tokio::test]
     async fn local_bridge_requires_auth_rejects_web_origins_and_deduplicates() {
@@ -386,6 +655,7 @@ mod tests {
         assert!(send(store.as_ref(), "test.bridge", None).await.ok);
         let mut request = BrowserDownload {
             request_id: "once".into(),
+            via: None,
             input: DownloadInput {
                 kind: DownloadKind::Video,
                 url: "http://127.0.0.1:99/video.mp4".into(),

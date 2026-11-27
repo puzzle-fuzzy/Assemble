@@ -84,6 +84,138 @@ fn nearly(left: f64, right: f64) -> bool {
     (left - right).abs() < 1e-9
 }
 
+fn restart(registry: &Registry) -> Registry {
+    let stored = serde_json::to_vec(&registry.history("https://example.test", "alice")).unwrap();
+    Registry::from_history(
+        serde_json::from_slice(&stored).unwrap(),
+        "https://example.test",
+        "alice",
+    )
+}
+
+#[test]
+fn completed_history_keeps_local_file_actions_but_paths_do_not_reach_the_view() {
+    let mut registry = Registry::default();
+    registry.offer(&incoming("saved"));
+    registry.begin_receive("saved");
+    let path = std::env::temp_dir().join("保存的合同.pdf");
+    registry.receive_completed("saved", "保存的合同.pdf", path.clone(), 42);
+    registry.settled("saved");
+    let restored = restart(&registry);
+    assert_eq!(restored.saved_file("saved"), Some(path.clone()));
+    assert_eq!(restored.saved_file_for_handle(42), None);
+    assert_eq!(restored.next_job(Instant::now()), Next::Nothing);
+    assert_eq!(
+        view_of(&restored, "saved").saved_as.as_deref(),
+        Some("保存的合同.pdf")
+    );
+    let view = serde_json::to_value(restored.views()).unwrap();
+    assert!(view[0].get("savedPath").is_none());
+    assert!(
+        !serde_json::to_string(&view)
+            .unwrap()
+            .contains(&path.display().to_string())
+    );
+}
+
+#[test]
+fn interrupted_receives_wait_for_server_resync_and_are_never_acknowledged_as_complete() {
+    let mut registry = Registry::default();
+    let send = incoming("pending");
+    registry.offer(&send);
+    registry.begin_receive("pending");
+    registry.progress("pending", 0.7);
+    let mut restored = restart(&registry);
+    let view = view_of(&restored, "pending");
+    assert_eq!(view.phase, TransferPhase::Failed);
+    assert_eq!(view.failure, Some(TransferFailure::Interrupted));
+    assert!(!view.retryable);
+    assert_eq!(restored.settlement_of("pending"), None);
+    assert_eq!(restored.next_job(Instant::now()), Next::Nothing);
+    restored.offer(&send);
+    restored.offer(&send);
+    assert_eq!(restored.views().len(), 1);
+    assert_eq!(view_of(&restored, "pending").phase, TransferPhase::Queued);
+    assert_eq!(
+        restored.begin_receive("pending"),
+        Some(Delivery::FromDevice(send))
+    );
+}
+
+#[test]
+fn a_saved_file_only_resends_the_receipt_after_restart_instead_of_downloading_twice() {
+    let mut registry = Registry::default();
+    let send = incoming("saved");
+    registry.offer(&send);
+    registry.begin_receive("saved");
+    let path = std::env::temp_dir().join("合同.pdf");
+    registry.receive_completed("saved", "合同.pdf", path.clone(), 42);
+    let mut restored = restart(&registry);
+    restored.offer(&send);
+    assert_eq!(restored.views().len(), 1);
+    assert_eq!(restored.saved_file("saved"), Some(path));
+    assert_eq!(restored.settlement_of("saved"), Some((send, None)));
+    assert!(restored.begin_receive("saved").is_none());
+}
+
+#[test]
+fn outgoing_history_does_not_reopen_source_files_and_keeps_local_ids_unique() {
+    let mut registry = Registry::default();
+    let (first, second) = queued(&mut registry);
+    let mut send = offered("server-send");
+    send.size = 10;
+    registry.begin_send(&first);
+    registry.send_uploaded(&first, &send);
+    registry.send_failed(&second, TransferFailure::WriteFailed);
+    let mut restored = restart(&registry);
+    assert!(!view_of(&restored, &second).retryable);
+    assert!(!restored.retry_failed_send(&second, Instant::now()));
+    assert!(restored.begin_send(&first).is_none());
+    assert!(restored.draft_view().is_none());
+    // 服务端仍在等待对方接收时，只接上状态，不重新上传。
+    assert_eq!(restored.updated(&send), Updated::Applied);
+    assert_eq!(view_of(&restored, &first).phase, TransferPhase::Waiting);
+    let mut delivered = send;
+    delivered.state = SendState::Delivered;
+    restored.updated(&delivered);
+    assert_eq!(view_of(&restored, &first).phase, TransferPhase::Complete);
+    assert_eq!(
+        restored.queue(Destination::Drive, vec![file("new", 1, &"a".repeat(64))]),
+        ["out-3"]
+    );
+}
+
+#[test]
+fn histories_are_account_and_origin_bound_and_capped_without_drafts() {
+    let mut registry = Registry::default();
+    for number in 0..110 {
+        registry.offer(&incoming(&format!("incoming-{number}")));
+    }
+    registry.set_draft(vec![file("secret draft", 20, &"b".repeat(64))]);
+    let history = registry.history("https://one.test", "alice");
+    assert_eq!(
+        Registry::from_history(history.clone(), "https://one.test", "bob")
+            .views()
+            .len(),
+        0
+    );
+    assert_eq!(
+        Registry::from_history(history.clone(), "https://two.test", "alice")
+            .views()
+            .len(),
+        0
+    );
+    let restored = Registry::from_history(history, "https://one.test", "alice");
+    assert_eq!(restored.views().len(), 100);
+    assert_eq!(restored.views()[0].id, "incoming-109");
+    assert!(restored.draft_view().is_none());
+    assert!(
+        !serde_json::to_string(&registry.history("https://one.test", "alice"))
+            .unwrap()
+            .contains("secret draft")
+    );
+}
+
 #[test]
 fn the_worker_takes_files_in_order_receiving_first_and_only_when_they_are_due() {
     let now = Instant::now();

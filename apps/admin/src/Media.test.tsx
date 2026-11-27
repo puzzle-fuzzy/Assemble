@@ -7,10 +7,16 @@ import {
 } from "@assemble/media/browser-client";
 import type { MediaClient } from "@assemble/media/client";
 import { MediaCollectionsManager } from "@assemble/media/components/collections";
+import { MediaEditor } from "@assemble/media/components/editor";
+import { MediaImport } from "@assemble/media/components/import";
 import { MediaDetails } from "@assemble/media/components/media-details";
 import { MediaWorkspace } from "@assemble/media/components/workspace";
 import type { MediaEntry, MediaJob, MediaList } from "@assemble/media/model";
 import { act, useState } from "react";
+import {
+  chooseSelect,
+  selectTrigger,
+} from "../../../packages/ui/src/test-support/select";
 import { App } from "./App";
 import {
   button,
@@ -25,6 +31,8 @@ import {
 } from "./test-support/dom";
 
 const entry: MediaEntry = {
+  published: true,
+  owner: null,
   id: "film-1",
   version: 3,
   scope: "shared",
@@ -113,10 +121,10 @@ function response(path: string): Response {
       registrationsToday: 1,
     });
   if (path === "/v1/media/capabilities") return json(capabilities);
-  if (path.startsWith("/v1/media/shared/entries?")) return json(list());
-  if (path === `/v1/media/shared/entries/${entry.id}`)
+  if (path.startsWith("/v1/admin/media/entries?")) return json(list());
+  if (path === `/v1/admin/media/entries/${entry.id}`)
     return json({ item: entry });
-  if (path === `/v1/media/shared/entries/${entry.id}/gallery`)
+  if (path === `/v1/admin/media/entries/${entry.id}/gallery`)
     return json({ entryId: entry.id, version: entry.version, items: [] });
   if (path.startsWith("/v1/media/search?")) return json({ items: [candidate] });
   if (path.startsWith("/v1/media/catalog/details?"))
@@ -218,6 +226,236 @@ afterEach(async () => {
 });
 
 describe("影视业务界面与权限", () => {
+  test("影视编辑下拉只更新草稿，提交仍携带原版本，保存中禁止切换", async () => {
+    let finish: ((response: Response) => void) | undefined;
+    handle = (path, init) =>
+      path === `/v1/admin/media/entries/${entry.id}` && init?.method === "PUT"
+        ? new Promise((resolve) => {
+            finish = resolve;
+          })
+        : response(path);
+    const client = createBrowserMediaClient("shared", {
+      readMode: "admin",
+      csrfToken: () => session.csrfToken,
+    });
+    let saved: MediaEntry | undefined;
+    await render(
+      <MediaEditor
+        client={client}
+        entry={entry}
+        onClose={() => {}}
+        onSaved={(value) => {
+          saved = value;
+        }}
+      />,
+    );
+    expect(selectTrigger(document.body, "作品类型").textContent).toContain(
+      "电影",
+    );
+    expect(selectTrigger(document.body, "观看状态").textContent).toContain(
+      "在看",
+    );
+    await chooseSelect(document.body, "作品类型", "剧集");
+    await chooseSelect(document.body, "观看状态", "想看");
+    expect(requests).toHaveLength(0);
+    await click(button(document.body, "保存"));
+    expect(selectTrigger(document.body, "作品类型").disabled).toBe(true);
+    expect(selectTrigger(document.body, "观看状态").disabled).toBe(true);
+    expect(JSON.parse(String(requests[0]?.init?.body))).toMatchObject({
+      version: entry.version,
+      content: { title: entry.title, mediaType: "tv", status: "planned" },
+    });
+    await act(async () =>
+      finish?.(
+        json({
+          item: { ...entry, mediaType: "tv", status: "planned", version: 4 },
+        }),
+      ),
+    );
+    expect(saved).toMatchObject({
+      mediaType: "tv",
+      status: "planned",
+      version: 4,
+    });
+  });
+
+  test("影视导入下拉保留搜索参数和结果清理，未配置的来源仍禁用", async () => {
+    const client = createBrowserMediaClient("shared", { readMode: "admin" });
+    await render(
+      <MediaImport
+        client={client}
+        capabilities={{
+          ...capabilities,
+          providers: { tmdb: true, douban: true },
+        }}
+        imageLoader={browserImageLoader}
+        onClose={() => {}}
+        onImported={() => {}}
+      />,
+    );
+    expect(selectTrigger(document.body, "资料源").textContent).toContain(
+      "TMDB",
+    );
+    await chooseSelect(document.body, "作品类型", "剧集");
+    expect(requests).toHaveLength(0);
+    await change(field(document.body, "片名关键词"), " source title ");
+    await click(button(document.body, "搜索"));
+    expect(
+      new URL(requests.at(-1)?.path ?? "", "http://localhost").searchParams.get(
+        "mediaType",
+      ),
+    ).toBe("tv");
+    expect(document.body.textContent).toContain("来源电影");
+    const count = requests.length;
+    await chooseSelect(document.body, "资料源", "豆瓣");
+    expect(requests).toHaveLength(count);
+    expect(document.body.textContent).not.toContain("来源电影");
+    await click(button(document.body, "搜索"));
+    const params = new URL(requests.at(-1)?.path ?? "", "http://localhost")
+      .searchParams;
+    expect(Object.fromEntries(params)).toMatchObject({
+      provider: "douban",
+      mediaType: "tv",
+      q: "source title",
+    });
+    await cleanup();
+    await render(
+      <MediaImport
+        client={client}
+        capabilities={capabilities}
+        imageLoader={browserImageLoader}
+        onClose={() => {}}
+        onImported={() => {}}
+      />,
+    );
+    await act(async () =>
+      selectTrigger(document.body, "资料源").dispatchEvent(
+        new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }),
+      ),
+    );
+    await waitFor(
+      () => document.querySelector('[role="option"]') !== null,
+      "来源选项",
+    );
+    const disabled = [
+      ...document.querySelectorAll<HTMLElement>('[role="option"]'),
+    ].find((item) => item.textContent?.trim() === "豆瓣");
+    expect(disabled?.getAttribute("aria-disabled")).toBe("true");
+  });
+
+  test("管理端不可代公开，已公开记录可撤下或在保存前恢复原选择", async () => {
+    const owned: MediaEntry = {
+      ...entry,
+      scope: "private",
+      owner: { id: "owner-1", displayName: "他人", avatarUrl: null },
+      published: false,
+    };
+    handle = (path) =>
+      path.startsWith("/v1/admin/media/entries?")
+        ? json(list([owned]))
+        : path === `/v1/admin/media/entries/${owned.id}`
+          ? json({ item: owned })
+          : response(path);
+    const host = await render(<App />);
+    await navigate(host, "media");
+    await click(button(host, `查看 ${owned.title} 的详情`));
+    await click(button(document.body, "编辑"));
+    let checkbox = document.body.querySelector<HTMLButtonElement>(
+      '[role="checkbox"][id$="-published"]',
+    );
+    if (!checkbox) throw new Error("missing publication choice");
+    expect(checkbox.disabled).toBe(true);
+    expect(checkbox.getAttribute("aria-checked")).toBe("false");
+    expect(document.body.textContent).toContain("只有所有者本人能公开这条记录");
+    await act(async () => setLanguage("en"));
+    expect(document.body.textContent).toContain(
+      "Only the owner can publish this entry.",
+    );
+    await act(async () => setLanguage("zh-CN"));
+    await cleanup();
+    requests.length = 0;
+    const client = createBrowserMediaClient("shared", {
+      readMode: "admin",
+      csrfToken: () => "media-csrf-test",
+    });
+    handle = (_path, init) =>
+      json({
+        item: {
+          ...owned,
+          published: JSON.parse(String(init?.body)).content.published,
+          version: owned.version + 1,
+        },
+      });
+    const saved = mock((value: MediaEntry) => value);
+    await render(
+      <MediaEditor
+        client={client}
+        entry={{ ...owned, published: true }}
+        viewerAccountId={session.account.id}
+        onClose={() => {}}
+        onSaved={saved}
+      />,
+    );
+    checkbox = document.body.querySelector<HTMLButtonElement>(
+      '[role="checkbox"][id$="-published"]',
+    );
+    if (!checkbox) throw new Error("missing publication choice");
+    expect(checkbox.disabled).toBe(false);
+    await click(checkbox);
+    expect(checkbox.getAttribute("aria-checked")).toBe("false");
+    expect(checkbox.disabled).toBe(false);
+    await click(checkbox);
+    expect(checkbox.getAttribute("aria-checked")).toBe("true");
+    await click(button(document.body, "保存"));
+    expect(JSON.parse(String(requests.at(-1)?.init?.body))).toMatchObject({
+      content: { published: true },
+    });
+    await cleanup();
+    await render(
+      <MediaEditor
+        client={client}
+        entry={{ ...owned, published: true }}
+        viewerAccountId={session.account.id}
+        onClose={() => {}}
+        onSaved={saved}
+      />,
+    );
+    checkbox = document.body.querySelector<HTMLButtonElement>(
+      '[role="checkbox"][id$="-published"]',
+    );
+    if (!checkbox) throw new Error("missing publication choice");
+    await click(checkbox);
+    await click(button(document.body, "保存"));
+    expect(JSON.parse(String(requests.at(-1)?.init?.body))).toMatchObject({
+      content: { published: false },
+    });
+    await cleanup();
+    await render(
+      <MediaEditor
+        client={client}
+        entry={{
+          ...owned,
+          owner: {
+            id: session.account.id,
+            displayName: "管理员本人",
+            avatarUrl: null,
+          },
+        }}
+        viewerAccountId={session.account.id}
+        onClose={() => {}}
+        onSaved={saved}
+      />,
+    );
+    checkbox = document.body.querySelector<HTMLButtonElement>(
+      '[role="checkbox"][id$="-published"]',
+    );
+    if (!checkbox) throw new Error("missing own publication choice");
+    expect(checkbox.disabled).toBe(false);
+    await click(checkbox);
+    expect(checkbox.getAttribute("aria-checked")).toBe("true");
+    expect(host).toBeTruthy();
+  });
+
   test("管理详情复用封面预览和轮播，关闭原图保留详情、筛选与维护操作", async () => {
     const poster = {
       assetId: "admin-cover",
@@ -227,7 +465,7 @@ describe("影视业务界面与权限", () => {
     };
     const second = { ...poster, assetId: "admin-second" };
     handle = (path) =>
-      path === `/v1/media/shared/entries/${entry.id}`
+      path === `/v1/admin/media/entries/${entry.id}`
         ? json({ item: { ...entry, poster } })
         : path.endsWith(`/${entry.id}/gallery`)
           ? json({
@@ -301,7 +539,7 @@ describe("影视业务界面与权限", () => {
       contentType: "image/webp",
     };
     handle = (path) =>
-      path === `/v1/media/shared/entries/${entry.id}`
+      path === `/v1/admin/media/entries/${entry.id}`
         ? json({ item: { ...entry, poster } })
         : response(path);
     const host = await render(<App />);
@@ -335,7 +573,7 @@ describe("影视业务界面与权限", () => {
     };
     let deny: ((value: Response) => void) | undefined;
     handle = (path) =>
-      path === `/v1/media/shared/entries/${entry.id}`
+      path === `/v1/admin/media/entries/${entry.id}`
         ? json({ item: { ...entry, poster } })
         : path.endsWith(`/${entry.id}/gallery`)
           ? new Promise<Response>((resolve) => {
@@ -363,6 +601,75 @@ describe("影视业务界面与权限", () => {
     expect(document.body.textContent).not.toContain(entry.notes);
   });
 
+  test("私人记录默认不公开，发布和撤销都必须明确保存，内容携带当前版本", async () => {
+    const owned: MediaEntry = {
+      ...entry,
+      scope: "private",
+      owner: { id: "owner-1", displayName: "本人", avatarUrl: null },
+      published: false,
+    };
+    const client = createBrowserMediaClient("private", {
+      csrfToken: () => "media-csrf-test",
+    });
+    handle = (path, init) =>
+      path === `/v1/media/private/entries/${owned.id}` && init?.method === "PUT"
+        ? json({
+            item: {
+              ...owned,
+              ...JSON.parse(String(init.body)).content,
+              version: owned.version + 1,
+            },
+          })
+        : response(path);
+    const saved = mock((value: MediaEntry) => value);
+    let host = await render(
+      <MediaEditor
+        client={client}
+        entry={owned}
+        viewerAccountId="owner-1"
+        onClose={() => {}}
+        onSaved={saved}
+      />,
+    );
+    let checkbox = document.body.querySelector<HTMLButtonElement>(
+      '[role="checkbox"][id$="-published"]',
+    );
+    if (!checkbox) throw new Error("missing publication choice");
+    expect(checkbox.getAttribute("aria-checked")).toBe("false");
+    await click(checkbox);
+    expect(requests.filter((item) => item.init?.method === "PUT")).toHaveLength(
+      0,
+    );
+    await click(button(document.body, "保存"));
+    expect(JSON.parse(String(requests.at(-1)?.init?.body))).toMatchObject({
+      version: owned.version,
+      content: { published: true },
+    });
+    expect(saved.mock.calls[0]?.[0].published).toBe(true);
+    await cleanup();
+    requests.length = 0;
+    host = await render(
+      <MediaEditor
+        client={client}
+        entry={{ ...owned, published: true, version: owned.version + 1 }}
+        viewerAccountId="owner-1"
+        onClose={() => {}}
+        onSaved={saved}
+      />,
+    );
+    checkbox = document.body.querySelector<HTMLButtonElement>(
+      '[role="checkbox"][id$="-published"]',
+    );
+    if (!checkbox) throw new Error("missing publication choice");
+    expect(checkbox.getAttribute("aria-checked")).toBe("true");
+    await click(checkbox);
+    await click(button(document.body, "保存"));
+    expect(JSON.parse(String(requests.at(-1)?.init?.body))).toMatchObject({
+      version: owned.version + 1,
+      content: { published: false },
+    });
+    expect(host).toBeTruthy();
+  });
   test("管理影视详情保留查询和列表，关闭弹窗后焦点回到原行", async () => {
     const host = await render(<App />);
     await navigate(host, "media");
@@ -423,7 +730,10 @@ describe("影视业务界面与权限", () => {
             page: Number(
               new URL(path, "http://localhost").searchParams.get("page"),
             ),
-            pageSize: 10,
+            pageSize: Number(
+              new URL(path, "http://localhost").searchParams.get("pageSize") ??
+                20,
+            ),
           })
         : path === `/v1/media/collections/${collection.id}`
           ? json({ item: collection })
@@ -458,7 +768,7 @@ describe("影视业务界面与权限", () => {
       collection.title,
     );
     await click(button(document.body, "关闭"));
-    expect(host.textContent).toContain("第 2 / 3 页");
+    expect(host.textContent).toContain("第 2 / 2 页");
     expect(document.activeElement === trigger).toBe(true);
     await act(async () => setLanguage("en"));
     expect(publicPage?.textContent).toBe("View collections");
@@ -466,7 +776,7 @@ describe("影视业务界面与权限", () => {
   test("筛选位于表头，搜索仅用占位文字，输入框清空图标重置全部条件并保留焦点和分页条数", async () => {
     const host = await render(
       <MediaWorkspace
-        client={createBrowserMediaClient("shared")}
+        client={createBrowserMediaClient("shared", { readMode: "admin" })}
         imageLoader={browserImageLoader}
         canEdit={false}
         accountKey="filters"
@@ -557,12 +867,12 @@ describe("影视业务界面与权限", () => {
 
   test("空表格仅显示本地化文字，不显示空态图标", async () => {
     handle = (path) =>
-      path.startsWith("/v1/media/shared/entries?")
+      path.startsWith("/v1/admin/media/entries?")
         ? json(list([]))
         : response(path);
     const host = await render(
       <MediaWorkspace
-        client={createBrowserMediaClient("shared")}
+        client={createBrowserMediaClient("shared", { readMode: "admin" })}
         imageLoader={browserImageLoader}
         canEdit={false}
         accountKey="empty"
@@ -577,7 +887,7 @@ describe("影视业务界面与权限", () => {
   });
 
   test("详情中的刷新返回最新列表，不保留已过期的详情版本", async () => {
-    const client = createBrowserMediaClient("shared");
+    const client = createBrowserMediaClient("shared", { readMode: "admin" });
     const host = await render(
       <MediaWorkspace
         client={client}
@@ -589,7 +899,7 @@ describe("影视业务界面与权限", () => {
     await click(button(host, "查看 真实片名 的详情"));
     expect(host.textContent).toContain("服务端简介");
     handle = (path) =>
-      path.startsWith("/v1/media/shared/entries?")
+      path.startsWith("/v1/admin/media/entries?")
         ? json(list([{ ...entry, title: "更新后片名", version: 4 }]))
         : response(path);
     await click(button(host, "刷新"));
@@ -599,7 +909,7 @@ describe("影视业务界面与权限", () => {
   test("管理入口读取真实片库，携带版本和CSRF更新三种状态；冲突保留输入", async () => {
     let conflict = true;
     handle = (path, init) =>
-      !conflict && path.startsWith("/v1/media/shared/entries?")
+      !conflict && path.startsWith("/v1/admin/media/entries?")
         ? json(list([{ ...entry, version: 4, status: "completed" }]))
         : path === `/v1/admin/media/entries/${entry.id}` &&
             init?.method === "PUT"
@@ -617,7 +927,7 @@ describe("影视业务界面与权限", () => {
       -1,
     );
     if (!editor) throw new Error("missing editor");
-    await change(field(editor, "观看状态"), "completed");
+    await chooseSelect(editor, "观看状态", "已看");
     await change(field(document.body, "片名"), "保留我的输入");
     await click(button(document.body, "保存"));
     const update = requests.find((item) => item.init?.method === "PUT");
@@ -634,7 +944,7 @@ describe("影视业务界面与权限", () => {
     conflict = false;
     await click(button(document.body, "载入最新资料"));
     expect(field(document.body, "片名").value).toBe(entry.title);
-    await change(field(editor, "观看状态"), "completed");
+    await chooseSelect(editor, "观看状态", "已看");
     await click(button(document.body, "保存"));
     expect(document.body.querySelector('[role="dialog"]')).toBeNull();
     expect(host.textContent).toContain("已看");
@@ -644,7 +954,7 @@ describe("影视业务界面与权限", () => {
     await navigate(host, "media");
     await waitForText(host, entry.title);
     handle = (path) =>
-      path.startsWith("/v1/media/shared/entries?")
+      path.startsWith("/v1/admin/media/entries?")
         ? json({ code: "HTTP_401", message: "secret diagnostics" }, 401)
         : response(path);
     await click(button(host, "刷新"));
@@ -692,7 +1002,7 @@ describe("影视业务界面与权限", () => {
       let resolve: ((response: Response) => void) | undefined;
       let signal: AbortSignal | null | undefined;
       handle = (path, init) =>
-        path === `/v1/media/shared/entries/${entry.id}`
+        path === `/v1/admin/media/entries/${entry.id}`
           ? new Promise((done) => {
               resolve = done;
               signal = init?.signal;
@@ -714,13 +1024,13 @@ describe("影视业务界面与权限", () => {
     let resolve: ((response: Response) => void) | undefined;
     let signal: AbortSignal | null | undefined;
     handle = (path, init) =>
-      path === `/v1/media/shared/entries/${entry.id}`
+      path === `/v1/admin/media/entries/${entry.id}`
         ? new Promise((done) => {
             resolve = done;
             signal = init?.signal;
           })
         : response(path);
-    const client = createBrowserMediaClient("shared");
+    const client = createBrowserMediaClient("shared", { readMode: "admin" });
     const host = await render(<AccountSurface client={client} />);
     await click(button(host, "查看 真实片名 的详情"));
     expect(signal?.aborted).toBe(false);
@@ -780,7 +1090,7 @@ describe("影视业务界面与权限", () => {
   test("合集从共享库选择并维护实际顺序，保存只提交成员标识", async () => {
     const second = { ...entry, id: "film-2", title: "第二部" };
     handle = (path, init) =>
-      path.startsWith("/v1/media/shared/entries?")
+      path.startsWith("/v1/admin/media/entries?")
         ? json(list([entry, second]))
         : path === "/v1/admin/media/collections" && init?.method === "POST"
           ? json({
@@ -800,7 +1110,10 @@ describe("影视业务界面与权限", () => {
     const host = await render(
       <MediaCollectionsManager
         client={createBrowserMediaCollectionsClient(options)}
-        libraryClient={createBrowserMediaClient("shared", options)}
+        libraryClient={createBrowserMediaClient("shared", {
+          ...options,
+          readMode: "admin",
+        })}
         imageLoader={browserImageLoader}
         accountKey="admin"
       />,
@@ -868,7 +1181,7 @@ describe("影视业务界面与权限", () => {
     const host = await render(<App />);
     await navigate(host, "media");
     await act(async () => {
-      const tab = button(host, "共享片库统计");
+      const tab = button(host, "全站片库统计");
       tab.focus();
       tab.dispatchEvent(
         new KeyboardEvent("keydown", { key: "Enter", bubbles: true }),
@@ -980,7 +1293,7 @@ describe("影视业务界面与权限", () => {
       contentType: "image/jpeg",
     };
     handle = (path, init) =>
-      path === `/v1/media/shared/entries/${entry.id}/gallery`
+      path === `/v1/admin/media/entries/${entry.id}/gallery`
         ? json({ entryId: entry.id, version: 3, items: [image] })
         : path === `/v1/admin/media/entries/${entry.id}/poster` &&
             init?.method === "PATCH"
@@ -1003,7 +1316,7 @@ describe("影视业务界面与权限", () => {
     expect(button(dialog, "当前封面").disabled).toBe(true);
   });
   test("切换英语翻译当前片库和详情，保留筛选值且不重复请求", async () => {
-    const client = createBrowserMediaClient("shared");
+    const client = createBrowserMediaClient("shared", { readMode: "admin" });
     const host = await render(
       <MediaWorkspace
         client={client}

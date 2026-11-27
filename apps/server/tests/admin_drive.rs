@@ -146,6 +146,155 @@ async fn all_accounts_are_listed_with_stable_pages_and_only_verified_public_meta
 }
 
 #[tokio::test]
+async fn verified_administrators_download_cross_account_files_with_native_browser_headers_and_ranges()
+ {
+    let (mut f, device, _, _) = seeded().await;
+    let path = "/v1/admin/drive/files/a-file/content";
+    let response = f
+        .browser
+        .get(path)
+        .header("sec-fetch-site", "same-origin")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.headers()["cache-control"], "no-store");
+    assert_eq!(
+        response.headers()["cross-origin-resource-policy"],
+        "same-origin"
+    );
+    assert_eq!(response.headers()["x-content-type-options"], "nosniff");
+    let disposition = response.headers()["content-disposition"].to_str().unwrap();
+    assert!(disposition.starts_with("attachment; filename*=UTF-8''"));
+    assert!(disposition.contains("%25"));
+    assert_eq!(
+        response.bytes().await.unwrap().as_ref(),
+        b"cloud storage contents"
+    );
+    let part = f
+        .browser
+        .get(path)
+        .header("origin", &f.browser.origin)
+        .header("range", "bytes=0-4")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(part.status(), StatusCode::PARTIAL_CONTENT);
+    assert_eq!(part.bytes().await.unwrap().as_ref(), b"cloud");
+    assert_eq!(
+        f.browser
+            .get("/v1/admin/drive/files/missing/content")
+            .header("origin", &f.browser.origin)
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::NOT_FOUND
+    );
+    let ordinary = reqwest::Client::new()
+        .get(format!(
+            "{}/v1/drive/files/a-file/content",
+            f.browser.origin
+        ))
+        .bearer_auth(device.token.expose())
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(
+        ordinary.status(),
+        StatusCode::NOT_FOUND,
+        "ordinary device access stays scoped to its own account"
+    );
+    f.server.stop().await;
+}
+
+#[tokio::test]
+async fn administrator_download_rejects_anonymous_device_cross_site_unverified_and_revoked_sessions()
+ {
+    let (mut f, device, _, _) = seeded().await;
+    let path = "/v1/admin/drive/files/a-file/content";
+    for token in [None, Some(device.token.expose())] {
+        let request = reqwest::Client::new()
+            .get(format!("{}{path}", f.browser.origin))
+            .header("origin", &f.browser.origin);
+        let response = if let Some(token) = token {
+            request.bearer_auth(token)
+        } else {
+            request
+        }
+        .send()
+        .await
+        .unwrap();
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+        assert!(!response.headers().contains_key("content-disposition"));
+        assert!(
+            !response
+                .text()
+                .await
+                .unwrap()
+                .contains("cloud storage contents")
+        );
+    }
+    for (origin, site) in [
+        (None, None),
+        (Some("https://foreign.example.test"), Some("same-origin")),
+        (None, Some("cross-site")),
+        (None, Some("same-site")),
+    ] {
+        let mut request = f.browser.get(path);
+        if let Some(origin) = origin {
+            request = request.header("origin", origin);
+        }
+        if let Some(site) = site {
+            request = request.header("sec-fetch-site", site);
+        }
+        let response = request.send().await.unwrap();
+        assert_eq!(response.status(), StatusCode::FORBIDDEN);
+        assert!(!response.headers().contains_key("content-disposition"));
+    }
+    for change in [
+        "UPDATE accounts SET is_super_admin = 0 WHERE email = ?",
+        "UPDATE accounts SET is_super_admin = 1, email_verified_at = NULL WHERE email = ?",
+    ] {
+        sqlx::query(change)
+            .bind(EMAIL)
+            .execute(&f.server.state.pool)
+            .await
+            .unwrap();
+        assert_eq!(
+            f.browser
+                .get(path)
+                .header("origin", &f.browser.origin)
+                .send()
+                .await
+                .unwrap()
+                .status(),
+            StatusCode::FORBIDDEN
+        );
+    }
+    sqlx::query("UPDATE accounts SET is_super_admin = 1, email_verified_at = 1 WHERE email = ?")
+        .bind(EMAIL)
+        .execute(&f.server.state.pool)
+        .await
+        .unwrap();
+    sqlx::query("UPDATE web_sessions SET expires_at = 0")
+        .execute(&f.server.state.pool)
+        .await
+        .unwrap();
+    assert_eq!(
+        f.browser
+            .get(path)
+            .header("origin", &f.browser.origin)
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::UNAUTHORIZED
+    );
+    f.server.stop().await;
+}
+
+#[tokio::test]
 async fn cloud_inventory_remains_read_only_same_origin_and_inaccessible_to_device_tokens() {
     let (mut f, device, _, _) = seeded().await;
     for path in ["/v1/admin/drive/files", "/v1/admin/storage"] {

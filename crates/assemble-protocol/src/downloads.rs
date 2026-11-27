@@ -12,6 +12,12 @@ pub enum DownloadKind {
     Video,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum DownloadInitiator {
+    Assistant,
+}
+
 /// 后续浏览器插件可复用此输入；不接受 Cookie、任意请求头、文件路径或进程参数。
 #[derive(Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -70,6 +76,8 @@ impl DownloadPhase {
 #[serde(rename_all = "camelCase")]
 pub struct DownloadTask {
     pub id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub initiated_by: Option<DownloadInitiator>,
     pub kind: DownloadKind,
     pub title: String,
     pub file_name: Option<String>,
@@ -87,11 +95,70 @@ pub struct DownloadTask {
     pub created_at: Timestamp,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DownloadsView {
+    #[serde(default = "assistant_allowed_default")]
+    pub assistant_allowed: bool,
     pub browser_task_id: Option<String>,
     pub folder_name: String,
     pub tools_available: bool,
     pub tasks: Vec<DownloadTask>,
+}
+
+pub fn assistant_allowed_default() -> bool {
+    true
+}
+
+impl Default for DownloadsView {
+    fn default() -> Self {
+        Self {
+            assistant_allowed: true,
+            browser_task_id: None,
+            folder_name: String::new(),
+            tools_available: false,
+            tasks: Vec::new(),
+        }
+    }
+}
+
+#[derive(Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct AssistantDownloadStart {
+    pub request_id: String,
+    pub preview_id: String,
+    pub variant_id: String,
+}
+
+/// 只投影安全展示字段；来源 URL、系统凭据与落盘路径永远不在这里。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct AssistantDownloadReply {
+    pub version: u8,
+    pub ok: bool,
+    pub preview: Option<DownloadPreview>,
+    pub task: Option<DownloadTask>,
+    pub task_id: Option<String>,
+    pub error_code: Option<String>,
+}
+
+impl AssistantDownloadReply {
+    pub fn success() -> Self {
+        Self {
+            version: 1,
+            ok: true,
+            preview: None,
+            task: None,
+            task_id: None,
+            error_code: None,
+        }
+    }
+
+    pub fn failure(code: &str) -> Self {
+        Self {
+            ok: false,
+            error_code: Some(code.to_owned()),
+            ..Self::success()
+        }
+    }
 }

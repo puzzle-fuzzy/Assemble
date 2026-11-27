@@ -160,7 +160,14 @@ export function PosterCard({
 }) {
   const isEntry = "id" in item;
   const destination = isEntry
-    ? entryPath(item.scope, item.id)
+    ? entryPath(
+        returnTo
+          ? returnTo.startsWith("/movies/private")
+            ? "private"
+            : "shared"
+          : item.scope,
+        item.id,
+      )
     : catalogPath(item.identity);
   const href = returnTo
     ? `${destination}?from=${encodeURIComponent(returnTo)}`

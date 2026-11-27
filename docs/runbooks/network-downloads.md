@@ -61,4 +61,12 @@ bun run browser:install --desktop /Applications/Assemble.app/Contents/MacOS/asse
 
 仅针对公开、可分享来源的手工验证可运行 `cargo run -p assemble-download --example inspect -- <公开地址>`；追加 `--download` 会实际下载到临时目录、校验音视频流后清理。不要把带私密签名的地址放进命令行或终端历史。
 
-Chrome 插件已实现主动检测网页视频/M3U8，并可将所选来源加入同一个桌面下载队列。它经受限制的原生宿主交接，临时连接凭据仅在系统凭据库与 Rust 内部；插件不接触 Assemble 登录凭据。MP4/MOV/M4V/WebM 直链先核对真实容器，再无转码封装为 MP4；浏览器提交主清单时使用最高带宽版本。加载、原生组件登记、支持范围与真实 Chrome 验证见[插件说明](../../apps/browser-extension/README.md)。当前是开发版，尚未安装到日常 Chrome 或上架商店，MCP 下载入口仍未实现。
+Chrome 插件已实现主动检测网页视频/M3U8，并可将所选来源加入同一个桌面下载队列。它经受限制的原生宿主交接，临时连接凭据仅在系统凭据库与 Rust 内部；插件不接触 Assemble 登录凭据。MP4/MOV/M4V/WebM 直链先核对真实容器，再无转码封装为 MP4；浏览器提交主清单时使用最高带宽版本。加载、原生组件登记、支持范围与真实 Chrome 验证见[插件说明](../../apps/browser-extension/README.md)。当前是开发版，尚未安装到日常 Chrome 或上架商店，MCP 本机下载入口已实现，使用方式与验证边界见下节。
+
+## 助手发起本机下载（2026-11-27）
+
+桌面应用运行时，MCP 提供 assemble_download_preview、assemble_download_start、assemble_download_status 三个具名工具：先解析公开来源，再选择预览里的清晰度并开始，最后按任务标识查询。下载只由桌面应用的同一队列执行，结果只含安全文件名，不含来源签名网址、凭据或完整本机路径。关闭应用会如实报告未连接，不自动启动。
+
+在本机设置中可关闭“允许助手在这台电脑下载”，默认开启，保存失败时开关保持原值。助手任务在下载列表标记“由助手发起”；本机保存目录沿用系统选择器设置。开关、挑战认证、两步开始、幂等和安全投影均有自动化测试；Windows/macOS 真人经对话开始并播放下载视频仍待新版本验收。此段描述源码能力，不表示当前安装版或正式安装包已经更新。
+
+边界见[决策 0016](../decisions/0016-assistant-local-downloads.md)。

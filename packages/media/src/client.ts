@@ -49,6 +49,7 @@ export interface MediaClient {
   actor(
     identity: MediaPersonIdentity,
     mediaType: MediaType,
+    query?: { page?: number; pageSize?: number },
     signal?: AbortSignal,
   ): Promise<MediaActorCredits>;
   import(

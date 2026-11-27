@@ -34,6 +34,7 @@ pub const SUPER_ADMIN_EMAIL: &str = "ASSEMBLE_SUPER_ADMIN_EMAIL";
 /// 与服务端同源发布的管理端构建目录，不包含任何账户数据。
 pub const ADMIN_ASSETS_DIR: &str = "ASSEMBLE_ADMIN_ASSETS_DIR";
 pub const MEDIA_WEB_ASSETS_DIR: &str = "ASSEMBLE_MEDIA_WEB_ASSETS_DIR";
+pub const RELEASES_WEB_ASSETS_DIR: &str = "ASSEMBLE_RELEASES_WEB_ASSETS_DIR";
 pub const DEFAULT_ADDR: &str = "127.0.0.1:8787";
 pub const DEFAULT_DRIVE_QUOTA_BYTES: u64 = 2 * 1024 * 1024 * 1024;
 pub const DEFAULT_STORAGE_BUDGET_BYTES: u64 = 10 * 1024 * 1024 * 1024;
@@ -64,6 +65,7 @@ pub struct Config {
     pub media: crate::media::MediaConfig,
     pub dht: crate::dht::config::Config,
     pub media_web_assets_dir: PathBuf,
+    pub releases_web_assets_dir: PathBuf,
     /// 只有说明了"哪个请求头可信"，服务端才按它区分请求的来源；见 [`crate::source`]。
     pub client_ip_header: Option<axum::http::HeaderName>,
 }
@@ -214,6 +216,9 @@ impl Config {
             media_web_assets_dir: get(MEDIA_WEB_ASSETS_DIR)
                 .filter(|value| !value.trim().is_empty())
                 .map_or_else(|| PathBuf::from("apps/media-web/dist"), PathBuf::from),
+            releases_web_assets_dir: get(RELEASES_WEB_ASSETS_DIR)
+                .filter(|value| !value.trim().is_empty())
+                .map_or_else(|| PathBuf::from("apps/releases-web/dist"), PathBuf::from),
             client_ip_header: optional(CLIENT_IP_HEADER, get(CLIENT_IP_HEADER), |value| {
                 <axum::http::HeaderName as std::str::FromStr>::from_str(value)
                     .map_err(|_| "要是一个请求头的名字，例如 X-Real-IP".to_owned())
@@ -240,6 +245,7 @@ impl Config {
             super_admin_email: None,
             admin_assets_dir: PathBuf::from("apps/admin/dist"),
             media_web_assets_dir: PathBuf::from("apps/media-web/dist"),
+            releases_web_assets_dir: PathBuf::from("apps/releases-web/dist"),
             client_ip_header: None,
         }
     }

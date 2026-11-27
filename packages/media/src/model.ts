@@ -24,6 +24,7 @@ export interface MediaCast {
   photo: MediaImage | null;
 }
 export interface MediaContent {
+  published: boolean;
   mediaType: MediaType;
   title: string;
   originalTitle: string;
@@ -42,6 +43,7 @@ export interface MediaEntry extends MediaContent {
   id: string;
   version: number;
   scope: MediaScope;
+  owner: { id: string; displayName: string; avatarUrl: string | null } | null;
   cast: MediaCast[];
   identities: MediaIdentity[];
   poster: MediaImage | null;
@@ -63,6 +65,8 @@ export interface MediaList {
   counts: MediaCounts;
 }
 export interface MediaQuery {
+  ownerId?: string;
+  scope?: MediaScope;
   q?: string;
   page?: number;
   pageSize?: number;
@@ -113,6 +117,9 @@ export interface MediaActorCredits {
     photo: MediaImage | null;
   };
   items: MediaCandidate[];
+  total: number;
+  page: number;
+  pageSize: number;
 }
 export interface MediaCollection {
   id: string;

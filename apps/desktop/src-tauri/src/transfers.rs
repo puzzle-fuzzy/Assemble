@@ -178,19 +178,22 @@ pub async fn resync<R: tauri::Runtime>(
     for send in &state.client.sends(&waiting, &options).await? {
         state.offer(send);
     }
-    let offered = SendQuery {
+    let outgoing = SendQuery {
         direction: Direction::Out,
-        state: Some(SendState::Offered),
+        // 应用关闭期间的最终回执也要接上，不能只看仍在等待的发送。
+        state: None,
         limit: SEND_PAGE_MAX,
     };
-    for send in &state.client.sends(&offered, &options).await? {
-        if state.abandoned(send) {
+    for send in &state.client.sends(&outgoing, &options).await? {
+        if send.state == SendState::Offered && state.abandoned(send) {
             // 撤回失败不影响这一轮的其余部分：下一次对账还会看到它。
             let _ = state
                 .client
                 .send_cancel(&send.id, &options)
                 .await
                 .map(|send| state.updated(&send));
+        } else {
+            state.updated(send);
         }
     }
     Ok(())

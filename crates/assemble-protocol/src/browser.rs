@@ -9,6 +9,8 @@ pub const BROWSER_VERSION: u8 = 1;
 pub struct BrowserDownload {
     pub request_id: String,
     pub input: DownloadInput,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub via: Option<crate::downloads::DownloadInitiator>,
 }
 
 #[derive(Deserialize, Serialize)]

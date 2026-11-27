@@ -1,5 +1,7 @@
 import { Alert, AlertDescription } from "@assemble/ui/alert";
 import { Button } from "@assemble/ui/button";
+import { Checkbox } from "@assemble/ui/checkbox";
+import { DatePicker } from "@assemble/ui/date-picker";
 import {
   Dialog,
   DialogContent,
@@ -16,7 +18,15 @@ import {
   FieldLabel,
 } from "@assemble/ui/field";
 import { Input } from "@assemble/ui/input";
-import { Select } from "@assemble/ui/select";
+import { parseCalendarDate } from "@assemble/ui/lib/date-input";
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@assemble/ui/select";
 import { Textarea } from "@assemble/ui/textarea";
 import { useId, useRef, useState } from "react";
 import type { MediaClient } from "../client";
@@ -31,6 +41,7 @@ import { MediaError } from "./feedback";
 
 export function entryContent(entry?: MediaEntry): MediaContent {
   return {
+    published: entry?.published ?? false,
     mediaType: entry?.mediaType ?? "movie",
     title: entry?.title ?? "",
     originalTitle: entry?.originalTitle ?? "",
@@ -59,7 +70,7 @@ export function validMediaContent(content: MediaContent) {
     (!content.magnetUri ||
       /^magnet:\?xt=urn:btih:[a-zA-Z0-9]+(?:&|$)/i.test(content.magnetUri)) &&
     [content.releaseDate, content.watchedAt].every(
-      (value) => !value || /^\d{4}-\d{2}-\d{2}$/.test(value),
+      (value) => !value || Boolean(parseCalendarDate(value)),
     )
   );
 }
@@ -69,12 +80,14 @@ export function MediaEditor({
   onClose,
   onSaved,
   onAccessFailure,
+  viewerAccountId,
 }: {
   client: MediaClient;
   entry?: MediaEntry;
   onClose: () => void;
   onSaved: (entry: MediaEntry) => void;
   onAccessFailure?: (failure: MediaAccessFailure) => void;
+  viewerAccountId?: string;
 }) {
   const { t } = useMediaTranslation();
   const prefix = useId();
@@ -92,6 +105,10 @@ export function MediaEditor({
     setInvalid(false);
   };
   const conflict = mediaErrorCode(task.error) === "VERSION_CONFLICT";
+  const ownerCanPublish = base
+    ? Boolean(viewerAccountId && base.owner?.id === viewerAccountId)
+    : client.scope === "private";
+  const publicationLocked = !ownerCanPublish && !base?.published;
   const fields = [
     ["title", "text"],
     ["originalTitle", "text"],
@@ -122,7 +139,7 @@ export function MediaEditor({
             {t(base ? "entry.editTitle" : "entry.createTitle")}
           </DialogTitle>
           <DialogDescription>
-            {t(`scope.${client.scope}Hint`)}
+            {t(`scope.${base?.scope ?? client.scope}Hint`)}
           </DialogDescription>
         </DialogHeader>
         <form
@@ -161,18 +178,21 @@ export function MediaEditor({
                   {t("entry.mediaType")}
                 </FieldLabel>
                 <Select
-                  id={`${prefix}-type`}
                   value={content.mediaType}
                   disabled={task.pending}
-                  onChange={(event) =>
-                    set(
-                      "mediaType",
-                      event.target.value as MediaContent["mediaType"],
-                    )
+                  onValueChange={(value) =>
+                    set("mediaType", value as MediaContent["mediaType"])
                   }
                 >
-                  <option value="movie">{t("type.movie")}</option>
-                  <option value="tv">{t("type.tv")}</option>
+                  <SelectTrigger id={`${prefix}-type`} className="w-full">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectGroup>
+                      <SelectItem value="movie">{t("type.movie")}</SelectItem>
+                      <SelectItem value="tv">{t("type.tv")}</SelectItem>
+                    </SelectGroup>
+                  </SelectContent>
                 </Select>
               </Field>
               <Field>
@@ -180,20 +200,26 @@ export function MediaEditor({
                   {t("entry.status")}
                 </FieldLabel>
                 <Select
-                  id={`${prefix}-status`}
                   value={content.status}
                   disabled={task.pending}
-                  onChange={(event) =>
-                    set("status", event.target.value as MediaContent["status"])
+                  onValueChange={(value) =>
+                    set("status", value as MediaContent["status"])
                   }
                 >
-                  {(["planned", "watching", "completed"] as const).map(
-                    (status) => (
-                      <option key={status} value={status}>
-                        {t(`status.${status}`)}
-                      </option>
-                    ),
-                  )}
+                  <SelectTrigger id={`${prefix}-status`} className="w-full">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectGroup>
+                      {(["planned", "watching", "completed"] as const).map(
+                        (status) => (
+                          <SelectItem key={status} value={status}>
+                            {t(`status.${status}`)}
+                          </SelectItem>
+                        ),
+                      )}
+                    </SelectGroup>
+                  </SelectContent>
                 </Select>
               </Field>
               {fields.map(([key, type]) => (
@@ -206,41 +232,51 @@ export function MediaEditor({
                   <FieldLabel htmlFor={`${prefix}-${key}`}>
                     {t(`entry.${key === "episodeCount" ? "episodes" : key}`)}
                   </FieldLabel>
-                  <Input
-                    id={`${prefix}-${key}`}
-                    type={type}
-                    value={content[key] ?? ""}
-                    required={key === "title"}
-                    maxLength={
-                      key === "title" || key === "originalTitle"
-                        ? 1000
-                        : undefined
-                    }
-                    min={
-                      key === "year"
-                        ? 1800
-                        : key === "episodeCount"
-                          ? 1
+                  {type === "date" ? (
+                    <DatePicker
+                      id={`${prefix}-${key}`}
+                      label={t(`entry.${key}`)}
+                      value={content[key] ?? ""}
+                      disabled={task.pending}
+                      onChange={(value) => set(key, value || null)}
+                    />
+                  ) : (
+                    <Input
+                      id={`${prefix}-${key}`}
+                      type={type}
+                      value={content[key] ?? ""}
+                      required={key === "title"}
+                      maxLength={
+                        key === "title" || key === "originalTitle"
+                          ? 1000
                           : undefined
-                    }
-                    max={key === "year" ? 9999 : undefined}
-                    disabled={task.pending}
-                    aria-invalid={
-                      invalid && key === "title" && !content.title.trim()
-                    }
-                    onChange={(event) =>
-                      set(
-                        key,
-                        type === "number"
-                          ? event.target.value === ""
-                            ? null
-                            : Number(event.target.value)
-                          : key === "title" || key === "originalTitle"
-                            ? event.target.value
-                            : event.target.value || null,
-                      )
-                    }
-                  />
+                      }
+                      min={
+                        key === "year"
+                          ? 1800
+                          : key === "episodeCount"
+                            ? 1
+                            : undefined
+                      }
+                      max={key === "year" ? 9999 : undefined}
+                      disabled={task.pending}
+                      aria-invalid={
+                        invalid && key === "title" && !content.title.trim()
+                      }
+                      onChange={(event) =>
+                        set(
+                          key,
+                          type === "number"
+                            ? event.target.value === ""
+                              ? null
+                              : Number(event.target.value)
+                            : key === "title" || key === "originalTitle"
+                              ? event.target.value
+                              : event.target.value || null,
+                        )
+                      }
+                    />
+                  )}
                 </Field>
               ))}
             </FieldGroup>
@@ -256,6 +292,31 @@ export function MediaEditor({
               />
               <FieldDescription>{t("entry.genresHint")}</FieldDescription>
             </Field>
+            {(base?.scope ?? client.scope) === "private" && (
+              <Field>
+                <Field orientation="horizontal">
+                  <Checkbox
+                    id={`${prefix}-published`}
+                    checked={content.published}
+                    disabled={task.pending || publicationLocked}
+                    onCheckedChange={(checked) =>
+                      !publicationLocked && set("published", checked === true)
+                    }
+                    aria-describedby={`${prefix}-published-hint`}
+                  />
+                  <FieldLabel htmlFor={`${prefix}-published`}>
+                    {t("publication.publish")}
+                  </FieldLabel>
+                </Field>
+                <FieldDescription id={`${prefix}-published-hint`}>
+                  {t(
+                    publicationLocked
+                      ? "publication.ownerOnly"
+                      : "publication.hint",
+                  )}
+                </FieldDescription>
+              </Field>
+            )}
             {areas.map((key) => (
               <Field key={key}>
                 <FieldLabel htmlFor={`${prefix}-${key}`}>

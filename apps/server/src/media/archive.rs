@@ -432,6 +432,7 @@ fn validate_entry(
     milliseconds(&entry.created_at).map_err(|_| rejected("MEDIA_ARCHIVE_TIMESTAMP_INVALID"))?;
     milliseconds(&entry.updated_at).map_err(|_| rejected("MEDIA_ARCHIVE_TIMESTAMP_INVALID"))?;
     if entry.scope != MediaScope::Shared
+        || entry.owner.is_some()
         || entry.version == 0
         || entry.version > i64::MAX as u64
         || entry.cast.len() > 1000
@@ -502,7 +503,8 @@ pub async fn import(pool: &SqlitePool, directory: &Path) -> Result<Report, ApiEr
             .await?;
     }
     for value in bundle.entries {
-        let entry = value.entry;
+        let mut entry = value.entry;
+        entry.content.published = true;
         sqlx::query("INSERT INTO media_entries(id,scope,owner_id,version,data,created_at,updated_at) VALUES(?,'shared',NULL,?,?,?,?)").bind(&entry.id).bind(i64::try_from(entry.version).map_err(|_|invalid())?).bind(super::encode(&entry)?).bind(milliseconds(&entry.created_at)?).bind(milliseconds(&entry.updated_at)?).execute(&mut *tx).await?;
         for identity in &entry.identities {
             sqlx::query("INSERT INTO media_identities(entry_id,scope_key,provider,media_type,external_id) VALUES(?,'shared',?,?,?)").bind(&entry.id).bind(super::spelling(&identity.provider)).bind(super::spelling(&identity.media_type)).bind(&identity.external_id).execute(&mut *tx).await?;

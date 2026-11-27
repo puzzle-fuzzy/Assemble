@@ -65,11 +65,14 @@ impl Runtime {
                 job.stage = None;
                 write_job(&state.pool, &job).await?;
             } else {
+                let admin = owner_key == "shared" || owner_key != account_id;
                 let principal = Principal {
+                    target_owner: (owner_key != "shared" && owner_key != account_id)
+                        .then(|| owner_key.clone()),
                     account_id,
                     credential_kind,
                     credential_id,
-                    admin: owner_key == "shared",
+                    admin,
                     csrf: None,
                 };
                 let input: Input = super::decode(&input)?;
@@ -315,7 +318,9 @@ async fn run_import(
     if let Some(existing) = existing {
         job.entry_id = Some(existing);
     } else {
-        store::insert(&mut tx, principal, &entry).await?;
+        entry.content.published = job.scope == MediaScope::Shared;
+        store::insert(&mut tx, principal, &mut entry).await?;
+        store::audit(&mut tx, principal, "media.imported", &entry).await?;
         if let Some(poster) = &entry.poster {
             assets::link(&mut tx, &entry.id, std::slice::from_ref(poster), "gallery").await?;
         }
@@ -390,7 +395,8 @@ async fn run_gallery(
     if entry.poster.is_none() {
         entry.poster = images.first().cloned();
     }
-    store::save(&mut tx, entry).await?;
+    let entry = store::save(&mut tx, entry).await?;
+    store::audit(&mut tx, principal, "media.gallery_synced", &entry).await?;
     job.entry_id = Some(entry_id);
     complete_in(&mut tx, &mut job).await?;
     tx.commit().await?;

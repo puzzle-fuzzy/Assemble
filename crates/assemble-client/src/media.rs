@@ -71,6 +71,8 @@ impl Client {
         let mut pairs = Vec::new();
         let fields = payload(query)?;
         for (name, key) in [
+            ("ownerId", "ownerId"),
+            ("scope", "scope"),
             ("q", "q"),
             ("page", "page"),
             ("pageSize", "pageSize"),
@@ -312,6 +314,8 @@ impl Client {
         &self,
         identity: &MediaPersonIdentity,
         media_type: MediaType,
+        page: u32,
+        page_size: u32,
         options: &RequestOptions<'_>,
     ) -> Result<MediaActorCredits, ClientError> {
         let provider = payload(&identity.provider)?;
@@ -323,7 +327,11 @@ impl Client {
                 provider.as_str().unwrap_or_default(),
                 segment(&identity.external_id)?
             ),
-            vec![("mediaType", kind.as_str().unwrap_or_default().into())],
+            vec![
+                ("mediaType", kind.as_str().unwrap_or_default().into()),
+                ("page", page.to_string()),
+                ("pageSize", page_size.to_string()),
+            ],
             None,
             options,
         )
@@ -449,6 +457,102 @@ mod tests {
     use axum::http::{HeaderMap, Response};
     use axum::{Router, routing::get};
     use tokio_util::sync::CancellationToken;
+    #[tokio::test]
+    async fn owner_filters_and_publication_content_cross_the_typed_client() {
+        let sample: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../packages/media/contract/snapshots.json"
+        ))
+        .unwrap();
+        let entry: MediaEntry = serde_json::from_value(sample["entries"][1].clone()).unwrap();
+        let listed = entry.clone();
+        let updated = entry.clone();
+        let app = Router::new()
+            .route(
+                "/v1/media/private/entries",
+                get(
+                    move |axum::extract::Query(query): axum::extract::Query<MediaQuery>| {
+                        let entry = listed.clone();
+                        async move {
+                            assert_eq!(query.owner_id.as_deref(), Some("owner-1"));
+                            assert_eq!(query.scope, Some(MediaScope::Private));
+                            assert_eq!(query.page, Some(2));
+                            axum::Json(MediaList {
+                                items: vec![entry],
+                                total: 2,
+                                page: 2,
+                                page_size: 1,
+                                counts: assemble_protocol::media::MediaCounts {
+                                    all: 2,
+                                    planned: 0,
+                                    watching: 2,
+                                    completed: 0,
+                                },
+                            })
+                        }
+                    },
+                ),
+            )
+            .route(
+                "/v1/media/private/entries/entry-private",
+                axum::routing::put(move |axum::Json(input): axum::Json<MediaUpdate>| {
+                    let mut entry = updated.clone();
+                    async move {
+                        assert!(input.content.published);
+                        assert_eq!(input.version, entry.version);
+                        entry.version += 1;
+                        entry.content = input.content;
+                        axum::Json(MediaItem { item: entry })
+                    }
+                }),
+            );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let origin =
+            crate::ServerOrigin::parse(&format!("http://{}", listener.local_addr().unwrap()))
+                .unwrap();
+        let stop = CancellationToken::new();
+        let until = stop.clone();
+        let task = tokio::spawn(async move {
+            axum::serve(listener, app)
+                .with_graceful_shutdown(until.cancelled_owned())
+                .await
+                .unwrap();
+        });
+        let client = Client::new(origin).unwrap();
+        let cancel = CancellationToken::new();
+        let options = RequestOptions::new(&cancel);
+        let list = client
+            .media_list(
+                MediaScope::Private,
+                &MediaQuery {
+                    owner_id: Some("owner-1".into()),
+                    scope: Some(MediaScope::Private),
+                    page: Some(2),
+                    page_size: Some(1),
+                    ..MediaQuery::default()
+                },
+                &options,
+            )
+            .await
+            .unwrap();
+        assert_eq!(list.items[0].id, entry.id);
+        let mut content = entry.content;
+        content.published = true;
+        let updated = client
+            .media_update(
+                MediaScope::Private,
+                &entry.id,
+                &MediaUpdate {
+                    version: entry.version,
+                    content,
+                },
+                &options,
+            )
+            .await
+            .unwrap();
+        assert!(updated.content.published);
+        stop.cancel();
+        task.await.unwrap();
+    }
     #[tokio::test]
     async fn image_download_verifies_headers_hash_and_cancel_without_exposing_bearer() {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();

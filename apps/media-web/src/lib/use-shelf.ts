@@ -16,7 +16,13 @@ export function useShelf(
 ) {
   const [revision, setRevision] = useState(0);
   const mediaType = query.mediaType;
-  const context = `${client.scope}:${status}:${mediaType ?? "all"}`;
+  const ownerId = query.ownerId;
+  const context = JSON.stringify([
+    client.scope,
+    status,
+    mediaType ?? null,
+    ownerId ?? null,
+  ]);
   const request = `${context}:${page}:${revision}`;
   const [result, setResult] = useState<{
     client: MediaClient;
@@ -42,6 +48,7 @@ export function useShelf(
     void client
       .list(
         {
+          ownerId,
           mediaType,
           status,
           page,
@@ -76,14 +83,23 @@ export function useShelf(
       controller.abort();
       sessionSignal.removeEventListener("abort", cancel);
     };
-  }, [client, context, request, mediaType, status, page, sessionSignal]);
+  }, [
+    client,
+    context,
+    request,
+    mediaType,
+    ownerId,
+    status,
+    page,
+    sessionSignal,
+  ]);
   const current =
     result?.client === client &&
     result.request === request &&
     (result.resource.phase === "ready" ||
       result.sessionSignal === sessionSignal);
   // 只在同一账户、片库与类型中保留翻页前的列表；详情仍严格按请求隔离。
-  // 账户与归属切换由 App 的 key 卸载本 hook；类型改变则同步丢弃旧页。
+  // 个人主页的公开归属也必须隔离，不能复用另一个人的列表或迟到响应。
   const previous =
     result?.client === client &&
     result.context === context &&

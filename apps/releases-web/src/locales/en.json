@@ -1,0 +1,24 @@
+{
+  "title": "Download Assemble",
+  "navigation": "Site navigation",
+  "movies": "Media library",
+  "retry": "Try again",
+  "unreleased": "Not released",
+  "loading": "Loading releases",
+  "errorTitle": "Releases are temporarily unavailable",
+  "errorMessage": "Please try again later.",
+  "download": "Download",
+  "downloadFor": "Download {{platform}} {{architecture}} {{version}}",
+  "verify": "Checksums",
+  "verifyFor": "View checksums for {{platform}} {{architecture}} {{version}}",
+  "file": "File name",
+  "size": "File size",
+  "publishedAt": "Published",
+  "architecture": { "x64": "x64", "arm64": "ARM64", "universal": "Universal" },
+  "platform": {
+    "windows": "Windows",
+    "macos": "macOS",
+    "ios": "iOS",
+    "android": "Android"
+  }
+}

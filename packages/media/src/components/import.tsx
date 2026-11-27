@@ -1,5 +1,13 @@
 import { Button } from "@assemble/ui/button";
 import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardFooter,
+  CardHeader,
+  CardTitle,
+} from "@assemble/ui/card";
+import {
   Dialog,
   DialogContent,
   DialogDescription,
@@ -8,7 +16,14 @@ import {
 } from "@assemble/ui/dialog";
 import { Field, FieldGroup, FieldLabel } from "@assemble/ui/field";
 import { Input } from "@assemble/ui/input";
-import { Select } from "@assemble/ui/select";
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@assemble/ui/select";
 import { useId, useState } from "react";
 import type { MediaClient } from "../client";
 import { type MediaAccessFailure, useMediaTask } from "../hooks/use-media-task";
@@ -119,25 +134,31 @@ export function MediaImport({
                   {t("import.provider")}
                 </FieldLabel>
                 <Select
-                  id={`${prefix}-provider`}
                   value={provider}
                   disabled={task.pending}
-                  onChange={(event) => {
+                  onValueChange={(value) => {
                     search.cancel();
                     setItems(null);
                     setCandidate(null);
-                    setProvider(event.target.value as MediaProvider);
+                    setProvider(value as MediaProvider);
                   }}
                 >
-                  {(["tmdb", "douban"] as const).map((source) => (
-                    <option
-                      key={source}
-                      value={source}
-                      disabled={!capabilities.providers[source]}
-                    >
-                      {t(`import.${source}`)}
-                    </option>
-                  ))}
+                  <SelectTrigger id={`${prefix}-provider`} className="w-full">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectGroup>
+                      {(["tmdb", "douban"] as const).map((source) => (
+                        <SelectItem
+                          key={source}
+                          value={source}
+                          disabled={!capabilities.providers[source]}
+                        >
+                          {t(`import.${source}`)}
+                        </SelectItem>
+                      ))}
+                    </SelectGroup>
+                  </SelectContent>
                 </Select>
               </Field>
               <Field>
@@ -145,18 +166,24 @@ export function MediaImport({
                   {t("entry.mediaType")}
                 </FieldLabel>
                 <Select
-                  id={`${prefix}-type`}
                   value={mediaType}
                   disabled={task.pending}
-                  onChange={(event) => {
+                  onValueChange={(value) => {
                     search.cancel();
                     setItems(null);
                     setCandidate(null);
-                    setMediaType(event.target.value as MediaType);
+                    setMediaType(value as MediaType);
                   }}
                 >
-                  <option value="movie">{t("type.movie")}</option>
-                  <option value="tv">{t("type.tv")}</option>
+                  <SelectTrigger id={`${prefix}-type`} className="w-full">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectGroup>
+                      <SelectItem value="movie">{t("type.movie")}</SelectItem>
+                      <SelectItem value="tv">{t("type.tv")}</SelectItem>
+                    </SelectGroup>
+                  </SelectContent>
                 </Select>
               </Field>
               <Field className="sm:col-span-2">
@@ -233,28 +260,34 @@ export function MediaImport({
           )
         )}
         {candidate && (
-          <section className="flex flex-col gap-3 rounded-lg border p-4">
-            <h3 className="font-medium">
-              {candidate.title} {candidate.year ?? ""}
-            </h3>
-            <p className="text-sm text-muted-foreground">
-              {candidate.originalTitle}
-            </p>
-            <p className="whitespace-pre-wrap text-sm">
-              {candidate.overview || t("entry.noOverview")}
-            </p>
-            <Button
-              disabled={task.pending || Boolean(job && isActiveJob(job))}
-              onClick={() =>
-                start({
-                  identity: candidate.identity,
-                  requestId: crypto.randomUUID(),
-                })
-              }
-            >
-              {t("import.confirm")}
-            </Button>
-          </section>
+          <Card>
+            <CardHeader>
+              <CardTitle>
+                <h3>
+                  {candidate.title} {candidate.year ?? ""}
+                </h3>
+              </CardTitle>
+              <CardDescription>{candidate.originalTitle}</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <p className="whitespace-pre-wrap text-sm">
+                {candidate.overview || t("entry.noOverview")}
+              </p>
+            </CardContent>
+            <CardFooter>
+              <Button
+                disabled={task.pending || Boolean(job && isActiveJob(job))}
+                onClick={() =>
+                  start({
+                    identity: candidate.identity,
+                    requestId: crypto.randomUUID(),
+                  })
+                }
+              >
+                {t("import.confirm")}
+              </Button>
+            </CardFooter>
+          </Card>
         )}
         {job && <MediaJobStatus job={job} />}
         <p className="text-xs text-muted-foreground">

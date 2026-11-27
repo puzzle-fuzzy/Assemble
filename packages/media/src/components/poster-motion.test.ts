@@ -36,7 +36,7 @@ function fixture() {
   preview.className = "detail-lightbox-image";
   content.append(preview);
   host.append(source, overlay, content);
-  return { source, content, preview };
+  return { source, overlay, content, preview };
 }
 
 async function finishAnimations() {
@@ -135,6 +135,32 @@ describe("海报开合动画", () => {
     expect(pending.every((animation) => animation.cancelled)).toBe(true);
     expect(source.style.visibility).toBe("");
     expect(document.querySelector('[data-poster-motion="true"]')).toBeNull();
+  });
+
+  test("缩回结束到弹窗卸载之间仍保持原图隐藏和透明终态，不闪回大图或遮罩", async () => {
+    const { source, overlay, content, preview } = fixture();
+    const motion = createPosterMotion(source);
+    motion.open(content);
+    expect(overlay.style.animation).toBe("none");
+    await finishAnimations();
+    let closed = false;
+    motion.close(content, () => {
+      closed = true;
+      expect(content.isConnected).toBe(true);
+      expect(preview.style.visibility).toBe("hidden");
+      expect(overlay.style.animation).toBe("none");
+      expect(pending.slice(3).every((animation) => !animation.cancelled)).toBe(
+        true,
+      );
+    });
+    await finishAnimations();
+    expect(closed).toBe(true);
+    expect(source.style.visibility).toBe("");
+    expect(document.querySelector('[data-poster-motion="true"]')).toBeNull();
+    content.remove();
+    motion.cancel();
+    expect(pending.every((animation) => animation.cancelled)).toBe(true);
+    expect(preview.style.visibility).toBe("");
   });
 
   test("关闭途中收到轮播切换不能取消关闭回调或锁住弹窗", async () => {

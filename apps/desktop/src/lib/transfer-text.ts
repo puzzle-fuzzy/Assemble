@@ -59,6 +59,8 @@ export function transferStatus(transfer: TransferView): string {
     case "complete":
       return state("done");
     case "failed": {
+      if (transfer.failure === "interrupted")
+        return text("transfer.interrupted");
       const names = transfer.failure
         ? zhCN.transfer.failures[transfer.failure]
         : null;

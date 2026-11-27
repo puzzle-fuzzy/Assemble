@@ -88,7 +88,7 @@ function CollectionsContent({
   const { t } = useMediaTranslation();
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(
-    presentation === "management" ? 10 : 12,
+    presentation === "management" ? 20 : 12,
   );
   const [revision, setRevision] = useState(0);
   const [list, setList] = useState<MediaCollectionList | null>(null);

@@ -35,6 +35,7 @@ export class MediaError extends Error {
   }
 }
 export interface BrowserMediaOptions {
+  readMode?: "public" | "admin";
   csrfToken?: () => string | null;
   fetch?: typeof fetch;
 }
@@ -123,7 +124,12 @@ export function createBrowserMediaClient(
   options?: BrowserMediaOptions,
 ): MediaClient {
   const request = transport(options);
-  const read = `/v1/media/${scope}`;
+  const read =
+    options?.readMode === "admin"
+      ? "/v1/admin/media"
+      : options?.readMode === "public"
+        ? "/v1/media/public"
+        : `/v1/media/${scope}`;
   const write = scope === "shared" ? "/v1/admin/media" : read;
   return {
     scope,
@@ -177,9 +183,9 @@ export function createBrowserMediaClient(
           signal,
         )
       ).item,
-    actor: (identity, mediaType, signal) =>
+    actor: (identity, mediaType, pagination = {}, signal) =>
       request(
-        `/v1/media/catalog/actors/${identity.provider}/${segment(identity.externalId)}${query({ mediaType })}`,
+        `/v1/media/catalog/actors/${identity.provider}/${segment(identity.externalId)}${query({ mediaType, page: pagination.page ?? 1, pageSize: pagination.pageSize ?? 24 })}`,
         isMediaActorCredits,
         signal,
       ),
@@ -211,6 +217,12 @@ export function createBrowserMediaClient(
         )
       ).item,
   };
+}
+/** 全站与个人公开主页只走公开投影，绝不因为当前账户可维护而混入私密内容。 */
+export function createPublicMediaClient(
+  options?: BrowserMediaOptions,
+): MediaClient {
+  return createBrowserMediaClient("shared", { ...options, readMode: "public" });
 }
 export function createBrowserMediaCollectionsClient(
   options?: BrowserMediaOptions,

@@ -3,6 +3,7 @@ import { setLanguage } from "@assemble/display";
 import { act } from "react";
 import { App } from "./App";
 import type { AdminDriveFile, AdminStorage } from "./lib/api";
+import { adminDriveDownloadPath } from "./lib/api";
 import {
   button,
   cleanup,
@@ -57,7 +58,7 @@ function listing(path: string, items = files) {
     items,
     total: items.length ? 21 : 0,
     page: Number(parameters.get("page") || 1),
-    pageSize: Number(parameters.get("pageSize") || 10),
+    pageSize: Number(parameters.get("pageSize") || 20),
   };
 }
 function response(path: string): Response {
@@ -109,6 +110,24 @@ async function renderDrive() {
 
 test("云盘显示全站文件与真实容量，搜索分页、详情弹窗和双语切换保持列表", async () => {
   const host = await renderDrive();
+  const initialRequest = requests.find((request) =>
+    request.path.startsWith("/v1/admin/drive/files?"),
+  );
+  expect(
+    new URL(initialRequest?.path ?? "", "http://localhost").searchParams.get(
+      "pageSize",
+    ),
+  ).toBe("20");
+  const downloads = [
+    ...host.querySelectorAll<HTMLAnchorElement>("a[download]"),
+  ];
+  expect(downloads).toHaveLength(files.length);
+  expect(downloads[0]?.getAttribute("href")).toBe(
+    "/v1/admin/drive/files/file-1/content",
+  );
+  expect(downloads[0]?.textContent).toBe("下载");
+  expect(downloads[0]?.getAttribute("aria-label")).toContain(files[0].name);
+  expect(downloads[0]?.closest("tr")?.textContent).toContain("详情");
   expect(
     host.querySelector('[aria-current="page"][href="#drive"]'),
   ).not.toBeNull();
@@ -145,6 +164,7 @@ test("云盘显示全站文件与真实容量，搜索分页、详情弹窗和�
   const before = requests.length;
   await act(async () => setLanguage("en"));
   expect(dialog?.textContent).toContain("File details");
+  expect(host.querySelector("a[download]")?.textContent).toBe("Download");
   expect(host.textContent).toContain("Available file storage");
   expect(requests).toHaveLength(before);
   await click(button(document.body, "Close"));
@@ -161,6 +181,12 @@ test("云盘显示全站文件与真实容量，搜索分页、详情弹窗和�
     expect(request.init?.cache).toBe("no-store");
     expect(request.init?.signal).toBeInstanceOf(AbortSignal);
   }
+});
+
+test("管理员下载只生成同源文件标识地址，不把特殊字符变成路径或查询参数", () => {
+  expect(adminDriveDownloadPath("file/中文?#")).toBe(
+    "/v1/admin/drive/files/file%2F%E4%B8%AD%E6%96%87%3F%23/content",
+  );
 });
 
 test.each([

@@ -38,7 +38,7 @@ fn spa_route(path: &str) -> bool {
     let provider = |value: &&str| matches!(*value, "tmdb" | "douban");
     match parts.as_slice() {
         ["private" | "collections"] => true,
-        ["collections", value] | ["entries", "shared" | "private", value] => id(value),
+        ["collections" | "users", value] | ["entries", "shared" | "private", value] => id(value),
         ["actors", source, value] | ["catalog", source, "movie" | "tv", value] => {
             provider(source) && id(value)
         }

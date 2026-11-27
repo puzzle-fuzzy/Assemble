@@ -1,6 +1,7 @@
 //! 本机网络下载：受控来源、任务生命周期与已校验文件发布，独立于窗口和正式服务。
 #![cfg_attr(test, allow(clippy::pedantic))]
 
+pub mod assistant;
 pub mod browser;
 mod douyin;
 mod hls;
@@ -45,6 +46,8 @@ pub enum DownloadError {
     Busy,
     #[error("the disk of the download folder does not have enough free space")]
     NoSpace,
+    #[error("assistant downloads are disabled")]
+    AssistantDisabled,
 }
 
 impl DownloadError {
@@ -63,6 +66,7 @@ impl DownloadError {
             Self::Expired => "DOWNLOAD_EXPIRED",
             Self::Busy => "DOWNLOAD_BUSY",
             Self::NoSpace => "DOWNLOAD_NO_SPACE",
+            Self::AssistantDisabled => "DOWNLOAD_ASSISTANT_DISABLED",
         }
     }
 }

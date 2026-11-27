@@ -16,6 +16,8 @@ import {
 } from "./test-support/dom";
 
 const entry: MediaEntry = {
+  published: true,
+  owner: null,
   id: "film-1",
   version: 1,
   scope: "shared",
@@ -71,18 +73,21 @@ function list(items = [entry], page = 1, total = items.length) {
 function response(path: string) {
   const url = new URL(path, "http://localhost");
   if (url.pathname === "/v1/media/session") return json(session);
-  if (url.pathname === "/v1/media/shared/entries")
+  if (url.pathname === "/v1/media/public/entries")
     return json(list([entry], Number(url.searchParams.get("page") ?? "1")));
   if (url.pathname === "/v1/media/private/entries")
     return json(
       list([{ ...entry, scope: "private", title: "账户甲的私人作品" }]),
     );
-  if (url.pathname === "/v1/media/shared/entries/film-1")
+  if (url.pathname === "/v1/media/public/entries/film-1")
     return json({ item: entry });
-  if (url.pathname === "/v1/media/shared/entries/film-1/gallery")
+  if (url.pathname === "/v1/media/public/entries/film-1/gallery")
     return json({ entryId: entry.id, version: 1, items: [] });
   if (url.pathname === "/v1/media/catalog/actors/tmdb/42")
     return json({
+      total: 1,
+      page: 1,
+      pageSize: 24,
       actor: {
         identity: { provider: "tmdb", externalId: "42" },
         name: "演员甲",
@@ -185,7 +190,7 @@ describe("影视展示端", () => {
         const lists = requests.filter(
           ({ path }) =>
             new URL(path, "http://localhost").pathname ===
-            "/v1/media/shared/entries",
+            "/v1/media/public/entries",
         );
         expect(lists).toHaveLength(signedIn ? 6 : 3);
         expect(
@@ -201,7 +206,7 @@ describe("影视展示端", () => {
   test("首屏预取中重新核验会话会取消旧请求，并恢复当前会话的加载", async () => {
     handle = (path, init) =>
       new URL(path, "http://localhost").pathname ===
-        "/v1/media/shared/entries" && init?.credentials === "omit"
+        "/v1/media/public/entries" && init?.credentials === "omit"
         ? new Promise<Response>(() => {})
         : response(path);
     const previousFetch = window.fetch;
@@ -237,7 +242,7 @@ describe("影视展示端", () => {
     ).toHaveLength(0);
     expect(host.textContent).not.toContain("在这里浏览");
     const statuses = requests
-      .filter(({ path }) => path.startsWith("/v1/media/shared/entries?"))
+      .filter(({ path }) => path.startsWith("/v1/media/public/entries?"))
       .map(({ path }) =>
         new URL(path, "http://localhost").searchParams.get("status"),
       );
@@ -262,7 +267,7 @@ describe("影视展示端", () => {
       "/movies/?plannedPage=2&watchingPage=3&completedPage=2",
     );
     handle = (path) =>
-      path.startsWith("/v1/media/shared/entries?")
+      path.startsWith("/v1/media/public/entries?")
         ? json(
             list(
               [entry],
@@ -308,11 +313,79 @@ describe("影视展示端", () => {
     expect(window.location.search).toBe("?mediaType=tv&plannedPage=2");
   });
 
+  test("个人主页请求始终携带 ownerId，跨用户导航丢弃旧海报与迟到响应", async () => {
+    let finishAlice: ((value: Response) => void) | undefined;
+    let aliceSignal: AbortSignal | null | undefined;
+    handle = (path, init) => {
+      const url = new URL(path, "http://localhost");
+      if (url.pathname !== "/v1/media/public/entries") return response(path);
+      const owner = url.searchParams.get("ownerId");
+      if (owner === "alice" && url.searchParams.get("page") === "2") {
+        aliceSignal = init?.signal;
+        return new Promise((resolve) => {
+          finishAlice = resolve;
+        });
+      }
+      return json(
+        list(
+          [
+            {
+              ...entry,
+              scope: "private",
+              published: true,
+              owner: {
+                id: owner ?? "global",
+                displayName: owner ?? "全站",
+                avatarUrl: null,
+              },
+              title: `${owner ?? "全站"}公开作品`,
+            },
+          ],
+          1,
+          48,
+        ),
+      );
+    };
+    await act(async () => navigate("/movies/users/alice"));
+    const host = await render(<App />);
+    expect(host.textContent).toContain("alice公开作品");
+    expect(host.textContent).not.toContain("全站公开作品");
+    const shelf = host.querySelector<HTMLElement>(
+      '[aria-labelledby="shelf-planned"]',
+    );
+    if (!shelf) throw new Error("SHELF_MISSING");
+    await click(button(shelf, "下一页"));
+    expect(window.location.pathname).toBe("/movies/users/alice");
+    expect(aliceSignal?.aborted).toBe(false);
+    await act(async () => navigate("/movies/users/bob"));
+    await settle();
+    expect(aliceSignal?.aborted).toBe(true);
+    expect(host.textContent).toContain("bob公开作品");
+    expect(host.textContent).not.toContain("alice公开作品");
+    await act(async () =>
+      finishAlice?.(json(list([{ ...entry, title: "迟到alice作品" }], 2, 48))),
+    );
+    await settle();
+    expect(host.textContent).not.toContain("迟到alice作品");
+    await click(button(host, "剧集"));
+    expect(window.location.pathname).toBe("/movies/users/bob");
+    const ownerQueries = requests
+      .filter((item) => item.path.startsWith("/v1/media/public/entries?"))
+      .map((item) => new URL(item.path, "http://localhost"));
+    expect(
+      ownerQueries.every((url) =>
+        ["alice", "bob"].includes(url.searchParams.get("ownerId") ?? ""),
+      ),
+    ).toBe(true);
+    expect(ownerQueries.at(-1)?.searchParams.get("ownerId")).toBe("bob");
+    expect(ownerQueries.at(-1)?.searchParams.get("mediaType")).toBe("tv");
+  });
+
   test("慢速翻页保留当前海报、分页焦点和其他分区，只请求目标页", async () => {
     let finish: ((value: Response) => void) | undefined;
     handle = (path) => {
       const url = new URL(path, "http://localhost");
-      if (url.pathname !== "/v1/media/shared/entries") return response(path);
+      if (url.pathname !== "/v1/media/public/entries") return response(path);
       const page = Number(url.searchParams.get("page") ?? 1);
       if (page === 2)
         return new Promise<Response>((resolve) => {
@@ -361,7 +434,7 @@ describe("影视展示端", () => {
     let finish: ((value: Response) => void) | undefined;
     handle = (path) => {
       const url = new URL(path, "http://localhost");
-      if (url.pathname !== "/v1/media/shared/entries") return response(path);
+      if (url.pathname !== "/v1/media/public/entries") return response(path);
       if (url.searchParams.get("mediaType") === "tv")
         return json(list([{ ...entry, title: "新类型剧集" }], 1, 48));
       if (url.searchParams.get("page") === "2")
@@ -434,7 +507,7 @@ describe("影视展示端", () => {
           })
         : response(path);
     const reads = requests.filter(({ path }) =>
-      path.startsWith("/v1/media/shared/entries"),
+      path.startsWith("/v1/media/public/entries"),
     ).length;
     await act(async () => window.dispatchEvent(new Event("focus")));
     expect(
@@ -451,7 +524,7 @@ describe("影视展示端", () => {
     expect(document.activeElement).toBe(input);
     expect(
       requests.filter(({ path }) =>
-        path.startsWith("/v1/media/shared/entries"),
+        path.startsWith("/v1/media/public/entries"),
       ),
     ).toHaveLength(reads);
   });
@@ -524,6 +597,82 @@ describe("影视展示端", () => {
     expect(requests.every(({ init }) => init?.method === "GET")).toBe(true);
   });
 
+  test("人物作品只展示当前页的真实海报，翻页请求下一页，切换类型回到第一页", async () => {
+    window.history.replaceState(
+      null,
+      "",
+      "/movies/actors/tmdb/42?mediaType=movie",
+    );
+    handle = (path) => {
+      const url = new URL(path, window.location.origin);
+      if (url.pathname !== "/v1/media/catalog/actors/tmdb/42")
+        return response(path);
+      const page = Number(url.searchParams.get("page"));
+      const kind = url.searchParams.get("mediaType");
+      const count = kind === "tv" ? 1 : page === 1 ? 24 : 1;
+      return json({
+        actor: {
+          identity: { provider: "tmdb", externalId: "42" },
+          name: "演员甲",
+          photo: null,
+        },
+        total: kind === "tv" ? 1 : 25,
+        page,
+        pageSize: 24,
+        items: Array.from({ length: count }, (_, index) => ({
+          identity: {
+            provider: "tmdb",
+            mediaType: kind,
+            externalId: String(page * 100 + index),
+          },
+          title: `${kind}-${page}-${index}`,
+          originalTitle: "",
+          year: 2026,
+          overview: "",
+          poster: {
+            assetId: `poster-${kind}-${page}-${index}`,
+            width: 342,
+            height: 513,
+            contentType: "image/png",
+          },
+        })),
+      });
+    };
+    const host = await render(<App />);
+    await waitFor(() => host.querySelector(".poster-card img"));
+    expect(host.querySelectorAll(".poster-card img")).toHaveLength(24);
+    expect(
+      host.querySelectorAll(".poster-card .poster-placeholder"),
+    ).toHaveLength(0);
+    expect(
+      host.querySelector(".poster-card img")?.getAttribute("src"),
+    ).toContain("poster-movie-1-0/content?variant=360");
+    await click(button(host, "下一页"));
+    await waitFor(() =>
+      host.textContent?.includes("movie-2-0") ? host : null,
+    );
+    expect(window.location.search).toBe("?mediaType=movie&page=2");
+    expect(host.querySelectorAll(".poster-card img")).toHaveLength(1);
+    expect(
+      host.querySelector(".poster-card img")?.getAttribute("src"),
+    ).toContain("poster-movie-2-0");
+    await click(button(host, "剧集"));
+    await waitFor(() => (host.textContent?.includes("tv-1-0") ? host : null));
+    expect(window.location.search).toBe("?mediaType=tv");
+    expect(
+      host.querySelector(".poster-card img")?.getAttribute("src"),
+    ).toContain("poster-tv-1-0");
+    expect(
+      requests
+        .filter(({ path }) =>
+          path.startsWith("/v1/media/catalog/actors/tmdb/42"),
+        )
+        .map(({ path }) =>
+          new URL(path, window.location.origin).searchParams.get("page"),
+        ),
+    ).toEqual(["1", "2", "1"]);
+  });
+
   test("登录后详情复制服务端返回的磁力，页面不显示维护入口", async () => {
     session = { account };
     window.history.replaceState(null, "", "/movies/entries/shared/film-1");
@@ -535,7 +684,7 @@ describe("影视展示端", () => {
     });
     let detailReads = 0;
     handle = (path) =>
-      path === "/v1/media/shared/entries/film-1"
+      path === "/v1/media/public/entries/film-1"
         ? json({
             item: {
               ...entry,
@@ -548,6 +697,9 @@ describe("影视展示端", () => {
         : response(path);
     try {
       const host = await render(<App />);
+      expect(host.querySelector(".detail-magnet-uri")?.textContent).toBe(
+        "magnet:?xt=urn:btih:0123456789012345678901234567890123456789",
+      );
       await click(button(host, "复制磁力链接"));
       expect(writeText).toHaveBeenCalledWith(
         "magnet:?xt=urn:btih:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
@@ -589,7 +741,7 @@ describe("影视展示端", () => {
       });
       let detailReads = 0;
       handle = (path) => {
-        if (path !== "/v1/media/shared/entries/film-1") return response(path);
+        if (path !== "/v1/media/public/entries/film-1") return response(path);
         if (detailReads++ === 0)
           return json({
             item: {
@@ -640,7 +792,7 @@ describe("影视展示端", () => {
         },
       };
       handle = (path) => {
-        if (path !== "/v1/media/shared/entries/film-1") return response(path);
+        if (path !== "/v1/media/public/entries/film-1") return response(path);
         const read = detailReads++;
         if (read === 0) return json(permitted);
         if (read === 1)
@@ -674,7 +826,7 @@ describe("影视展示端", () => {
   test("接口错误只显示固定文案并支持重试，不回显不可信诊断", async () => {
     let attempts = 0;
     handle = (path) =>
-      path.startsWith("/v1/media/shared/entries") && attempts++ === 0
+      path.startsWith("/v1/media/public/entries") && attempts++ === 0
         ? json(
             { code: "UNAVAILABLE", detail: "untrusted-sensitive-detail" },
             503,
@@ -690,7 +842,7 @@ describe("影视展示端", () => {
   test("英文覆盖导航、全部观看状态、空态和显示偏好，翻译字段与中文一致", async () => {
     setLanguage("en");
     handle = (path) =>
-      path.startsWith("/v1/media/shared/entries")
+      path.startsWith("/v1/media/public/entries")
         ? json(list([]))
         : response(path);
     const host = await render(<App />);

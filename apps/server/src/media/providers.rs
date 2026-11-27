@@ -27,6 +27,11 @@ pub struct SourceCast {
     pub photo: Option<SourceImage>,
 }
 #[derive(Debug, Clone)]
+pub struct SourceCredit {
+    pub candidate: MediaCandidate,
+    pub poster: Option<SourceImage>,
+}
+#[derive(Debug, Clone)]
 pub struct Details {
     pub candidate: MediaCandidate,
     pub content: MediaContent,
@@ -344,7 +349,7 @@ impl Providers {
         &self,
         identity: &MediaPersonIdentity,
         media_type: MediaType,
-    ) -> Result<(MediaActor, Option<SourceImage>, Vec<MediaCandidate>), ApiError> {
+    ) -> Result<(MediaActor, Option<SourceImage>, Vec<SourceCredit>), ApiError> {
         validate_external_id(&identity.external_id)?;
         let provider = identity.provider;
         let kind = super::spelling(&media_type);
@@ -390,8 +395,11 @@ impl Providers {
                 return Err(unavailable("MEDIA_FILMOGRAPHY_TOO_LARGE"));
             }
             for value in values {
-                let (candidate, _) = summary(provider, media_type, value)?;
-                items.insert(candidate.identity.external_id.clone(), candidate);
+                let (candidate, poster) = summary(provider, media_type, value)?;
+                items.insert(
+                    candidate.identity.external_id.clone(),
+                    SourceCredit { candidate, poster },
+                );
             }
         } else {
             items = self
@@ -400,9 +408,12 @@ impl Providers {
         }
         let mut items: Vec<_> = items.into_values().collect();
         items.sort_by(|a, b| {
-            b.year
-                .cmp(&a.year)
-                .then_with(|| b.identity.external_id.cmp(&a.identity.external_id))
+            b.candidate.year.cmp(&a.candidate.year).then_with(|| {
+                b.candidate
+                    .identity
+                    .external_id
+                    .cmp(&a.candidate.identity.external_id)
+            })
         });
         Ok((
             MediaActor {
@@ -418,7 +429,7 @@ impl Providers {
         &self,
         id: &str,
         media_type: MediaType,
-    ) -> Result<BTreeMap<String, MediaCandidate>, ApiError> {
+    ) -> Result<BTreeMap<String, SourceCredit>, ApiError> {
         let provider = MediaProvider::Douban;
         let kind = super::spelling(&media_type);
         let mut items = BTreeMap::new();
@@ -463,8 +474,11 @@ impl Providers {
                 if work["type"].as_str() != Some(&kind) {
                     continue;
                 }
-                let (candidate, _) = summary(provider, media_type, work)?;
-                items.insert(candidate.identity.external_id.clone(), candidate);
+                let (candidate, poster) = summary(provider, media_type, work)?;
+                items.insert(
+                    candidate.identity.external_id.clone(),
+                    SourceCredit { candidate, poster },
+                );
             }
             start += 10;
             if start >= total {
@@ -895,6 +909,7 @@ fn parse_content(
         None
     };
     let content = MediaContent {
+        published: false,
         media_type: identity.media_type,
         title: candidate.title.clone(),
         original_title: candidate.original_title.clone(),

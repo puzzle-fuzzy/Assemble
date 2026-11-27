@@ -13,6 +13,7 @@ type InvokeCall = { command: string; args: Record<string, unknown> };
 const STATE: Snapshot = {
   systemNotifications: { items: [], available: true },
   downloads: {
+    assistantAllowed: true,
     browserTaskId: null,
     folderName: "",
     toolsAvailable: false,
@@ -189,9 +190,12 @@ describe("桥接", () => {
     await bridge.driveRefresh();
     await bridge.driveUpload();
     await bridge.driveDownload("file-1");
+    await bridge.driveRename("file-1", "合同（新版）.pdf");
+    await bridge.downloadSetAssistantAllowed(false);
     await bridge.driveDelete("file-1");
     await bridge.closeSendPanel();
     await bridge.openMain();
+    await bridge.openPublicMedia();
     await bridge.cancelTransfer("transfer-1");
     await bridge.retryTransfer("transfer-1");
     await bridge.setSendMenu(true);
@@ -249,9 +253,15 @@ describe("桥接", () => {
       { command: "drive_refresh", args: {} },
       { command: "drive_upload", args: {} },
       { command: "drive_download", args: { fileId: "file-1" } },
+      {
+        command: "drive_rename",
+        args: { fileId: "file-1", name: "合同（新版）.pdf" },
+      },
+      { command: "download_set_assistant_allowed", args: { enabled: false } },
       { command: "drive_delete", args: { fileId: "file-1" } },
       { command: "close_send_panel", args: {} },
       { command: "open_main", args: {} },
+      { command: "open_public_media", args: {} },
       { command: "cancel_transfer", args: { transferId: "transfer-1" } },
       { command: "retry_transfer", args: { transferId: "transfer-1" } },
       { command: "set_send_menu", args: { enabled: true } },
@@ -385,6 +395,7 @@ describe("影视具名桥接", () => {
     rejectWith = null;
   });
   const content: MediaContent = {
+    published: false,
     mediaType: "movie",
     title: "测试电影",
     originalTitle: "",
@@ -495,6 +506,8 @@ describe("影视具名桥接", () => {
         args: {
           identity: { provider: "tmdb", externalId: "1" },
           mediaType: "tv",
+          page: 2,
+          pageSize: 20,
         },
         value: {
           actor: {
@@ -503,9 +516,15 @@ describe("影视具名桥接", () => {
             photo: null,
           },
           items: [],
+          total: 44,
+          page: 2,
+          pageSize: 20,
         },
         perform: () =>
-          client.actor({ provider: "tmdb", externalId: "1" }, "tv"),
+          client.actor({ provider: "tmdb", externalId: "1" }, "tv", {
+            page: 2,
+            pageSize: 20,
+          }),
       },
       {
         command: "media_image",

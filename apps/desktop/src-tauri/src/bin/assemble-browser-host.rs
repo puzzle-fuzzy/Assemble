@@ -84,9 +84,11 @@ async fn main() {
     {
         let request = match message {
             BrowserMessage::Hello => None,
-            BrowserMessage::Download { request_id, input } => {
-                Some(BrowserDownload { request_id, input })
-            }
+            BrowserMessage::Download { request_id, input } => Some(BrowserDownload {
+                request_id,
+                input,
+                via: None,
+            }),
         };
         let mut connected = browser::send(&store, &config.app_id, None).await;
         if !connected.ok

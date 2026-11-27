@@ -3,7 +3,7 @@
     "shared": "Shared library",
     "private": "My library",
     "sharedHint": "Administrators maintain shared entries. Everyone can browse them.",
-    "privateHint": "Only you can access your private entries, images and reviews."
+    "privateHint": "Private by default. Publish individual entries to share them."
   },
   "type": {
     "all": "All types",
@@ -75,7 +75,7 @@
     "watchedAt": "Date watched",
     "review": "Review",
     "notes": "Notes",
-    "notesHint": "Only administrators can read shared notes. Private notes are only visible to you.",
+    "notesHint": "Notes are visible only to the owner and administrators, never on public pages.",
     "magnet": "Magnet link",
     "copyMagnet": "Copy magnet link",
     "copied": "Copied",
@@ -190,8 +190,8 @@
   },
   "statistics": {
     "countHeader": "Titles",
-    "title": "Shared library statistics",
-    "hint": "Only shared entries are included. Private libraries are excluded.",
+    "title": "All library statistics",
+    "hint": "Includes shared entries and every user's library. Administrators only.",
     "total": "All works",
     "movies": "Movies",
     "tv": "TV series",
@@ -200,5 +200,18 @@
     "byMonth": "Month watched",
     "empty": "No records to summarize yet",
     "count": "{{count}} works"
+  },
+  "publication": {
+    "allLibraries": "All libraries",
+    "userLibraries": "User libraries",
+    "owner": "Owner",
+    "visibility": "Visibility",
+    "public": "Public",
+    "private": "Private",
+    "publish": "Publish this entry",
+    "ownerOnly": "Only the owner can publish this entry.",
+    "hint": "Publishes metadata, images and review. Notes stay private; magnets require sign-in. Uncheck and save to withdraw.",
+    "search": "Title, user name or account ID",
+    "browseAll": "Browse all public entries"
   }
 }

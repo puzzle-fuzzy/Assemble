@@ -1,8 +1,11 @@
+import { Alert, AlertDescription } from "@assemble/ui/alert";
 import { Button } from "@assemble/ui/button";
 import {
   Card,
   CardAction,
   CardContent,
+  CardDescription,
+  CardFooter,
   CardHeader,
   CardTitle,
 } from "@assemble/ui/card";
@@ -21,7 +24,13 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@assemble/ui/dialog";
-import { Field, FieldGroup, FieldLabel as Label } from "@assemble/ui/field";
+import { Empty, EmptyHeader, EmptyTitle } from "@assemble/ui/empty";
+import {
+  Field,
+  FieldError,
+  FieldGroup,
+  FieldLabel as Label,
+} from "@assemble/ui/field";
 import { Input } from "@assemble/ui/input";
 import { Progress } from "@assemble/ui/progress";
 import { useEffect, useId, useRef, useState } from "react";
@@ -212,55 +221,57 @@ export function DownloadsPage({
           </FieldGroup>
         </form>
         {error ? (
-          <p
-            id={`${id}-error`}
-            role="alert"
-            className="text-sm text-destructive"
-          >
-            {downloadError(error)}
-          </p>
+          <FieldError id={`${id}-error`}>{downloadError(error)}</FieldError>
         ) : null}
         {preview ? (
-          <div className="flex flex-col gap-3 rounded-lg border p-3">
-            <p className="break-words text-sm font-medium">{preview.title}</p>
-            <p className="text-xs text-muted-foreground">
-              {preview.sourceHost}
-            </p>
-            <Label htmlFor={`${id}-quality`}>{t("quality")}</Label>
-            <Select
-              value={variant}
-              disabled={pending}
-              onValueChange={setVariant}
-            >
-              <SelectTrigger id={`${id}-quality`} className="w-full">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent position="popper">
-                <SelectGroup>
-                  {preview.variants.map((v) => (
-                    <SelectItem key={v.id} value={v.id}>
-                      {v.height ? `${v.height}p` : t("original")}
-                      {v.bandwidth
-                        ? ` · ${t("rate", { rate: Math.round(v.bandwidth / 1000) })}`
-                        : ""}
-                    </SelectItem>
-                  ))}
-                </SelectGroup>
-              </SelectContent>
-            </Select>
-            <Button
-              disabled={pending || !view?.toolsAvailable}
-              onClick={() =>
-                void run(async () => {
-                  await source.downloadStart(preview.id, variant);
-                  setPreview(null);
-                  setCompose(false);
-                })
-              }
-            >
-              {t("start")}
-            </Button>
-          </div>
+          <Card size="sm">
+            <CardHeader>
+              <CardTitle className="break-words">{preview.title}</CardTitle>
+              <CardDescription>{preview.sourceHost}</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <FieldGroup>
+                <Field>
+                  <Label htmlFor={`${id}-quality`}>{t("quality")}</Label>
+                  <Select
+                    value={variant}
+                    disabled={pending}
+                    onValueChange={setVariant}
+                  >
+                    <SelectTrigger id={`${id}-quality`} className="w-full">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent position="popper">
+                      <SelectGroup>
+                        {preview.variants.map((v) => (
+                          <SelectItem key={v.id} value={v.id}>
+                            {v.height ? `${v.height}p` : t("original")}
+                            {v.bandwidth
+                              ? ` · ${t("rate", { rate: Math.round(v.bandwidth / 1000) })}`
+                              : ""}
+                          </SelectItem>
+                        ))}
+                      </SelectGroup>
+                    </SelectContent>
+                  </Select>
+                </Field>
+              </FieldGroup>
+            </CardContent>
+            <CardFooter>
+              <Button
+                disabled={pending || !view?.toolsAvailable}
+                onClick={() =>
+                  void run(async () => {
+                    await source.downloadStart(preview.id, variant);
+                    setPreview(null);
+                    setCompose(false);
+                  })
+                }
+              >
+                {t("start")}
+              </Button>
+            </CardFooter>
+          </Card>
         ) : null}
       </DialogContent>
       <Card>
@@ -293,14 +304,16 @@ export function DownloadsPage({
             <p className="text-sm text-muted-foreground">{t("toolsMissing")}</p>
           ) : null}
           {error && !compose ? (
-            <p role="alert" className="text-sm text-destructive">
-              {downloadError(error)}
-            </p>
+            <Alert variant="destructive">
+              <AlertDescription>{downloadError(error)}</AlertDescription>
+            </Alert>
           ) : null}
           {!view?.tasks.length ? (
-            <div className="py-8 text-center">
-              <p className="text-sm font-medium">{t("empty")}</p>
-            </div>
+            <Empty className="py-8">
+              <EmptyHeader>
+                <EmptyTitle>{t("empty")}</EmptyTitle>
+              </EmptyHeader>
+            </Empty>
           ) : (
             <ul className="divide-y">
               {view.tasks.map((task) => {
@@ -321,12 +334,14 @@ export function DownloadsPage({
                     <p className="break-words text-sm font-medium">
                       {task.fileName ?? task.title}
                     </p>
-                    <p
-                      className="text-xs text-muted-foreground"
-                      role={active ? undefined : "status"}
-                    >
-                      {t(task.phase)}
-                    </p>
+                    {task.phase !== "completed" ? (
+                      <p
+                        className="text-xs text-muted-foreground"
+                        role={active ? undefined : "status"}
+                      >
+                        {t(task.phase)}
+                      </p>
+                    ) : null}
                     {active ? (
                       <Progress
                         value={progress}
@@ -334,8 +349,11 @@ export function DownloadsPage({
                       />
                     ) : null}
                     <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
+                      {task.initiatedBy === "assistant" ? (
+                        <span>{t("initiatedByAssistant")}</span>
+                      ) : null}
                       <span>{formatSize(task.receivedBytes)}</span>
-                      {task.totalSegments !== null ? (
+                      {active && task.totalSegments !== null ? (
                         <span>
                           {t("parts", {
                             done: task.completedSegments,
@@ -343,7 +361,7 @@ export function DownloadsPage({
                           })}
                         </span>
                       ) : null}
-                      {task.bytesPerSecond > 0 ? (
+                      {active && task.bytesPerSecond > 0 ? (
                         <span>
                           {t("speed", {
                             size: formatSize(task.bytesPerSecond),

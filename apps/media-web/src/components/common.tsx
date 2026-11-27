@@ -10,7 +10,25 @@ import { LoadingState } from "@assemble/ui/loading-state";
 import { ArrowLeftIcon, ArrowRightIcon, RotateCwIcon } from "lucide-react";
 import type { ComponentProps } from "react";
 import { useSiteTranslation } from "../lib/i18n";
-import { loginPath, navigate } from "../lib/navigation";
+import { loginPath, navigate, userLibraryPath } from "../lib/navigation";
+
+export function PublicProfileLink({
+  accountId,
+  active = false,
+}: {
+  accountId: string;
+  active?: boolean;
+}) {
+  const { t } = useSiteTranslation();
+  return (
+    <SiteLink
+      href={userLibraryPath(accountId)}
+      aria-current={active ? "page" : undefined}
+    >
+      {t("myPublicLibrary")}
+    </SiteLink>
+  );
+}
 
 export function SiteLink({
   href = "/movies/",

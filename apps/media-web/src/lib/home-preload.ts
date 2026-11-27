@@ -68,7 +68,7 @@ export function preloadAnonymousHome() {
   window.addEventListener("popstate", changed);
   window.addEventListener("assemble:media-navigation", changed);
   for (const status of ["planned", "watching", "completed"] as const) {
-    const url = new URL("/v1/media/shared/entries", origin);
+    const url = new URL("/v1/media/public/entries", origin);
     if (mediaType === "movie" || mediaType === "tv")
       url.searchParams.set("mediaType", mediaType);
     url.searchParams.set("status", status);

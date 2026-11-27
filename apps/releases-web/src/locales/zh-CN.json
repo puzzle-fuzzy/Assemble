@@ -1,0 +1,24 @@
+{
+  "title": "下载 Assemble",
+  "navigation": "网站导航",
+  "movies": "影视站",
+  "retry": "重试",
+  "unreleased": "未发布",
+  "loading": "正在读取发布信息",
+  "errorTitle": "暂时无法读取发布信息",
+  "errorMessage": "请稍后重试。",
+  "download": "下载",
+  "downloadFor": "下载 {{platform}} {{architecture}} {{version}}",
+  "verify": "校验信息",
+  "verifyFor": "查看 {{platform}} {{architecture}} {{version}} 的校验信息",
+  "file": "文件名",
+  "size": "文件大小",
+  "publishedAt": "发布时间",
+  "architecture": { "x64": "x64", "arm64": "ARM64", "universal": "通用" },
+  "platform": {
+    "windows": "Windows",
+    "macos": "macOS",
+    "ios": "iOS",
+    "android": "Android"
+  }
+}

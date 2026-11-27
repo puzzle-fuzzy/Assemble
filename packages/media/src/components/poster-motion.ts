@@ -92,6 +92,8 @@ export function createPosterMotion(source: HTMLImageElement | null) {
       sibling.matches('[data-slot="dialog-overlay"]')
         ? sibling
         : null;
+    // 此预览已接管遮罩的淡入淡出，避免 Dialog 退出时从不透明再播放一次。
+    if (backdrop) backdrop.style.animation = "none";
     try {
       animations = [
         clone.animate([box(from), box(to)], {
@@ -203,7 +205,11 @@ export function createPosterMotion(source: HTMLImageElement | null) {
     source.style.visibility = "hidden";
     clone = flyingImage(frame, from);
     run(content, from, to, false, () => {
-      cancel();
+      // Dialog 的关闭要等 React 提交；此时撤销填充动画会让原图和遮罩闪回一帧。
+      // 只交还页面封面，弹窗继续保持透明终态，卸载后再由 cancel 统一释放。
+      clone?.remove();
+      clone = null;
+      if (source) source.style.visibility = sourceVisibility;
       finish();
     });
   }

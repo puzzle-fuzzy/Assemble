@@ -279,6 +279,7 @@ pub fn routes() -> axum::Router<Shared> {
         .route("/v1/admin/overview", get(overview))
         .route("/v1/admin/storage", get(storage))
         .route("/v1/admin/drive/files", get(drive_files))
+        .route("/v1/admin/drive/files/{id}/content", get(drive_content))
         .route("/v1/admin/users", get(users))
         .route("/v1/admin/users/{id}", get(user))
         .route("/v1/admin/users/{id}/suspend", post(suspend))
@@ -661,6 +662,28 @@ impl DriveRow {
             created_at: timestamp(self.created_at)?,
         })
     }
+}
+
+async fn drive_content(
+    State(state): State<Shared>,
+    _: Admin,
+    Path(id): Path<String>,
+    headers: HeaderMap,
+) -> Result<Response, ApiError> {
+    if !is_valid_id(&id) {
+        return Err(ApiError::not_found());
+    }
+    let row: crate::drive::DriveRow = sqlx::query_as(
+        "SELECT id, account_id, name, size, mime_type, sha256, created_at FROM drive_files WHERE id = ?",
+    ).bind(&id).fetch_optional(&state.pool).await?.ok_or_else(ApiError::not_found)?;
+    // 与普通云盘下载复用附件文件名、分段读取和类型边界；跨账户授权只在此管理员入口执行。
+    Ok(crate::http::file_response(
+        &state.blobs.path_for(&row.sha256),
+        &row.name,
+        row.mime_type.as_deref(),
+        &headers,
+    )
+    .await)
 }
 
 async fn drive_files(

@@ -31,6 +31,7 @@ pub mod memo;
 pub mod origin;
 pub mod pairing;
 pub mod primitives;
+pub mod releases;
 pub mod schedule;
 pub mod sends;
 pub mod system_notifications;

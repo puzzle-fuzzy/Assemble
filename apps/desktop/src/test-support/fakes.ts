@@ -180,6 +180,7 @@ export function snapshot(overrides: Overrides = {}): Snapshot {
     service: service(),
     systemNotifications: { items: [], available: true },
     downloads: {
+      assistantAllowed: true,
       browserTaskId: null,
       folderName: "网络下载",
       toolsAvailable: true,
@@ -253,6 +254,15 @@ export class FakeBridge implements Bridge {
   }
   async downloadRetry(_id: string) {
     this.calls.push("downloadRetry");
+  }
+  async downloadSetAssistantAllowed(enabled: boolean) {
+    await this.answer(`downloadSetAssistantAllowed:${enabled}`, undefined);
+    const next = {
+      ...this.current,
+      downloads: { ...this.current.downloads, assistantAllowed: enabled },
+    };
+    this.push(next);
+    return next;
   }
   async downloadChooseFolder() {
     this.calls.push("downloadChooseFolder");
@@ -409,12 +419,20 @@ export class FakeBridge implements Bridge {
     return this.answer(`driveDelete:${fileId}`, this.current);
   }
 
+  driveRename(fileId: string, name: string) {
+    return this.answer(`driveRename:${fileId}:${name}`, this.current);
+  }
+
   closeSendPanel() {
     return this.answer("closeSendPanel", undefined);
   }
 
   openMain() {
     return this.answer("openMain", undefined);
+  }
+
+  openPublicMedia() {
+    return this.answer("openPublicMedia", undefined);
   }
 
   cancelTransfer(transferId: string) {

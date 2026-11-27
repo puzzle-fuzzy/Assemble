@@ -29,6 +29,10 @@ import {
 } from "@/test-support/dom";
 import { DEVICE, FakeBridge, snapshot } from "@/test-support/fakes";
 import { renderApp } from "@/test-support/render-app";
+import {
+  chooseSelect,
+  selectTrigger,
+} from "../../../packages/ui/src/test-support/select";
 
 beforeEach(() => {
   document.body.replaceChildren();
@@ -400,6 +404,17 @@ describe("日程", () => {
     expect(text(page)).toContain("时间要填到哪一天、几点几分。");
     expect(source.calls).toEqual([]);
 
+    for (const invalid of [
+      "2026-11-26T25:00",
+      "2026-11-26T09:60",
+      "2026-02-30T09:05",
+    ]) {
+      await fill(page, "到点时间", invalid);
+      await click(button(page, "保存"));
+      expect(text(page)).toContain("时间要填到哪一天、几点几分。");
+      expect(source.calls).toEqual([]);
+    }
+
     await fill(page, "到点时间", "2026-11-26T09:05");
     await fill(page, "备注", " 驿站楼下 ");
     await click(button(page, "保存"));
@@ -427,15 +442,15 @@ describe("日程", () => {
     // 从现在这一条填起，时间是这台电脑的本地时间。
     expect(text(page)).toContain("修改日程");
     expect(field(page, "标题").value).toBe("火车");
-    expect(field(page, "开始时间").value).toBe("2026-11-26T09:00");
-    expect(field(page, "结束时间").value).toBe("2026-11-26T10:00");
-    expect(field(page, "重复").value).toBe("none");
-    expect(field(page, "提醒").value).toBe("30");
+    expect(field(page, "开始时间").value).toBe("2026-11-26 09:00");
+    expect(field(page, "结束时间").value).toBe("2026-11-26 10:00");
+    expect(selectTrigger(page, "重复").textContent).toContain("不重复");
+    expect(selectTrigger(page, "提醒").textContent).toContain("提前 30 分钟");
     expect(field(page, "地点").value).toBe("上海虹桥站");
     expect(field(page, "备注").value).toBe("带身份证");
 
     await fill(page, "标题", "高铁");
-    await fill(page, "重复", "daily");
+    await chooseSelect(page, "重复", "每天");
     await fill(page, "结束时间", "2026-11-26T09:00");
     await click(button(page, "保存"));
     expect(text(page)).toContain("结束时间要晚于开始时间。");
@@ -488,8 +503,7 @@ describe("日程", () => {
 
     expect(text(await planned(page, "火车"))).toContain("提前 45 分钟");
     await click(button(await planned(page, "火车"), "编辑"));
-    const lead = field(page, "提醒");
-    expect(lead.value).toBe("45");
+    const lead = selectTrigger(page, "提醒");
     expect(text(lead)).toContain("提前 45 分钟");
     await click(button(page, "保存"));
     expect(source.lastSubmitted).toMatchObject({ remindBefore: 45 });

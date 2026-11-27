@@ -137,7 +137,8 @@ export function isTransferFailure(value: unknown): value is TransferFailure {
     value === "fileUnreadable" ||
     value === "rejected" ||
     value === "quotaExceeded" ||
-    value === "vanished"
+    value === "vanished" ||
+    value === "interrupted"
   );
 }
 

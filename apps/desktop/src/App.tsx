@@ -3,18 +3,15 @@
 // 各功能共享窗口布局；账户切换统一隔离查询、草稿与异步结果。
 
 import { useDisplayPreferences } from "@assemble/display";
-import {
-  Breadcrumb,
-  BreadcrumbItem,
-  BreadcrumbLink,
-  BreadcrumbList,
-  BreadcrumbPage,
-  BreadcrumbSeparator,
-} from "@assemble/ui/breadcrumb";
+import type { MediaPageLocation } from "@assemble/media/components/workspace";
+import { Alert, AlertAction, AlertDescription } from "@assemble/ui/alert";
+import { FieldError } from "@assemble/ui/field";
 import { LoadingState } from "@assemble/ui/loading-state";
+import { PageBreadcrumbs } from "@assemble/ui/page-breadcrumbs";
 import { ArrowDownToLine, ArrowUpToLine, UserRound } from "lucide-react";
 import { Fragment, lazy, Suspense, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
+import { AssistantDownloadsSetting } from "@/AssistantDownloadsSetting";
 import {
   DesktopMobileMenu,
   DesktopSidebar,
@@ -48,6 +45,7 @@ import { SidebarProvider } from "@/components/ui/sidebar";
 import { Toaster } from "@/components/ui/sonner";
 import { Switch } from "@/components/ui/switch";
 import { DownloadsPage } from "@/DownloadsPage";
+import { DriveRenameAction } from "@/DriveRenameDialog";
 import { useSnapshot } from "@/hooks/use-snapshot";
 import {
   type Bridge,
@@ -118,6 +116,9 @@ export function App({
   const accountAction = useRef(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const [section, setSection] = useState<Section>("transfers");
+  const [mediaLocation, setMediaLocation] = useState<MediaPageLocation | null>(
+    null,
+  );
   const [queries, setQueries] = useState<Partial<Record<Section, string>>>({});
   const contentHeading = useRef<HTMLSpanElement>(null);
   const [systemFocus, setSystemFocus] = useState<{
@@ -136,6 +137,10 @@ export function App({
   const phase = snapshot?.session.phase;
   const accountId =
     snapshot?.session.phase === "signedIn" ? snapshot.session.account.id : null;
+  const currentMediaLocation =
+    section === "media" && mediaLocation?.accountKey === accountId
+      ? mediaLocation
+      : null;
   const previousAccount = useRef(accountId);
   const previousSection = useRef(section);
   const compose = snapshot?.planner?.compose ?? null;
@@ -166,10 +171,10 @@ export function App({
 
   const sectionLabel = SECTIONS().find((item) => item.id === section)?.label;
   useEffect(() => {
-    document.title = `${sectionLabel} · Assemble`;
+    document.title = `${currentMediaLocation ? `${currentMediaLocation.title} · ` : ""}${sectionLabel} · Assemble`;
     if (previousSection.current !== section) contentHeading.current?.focus();
     previousSection.current = section;
-  }, [section, sectionLabel]);
+  }, [section, sectionLabel, currentMediaLocation]);
 
   function navigate(next: Section) {
     setSection(next);
@@ -248,32 +253,29 @@ export function App({
                 onNavigate={navigate}
                 onNavigateFocus={() => contentHeading.current?.focus()}
               />
-              <Breadcrumb>
-                <BreadcrumbList>
-                  <BreadcrumbItem className="hidden md:block">
-                    <BreadcrumbLink
-                      href="#transfers"
-                      onClick={(event) => {
-                        event.preventDefault();
-                        navigate("transfers");
-                      }}
-                    >
-                      Assemble
-                    </BreadcrumbLink>
-                  </BreadcrumbItem>
-                  <BreadcrumbSeparator className="hidden md:block" />
-                  <BreadcrumbItem>
-                    <BreadcrumbPage
-                      ref={contentHeading}
-                      role="heading"
-                      aria-level={1}
-                      tabIndex={-1}
-                    >
-                      {sectionLabel}
-                    </BreadcrumbPage>
-                  </BreadcrumbItem>
-                </BreadcrumbList>
-              </Breadcrumb>
+              <PageBreadcrumbs
+                ancestors={[
+                  {
+                    id: "app",
+                    label: "Assemble",
+                    href: "#transfers",
+                    onNavigate: () => navigate("transfers"),
+                    hideOnNarrow: true,
+                  },
+                  ...(currentMediaLocation
+                    ? [
+                        {
+                          id: "media",
+                          label: sectionLabel ?? "",
+                          href: "#media",
+                          onNavigate: currentMediaLocation.showList,
+                        },
+                      ]
+                    : []),
+                ]}
+                current={currentMediaLocation?.title ?? sectionLabel ?? ""}
+                currentRef={contentHeading}
+              />
             </div>
             <div className="flex min-w-0 shrink-0 items-center gap-2 px-4">
               <DesktopSystemNotifications
@@ -309,9 +311,9 @@ export function App({
             {/* Card 的外描边需要留在滚动区内，避免顶部贴边时被视口裁掉。 */}
             <div className="@container mx-auto flex w-full min-w-0 flex-col gap-4 p-4 pt-1">
               {loadError ? (
-                <p role="alert" className="text-sm text-destructive">
-                  {loadError}
-                </p>
+                <Alert variant="destructive">
+                  <AlertDescription>{loadError}</AlertDescription>
+                </Alert>
               ) : null}
               {snapshot?.notice ? (
                 <NoticeLine
@@ -320,9 +322,11 @@ export function App({
                 />
               ) : null}
               {actionError ? (
-                <p role="alert" className="text-sm text-destructive">
-                  {messageFor(toBridgeError({ code: actionError }))}
-                </p>
+                <Alert variant="destructive">
+                  <AlertDescription>
+                    {messageFor(toBridgeError({ code: actionError }))}
+                  </AlertDescription>
+                </Alert>
               ) : null}
               {phase !== "signedIn" &&
               section !== "media" &&
@@ -461,6 +465,14 @@ export function App({
                       source={mediaSource}
                       accountId={accountId}
                       onSignIn={() => navigate("account")}
+                      onLocationChange={setMediaLocation}
+                      onBrowseLibrary={() => {
+                        void source
+                          .openPublicMedia()
+                          .catch((error: unknown) =>
+                            toast.error(messageFor(toBridgeError(error))),
+                          );
+                      }}
                     />
                   </Suspense>
                 </section>
@@ -591,24 +603,17 @@ function NoticeLine({
   }
   const isError = notice.kind === "error";
   return (
-    <div
+    <Alert
+      variant={isError ? "destructive" : "default"}
       role={isError ? "alert" : "status"}
-      className={
-        isError
-          ? "flex items-start justify-between gap-3 text-sm text-destructive"
-          : "flex items-start justify-between gap-3 text-sm text-muted-foreground"
-      }
     >
-      <p>{noticeText(notice)}</p>
-      <Button
-        type="button"
-        variant="ghost"
-        className="shrink-0"
-        onClick={onDismiss}
-      >
-        {uiText("dismiss")}
-      </Button>
-    </div>
+      <AlertDescription>{noticeText(notice)}</AlertDescription>
+      <AlertAction>
+        <Button type="button" variant="ghost" size="sm" onClick={onDismiss}>
+          {uiText("dismiss")}
+        </Button>
+      </AlertAction>
+    </Alert>
   );
 }
 
@@ -941,9 +946,9 @@ function DeviceRow({
         )}
       </div>
       {problem ? (
-        <p role="alert" className="mt-1 text-xs text-destructive">
+        <FieldError className="mt-1">
           {messageFor(toBridgeError({ code: problem }))}
-        </p>
+        </FieldError>
       ) : null}
     </div>
   );
@@ -1413,6 +1418,7 @@ function DriveRow({
             >
               {uiText("download")}
             </Button>
+            <DriveRenameAction source={source} file={file} disabled={pending} />
             <Button
               size="default"
               variant="outline"
@@ -1526,6 +1532,12 @@ function LaunchCard({ source, snapshot, onError }: CardProps) {
             ) : null}
           </div>
         </div>
+        {snapshot?.downloads ? (
+          <AssistantDownloadsSetting
+            source={source}
+            enabled={snapshot.downloads.assistantAllowed}
+          />
+        ) : null}
         {/* 提醒有没有用，要看登录没登录：没登录就收不到，这一项也不必摆出来。 */}
         {snapshot?.session.phase === "signedIn" ? (
           <div className="flex flex-wrap items-center justify-between gap-3 pt-3">
@@ -1554,23 +1566,28 @@ function LaunchCard({ source, snapshot, onError }: CardProps) {
           </div>
         ) : null}
         {sendMenu === "unsupported" ? null : (
-          <div className="flex items-center justify-between gap-3 border-t border-border pt-3">
-            <div className="min-w-0">
-              <p className="text-sm font-medium">{uiText("fileContextMenu")}</p>
-              <p className="text-sm text-muted-foreground">
-                {sendMenu === "enabled"
-                  ? uiText("rightClickAFileAndChooseSendWithAssemble")
-                  : uiText("sendWithAssembleIsDisabledInTheFileContextMenu")}
-              </p>
+          <div className="flex flex-col gap-3">
+            <Separator />
+            <div className="flex items-center justify-between gap-3">
+              <div className="min-w-0">
+                <p className="text-sm font-medium">
+                  {uiText("fileContextMenu")}
+                </p>
+                <p className="text-sm text-muted-foreground">
+                  {sendMenu === "enabled"
+                    ? uiText("rightClickAFileAndChooseSendWithAssemble")
+                    : uiText("sendWithAssembleIsDisabledInTheFileContextMenu")}
+                </p>
+              </div>
+              <Switch
+                aria-label={uiText("sendWithAssembleInTheFileContextMenu")}
+                checked={sendMenu === "enabled"}
+                disabled={pending}
+                onCheckedChange={(checked) =>
+                  void flip(() => source.setSendMenu(checked))
+                }
+              />
             </div>
-            <Switch
-              aria-label={uiText("sendWithAssembleInTheFileContextMenu")}
-              checked={sendMenu === "enabled"}
-              disabled={pending}
-              onCheckedChange={(checked) =>
-                void flip(() => source.setSendMenu(checked))
-              }
-            />
           </div>
         )}
       </CardContent>

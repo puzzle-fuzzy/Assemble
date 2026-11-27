@@ -9,6 +9,8 @@ use sqlx::{Sqlite, Transaction};
 #[derive(Debug, Clone)]
 pub(super) struct Principal {
     pub account_id: String,
+    /// 管理操作的归属与审计操作者分开，不冒用被管理账户的身份。
+    pub target_owner: Option<String>,
     pub credential_kind: String,
     pub credential_id: String,
     pub admin: bool,
@@ -24,6 +26,7 @@ pub(super) async fn optional(
         let admin: bool = sqlx::query_scalar("SELECT is_super_admin = 1 AND email IS NOT NULL AND email_verified_at IS NOT NULL FROM accounts WHERE id = ?")
             .bind(&session.account_id).fetch_one(&state.pool).await?;
         return Ok(Some(Principal {
+            target_owner: None,
             account_id: session.account_id,
             credential_kind: "web".into(),
             credential_id: session.id,
@@ -34,6 +37,7 @@ pub(super) async fn optional(
     if headers.contains_key(header::AUTHORIZATION) {
         let identity = crate::auth::identity(&state.pool, headers).await?;
         return Ok(Some(Principal {
+            target_owner: None,
             account_id: identity.account_id,
             credential_kind: "device".into(),
             credential_id: identity.device_id,
@@ -102,11 +106,12 @@ pub(super) async fn revalidate(
     principal: &Principal,
     scope: MediaScope,
 ) -> Result<(), ApiError> {
+    let needs_admin = scope == MediaScope::Shared || principal.target_owner.is_some();
     let valid: bool = if principal.credential_kind == "web" {
-        sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM web_sessions s JOIN accounts a ON a.id = s.account_id WHERE s.id = ? AND s.account_id = ? AND s.expires_at > ? AND (? = 0 OR (a.is_super_admin = 1 AND a.email IS NOT NULL AND a.email_verified_at IS NOT NULL)))")
-            .bind(&principal.credential_id).bind(&principal.account_id).bind(super::now()).bind(scope == MediaScope::Shared).fetch_one(&mut **tx).await?
-    } else if scope == MediaScope::Private {
-        sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM devices WHERE id = ? AND account_id = ?)")
+        sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM web_sessions s JOIN accounts a ON a.id = s.account_id WHERE s.id = ? AND s.account_id = ? AND s.expires_at > ? AND a.suspended_at IS NULL AND (? = 0 OR (a.is_super_admin = 1 AND a.email IS NOT NULL AND a.email_verified_at IS NOT NULL)))")
+            .bind(&principal.credential_id).bind(&principal.account_id).bind(super::now()).bind(needs_admin).fetch_one(&mut **tx).await?
+    } else if scope == MediaScope::Private && !needs_admin {
+        sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM devices d JOIN accounts a ON a.id = d.account_id WHERE d.id = ? AND d.account_id = ? AND a.suspended_at IS NULL)")
             .bind(&principal.credential_id)
             .bind(&principal.account_id)
             .fetch_one(&mut **tx)
@@ -123,6 +128,10 @@ pub(super) async fn revalidate(
 pub(super) fn owner_key(scope: MediaScope, principal: &Principal) -> String {
     match scope {
         MediaScope::Shared => "shared".to_owned(),
-        MediaScope::Private => principal.account_id.clone(),
+        MediaScope::Private => principal
+            .target_owner
+            .as_ref()
+            .unwrap_or(&principal.account_id)
+            .clone(),
     }
 }

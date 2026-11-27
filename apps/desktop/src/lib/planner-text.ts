@@ -1,6 +1,6 @@
 // 日程卡片用的文字换算：UTC 时间与本地时间之间，以及几种标签。
 //
-// 服务端给的时间都是 UTC；输入框（`datetime-local`）和显示用的都是这台电脑的本地时间。
+// 服务端给的时间都是 UTC；共享日期时间选择器和显示用的都是这台电脑的本地时间。
 // 这里都是纯函数，不碰界面。
 
 import { text, textLocale } from "@/lib/text-i18n";
@@ -22,7 +22,7 @@ function startOfDay(date: Date): number {
 
 const pad = (value: number) => String(value).padStart(2, "0");
 
-/** 给 `datetime-local` 输入框用的本地时间：`YYYY-MM-DDTHH:mm`。 */
+/** 给日期时间选择器用的本地时间值：`YYYY-MM-DDTHH:mm`。 */
 export function toLocalInput(iso: string): string {
   const at = new Date(iso);
   if (Number.isNaN(at.getTime())) return "";
@@ -34,12 +34,14 @@ export function toLocalInput(iso: string): string {
  * 填得不完整（只有日期没有时刻、或者根本是空的）时为 null。
  */
 export function fromLocalInput(value: string): string | null {
-  // `datetime-local` 的值固定是 `YYYY-MM-DDTHH:mm`（秒可以不带）。
-  const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::\d{2})?$/.exec(
+  // 选择器交出的值固定是 `YYYY-MM-DDTHH:mm`（秒可以不带）。
+  const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2}))?$/.exec(
     value,
   );
   if (!match) return null;
   const [year, month, day, hour, minute] = match.slice(1).map(Number);
+  // 手动输入不再有原生时间框兜底，避免小时或分钟溢出被 Date 悄悄顺延。
+  if (hour > 23 || minute > 59 || Number(match[6] ?? 0) > 59) return null;
   const at = new Date(year, month - 1, day, hour, minute);
   // 2 月 30 日这样的日期会被 Date 顺到下个月去：填错了就是填错了。
   const honest =

@@ -3,7 +3,9 @@
 // 它是一个单独的窗口，只认标识：要发的文件、账户里的设备、每一条传输。
 // 文件在哪、怎么上传，都在 Rust 那边。挑文件、选设备、发出去，点三下就结束。
 
+import { Alert, AlertDescription } from "@assemble/ui/alert";
 import { DisplayPreferencesMenu } from "@assemble/ui/display-preferences";
+import { Item, ItemContent, ItemTitle } from "@assemble/ui/item";
 import { ArrowRight, Cloud, File, Monitor } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
@@ -123,9 +125,9 @@ export function SendPanel({ bridge: source = bridge }: SendPanelProps) {
         <DisplayPreferencesMenu />
       </header>
       {loadError ? (
-        <p role="alert" className="text-sm text-destructive">
-          {loadError}
-        </p>
+        <Alert variant="destructive">
+          <AlertDescription>{loadError}</AlertDescription>
+        </Alert>
       ) : null}
       {!snapshot ? (
         <p className="text-sm text-muted-foreground">
@@ -233,9 +235,11 @@ export function SendPanel({ bridge: source = bridge }: SendPanelProps) {
             </p>
           ) : null}
           {problem ? (
-            <p role="alert" className="text-sm text-destructive">
-              {messageFor(toBridgeError({ code: problem }))}
-            </p>
+            <Alert variant="destructive">
+              <AlertDescription>
+                {messageFor(toBridgeError({ code: problem }))}
+              </AlertDescription>
+            </Alert>
           ) : null}
         </>
       ) : null}
@@ -274,9 +278,11 @@ export function SendPanel({ bridge: source = bridge }: SendPanelProps) {
             </p>
           )}
           {problem ? (
-            <p role="alert" className="text-sm text-destructive">
-              {messageFor(toBridgeError({ code: problem }))}
-            </p>
+            <Alert variant="destructive">
+              <AlertDescription>
+                {messageFor(toBridgeError({ code: problem }))}
+              </AlertDescription>
+            </Alert>
           ) : null}
         </>
       ) : null}
@@ -286,26 +292,33 @@ export function SendPanel({ bridge: source = bridge }: SendPanelProps) {
 
 function SentFile({ transfer }: { transfer: TransferView }) {
   return (
-    <li className="rounded-lg border border-border px-3 py-2">
-      <p className="truncate text-sm font-medium" title={transfer.name}>
-        {transfer.name}
-      </p>
-      {transfer.phase === "inProgress" ? (
-        <Progress
-          aria-hidden
-          className="mt-2"
-          value={transfer.progress * 100}
-        />
-      ) : null}
-      <p
-        className={
-          transfer.phase === "failed"
-            ? "mt-1 text-xs text-destructive"
-            : "mt-1 text-xs text-muted-foreground"
-        }
-      >
-        {transferStatus(transfer)}
-      </p>
-    </li>
+    <Item variant="outline" size="xs" asChild>
+      <li>
+        <ItemContent className="min-w-0">
+          <ItemTitle
+            className="block max-w-full truncate"
+            title={transfer.name}
+          >
+            {transfer.name}
+          </ItemTitle>
+          {transfer.phase === "inProgress" ? (
+            <Progress
+              aria-hidden
+              className="mt-2"
+              value={transfer.progress * 100}
+            />
+          ) : null}
+          <p
+            className={
+              transfer.phase === "failed"
+                ? "mt-1 text-xs text-destructive"
+                : "mt-1 text-xs text-muted-foreground"
+            }
+          >
+            {transferStatus(transfer)}
+          </p>
+        </ItemContent>
+      </li>
+    </Item>
   );
 }

@@ -59,6 +59,45 @@ function option(role: string, label: string) {
   return found;
 }
 
+test("应用可指定每页二十条，原生下载链接保留文件地址且禁用链接不可触发", async () => {
+  const rows = Array.from({ length: 21 }, (_, index) => ({
+    id: String(index),
+    name: `文件${index}`,
+    note: "",
+  }));
+  await mount(
+    <DataTable
+      label="下载目录"
+      variant="management"
+      data={rows}
+      columns={columns}
+      getRowLabel={(item) => item.name}
+      defaultPageSize={20}
+      rowActions={(item) => [
+        {
+          label: "下载",
+          href: `/v1/admin/drive/files/${item.id}/content`,
+          download: true,
+          disabled: item.id === "0",
+        },
+      ]}
+    />,
+  );
+  expect(host.querySelectorAll("tbody tr[data-table-row]")).toHaveLength(20);
+  const links = [...host.querySelectorAll<HTMLAnchorElement>("a[download]")];
+  expect(links).toHaveLength(20);
+  expect(links[1]?.getAttribute("href")).toBe(
+    "/v1/admin/drive/files/1/content",
+  );
+  expect(links[0]?.hasAttribute("href")).toBe(false);
+  expect(links[0]?.getAttribute("aria-disabled")).toBe("true");
+  const event = new MouseEvent("click", { bubbles: true, cancelable: true });
+  links[0]?.dispatchEvent(event);
+  expect(event.defaultPrevented).toBe(true);
+  await click(control("下一页"));
+  expect(host.querySelectorAll("tbody tr[data-table-row]")).toHaveLength(1);
+});
+
 test("本机表格只选当前页，翻页清除选择，列菜单确实隐藏对应数据", async () => {
   await mount(
     <DataTable

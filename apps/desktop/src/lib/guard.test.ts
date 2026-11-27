@@ -55,6 +55,7 @@ test("认得手机和兜底的平台；只有电脑上的应用能收文件", ()
 const VALID: Snapshot = {
   systemNotifications: { items: [], available: true },
   downloads: {
+    assistantAllowed: true,
     browserTaskId: null,
     folderName: "",
     toolsAvailable: false,

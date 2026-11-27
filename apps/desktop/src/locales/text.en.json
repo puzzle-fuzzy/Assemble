@@ -82,6 +82,7 @@
         "failed": "Download failed"
       }
     },
+    "interrupted": "Interrupted",
     "failures": {
       "diskFull": {
         "received": "This computer's disk is full",
@@ -108,7 +109,8 @@
         "sent": "The server rejected this transfer; select the file again"
       },
       "quotaExceeded": { "sent": "There is not enough cloud storage" },
-      "vanished": { "received": "This file is no longer in the cloud drive" }
+      "vanished": { "received": "This file is no longer in the cloud drive" },
+      "interrupted": { "received": "Interrupted", "sent": "Interrupted" }
     }
   },
   "errors": {
@@ -143,6 +145,7 @@
       "sessionExpired": "Your sign-in has expired. Sign in again.",
       "deviceSessionExpired": "This device's sign-in has expired. Sign in again.",
       "signOutPending": "Unable to sign out: the server has not revoked this device's sign-in. Connect to the network and try again.",
+      "historyClearFailed": "Signed out, but the local transfer history could not be cleared.",
       "loginTimedOut": "Browser sign-in timed out. Please try again.",
       "browserUnavailable": "The system browser could not be opened. Try again.",
       "credentialStoreUnavailable": "The system keychain is unavailable. Your sign-in could not be saved.",

@@ -83,7 +83,20 @@ export function LibraryWall({
   const returnTo = wallPath(client.scope, query, pages);
   return (
     <div className="home-shelves">
-      <h1 className="sr-only">{t(client.scope)}</h1>
+      {query.ownerId ? (
+        <h1>
+          {shelves
+            .flatMap((shelf) =>
+              shelf.resource.phase === "ready"
+                ? shelf.resource.value.items
+                : [],
+            )
+            .find((entry) => entry.owner)?.owner?.displayName ??
+            t("publicLibrary")}
+        </h1>
+      ) : (
+        <h1 className="sr-only">{t(client.scope)}</h1>
+      )}
       <ToggleGroup
         type="single"
         value={query.mediaType ?? "all"}
@@ -91,10 +104,10 @@ export function LibraryWall({
         onValueChange={(value) => {
           if (value === "all" || value === "movie" || value === "tv")
             navigate(
-              wallPath(
-                client.scope,
-                value === "all" ? {} : { mediaType: value },
-              ),
+              wallPath(client.scope, {
+                ...(query.ownerId ? { ownerId: query.ownerId } : {}),
+                ...(value === "all" ? {} : { mediaType: value }),
+              }),
             );
         }}
       >

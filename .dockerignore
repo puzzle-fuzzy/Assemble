@@ -12,6 +12,8 @@
 !packages/media/**
 !Cargo.toml
 !Cargo.lock
+!deploy/
+!deploy/updater.pubkey
 !crates/
 !crates/**
 !apps/server/
@@ -32,6 +34,8 @@
 !apps/browser-extension/package.json
 !apps/media-web/
 !apps/media-web/**
+!apps/releases-web/
+!apps/releases-web/**
 **/node_modules
 **/dist
 **/data

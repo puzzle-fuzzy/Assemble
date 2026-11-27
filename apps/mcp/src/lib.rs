@@ -23,6 +23,7 @@
 
 pub mod browser;
 pub mod config;
+pub mod downloads;
 pub mod origin;
 pub mod planning;
 pub mod server;

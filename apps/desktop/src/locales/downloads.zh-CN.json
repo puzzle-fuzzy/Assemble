@@ -21,6 +21,8 @@
   "empty": "还没有下载任务",
   "emptyHint": "粘贴地址或导入清单，解析后选择画质开始下载。",
   "queue": "下载任务",
+  "assistantAllowed": "允许助手在这台电脑下载",
+  "initiatedByAssistant": "由助手发起",
   "cancel": "取消",
   "retry": "重试",
   "open": "打开视频",
@@ -37,6 +39,8 @@
   "cancelled": "已取消",
   "interrupted": "上次退出时中断，请重新解析来源",
   "error": {
+    "SETTINGS_SAVE_FAILED": "设置未保存，请检查本机存储空间和权限后重试。",
+    "DOWNLOAD_ASSISTANT_DISABLED": "已关闭助手下载，请在本机设置中开启。",
     "DOWNLOAD_INVALID_SOURCE": "请填写可公开访问的视频下载链接，或粘贴抖音分享文字。",
     "IMPORT_DOWNLOAD_LINK_NEEDED": "无法从这个文件获取视频。请粘贴下载该 M3U8 文件的链接后重新选择文件；也可用浏览器插件下载。",
     "DOWNLOAD_SOURCE_UNAVAILABLE": "来源不可用或已过期，请重新获取地址。",

@@ -1,3 +1,4 @@
+import { Alert, AlertDescription } from "@assemble/ui/alert";
 import { Badge } from "@assemble/ui/badge";
 import { Button } from "@assemble/ui/button";
 import { Separator } from "@assemble/ui/separator";
@@ -307,9 +308,9 @@ export function MediaDetails({
             )
           )}
           {copy === "error" && (
-            <p role="alert" className="text-sm text-destructive">
-              {t("entry.copyFailed")}
-            </p>
+            <Alert variant="destructive">
+              <AlertDescription>{t("entry.copyFailed")}</AlertDescription>
+            </Alert>
           )}
           {reading && <div>{details}</div>}
         </div>

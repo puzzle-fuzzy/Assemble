@@ -125,6 +125,7 @@ export function StorageOverview({ storage }: { storage?: AdminStorage }) {
             <StorageWarnings storage={storage} />
             <DataTable
               variant="management"
+              defaultPageSize={20}
               label={t("storage.accounts")}
               data={storage.topAccounts}
               columns={columns}

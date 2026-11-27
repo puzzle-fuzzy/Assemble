@@ -3,7 +3,7 @@
     "shared": "共享片库",
     "private": "我的片库",
     "sharedHint": "共享条目由管理员维护，所有人可以浏览。",
-    "privateHint": "私人条目、图片与观后感仅对你可见。"
+    "privateHint": "记录默认私有，可以逐条选择公开。"
   },
   "type": {
     "all": "全部类型",
@@ -75,7 +75,7 @@
     "watchedAt": "观看日期",
     "review": "观后感",
     "notes": "备注",
-    "notesHint": "共享备注仅管理员可读；私人备注仅本人可读。",
+    "notesHint": "备注仅本人和管理员可见，不在公开页面展示。",
     "magnet": "磁力链接",
     "copyMagnet": "复制磁力链接",
     "copied": "已复制",
@@ -190,8 +190,8 @@
   },
   "statistics": {
     "countHeader": "作品数量",
-    "title": "共享片库统计",
-    "hint": "只统计共享条目，不含任何私人片库。",
+    "title": "全站片库统计",
+    "hint": "包含共享片库和所有用户片库，仅管理员可见。",
     "total": "全部作品",
     "movies": "电影",
     "tv": "剧集",
@@ -200,5 +200,18 @@
     "byMonth": "观看月份",
     "empty": "还没有可统计的记录",
     "count": "{{count}} 部"
+  },
+  "publication": {
+    "allLibraries": "全部片库",
+    "userLibraries": "用户片库",
+    "owner": "归属",
+    "visibility": "可见性",
+    "public": "公开",
+    "private": "私有",
+    "publish": "公开这条记录",
+    "ownerOnly": "只有所有者本人能公开这条记录。",
+    "hint": "公开后会展示资料、图集和观后感；备注不公开，磁力需登录。取消勾选并保存即可撤销。",
+    "search": "片名、用户名称或账户 ID",
+    "browseAll": "浏览全站片库"
   }
 }

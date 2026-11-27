@@ -21,10 +21,14 @@ use std::time::{Duration, Instant};
 use assemble_client::OutgoingFile;
 use assemble_device::inbox::ReceiveFailure;
 use assemble_protocol::drive::DriveFile;
+use assemble_protocol::primitives::Timestamp;
 use assemble_protocol::sends::{Direction, FailReason, Send as SendRecord, SendState};
 use serde::{Deserialize, Serialize};
 
 use crate::state::DeviceView;
+
+mod history;
+pub use history::History;
 
 /// 一次传输走到了哪一步。收与发共用一套说法，界面按方向各自措辞。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -75,6 +79,8 @@ pub enum TransferFailure {
     QuotaExceeded,
     /// 云盘里的文件在取回之前就被删掉了。
     Vanished,
+    /// 应用退出时尚未完成；不会拿旧的文件路径自动重新发送。
+    Interrupted,
 }
 
 impl From<ReceiveFailure> for TransferFailure {
@@ -113,7 +119,8 @@ impl TransferFailure {
             | Self::FileUnreadable
             | Self::Rejected
             | Self::QuotaExceeded
-            | Self::Vanished => None,
+            | Self::Vanished
+            | Self::Interrupted => None,
         }
     }
 }
@@ -220,6 +227,8 @@ pub enum Origin {
     FromDrive(DriveFile),
     /// 这台设备发出去的。
     Outgoing(Outgoing),
+    /// 重启后留下的历史，不持有任何可以重新上传的文件。
+    History { send: Option<SendRecord> },
 }
 
 /// 要收下来的东西：别的设备发来的，或者云盘里的。
@@ -244,6 +253,8 @@ pub struct TransferRecord {
     pub saved_path: Option<PathBuf>,
     /// 通知的系统标识：点通知时据此找到要显示的文件。
     pub handle: Option<i32>,
+    /// 记录首次出现的时间，只保存在本机历史里。
+    pub recorded_at: Timestamp,
 }
 
 impl TransferRecord {
@@ -268,6 +279,7 @@ impl TransferRecord {
             settled: false,
             saved_path: None,
             handle: None,
+            recorded_at: send.created_at,
         }
     }
 
@@ -296,6 +308,7 @@ impl TransferRecord {
             settled: false,
             saved_path: None,
             handle: None,
+            recorded_at: Timestamp::now(),
         }
     }
 
@@ -322,6 +335,7 @@ impl TransferRecord {
             settled: true,
             saved_path: None,
             handle: None,
+            recorded_at: Timestamp::now(),
         }
     }
 
@@ -332,13 +346,14 @@ impl TransferRecord {
     pub fn incoming_record(&self) -> Option<&SendRecord> {
         match &self.origin {
             Origin::Incoming(send) => Some(send),
-            Origin::FromDrive(_) | Origin::Outgoing(_) => None,
+            Origin::History { send } if self.view.direction == Direction::In => send.as_ref(),
+            Origin::FromDrive(_) | Origin::Outgoing(_) | Origin::History { .. } => None,
         }
     }
 
     pub fn outgoing(&self) -> Option<&Outgoing> {
         match &self.origin {
-            Origin::Incoming(_) | Origin::FromDrive(_) => None,
+            Origin::Incoming(_) | Origin::FromDrive(_) | Origin::History { .. } => None,
             Origin::Outgoing(outgoing) => Some(outgoing),
         }
     }
@@ -348,7 +363,7 @@ impl TransferRecord {
         match &self.origin {
             Origin::Incoming(send) => Some(Delivery::FromDevice(send.clone())),
             Origin::FromDrive(file) => Some(Delivery::FromDrive(file.clone())),
-            Origin::Outgoing(_) => None,
+            Origin::Outgoing(_) | Origin::History { .. } => None,
         }
     }
 
@@ -358,7 +373,7 @@ impl TransferRecord {
     }
 
     fn is_incoming(&self) -> bool {
-        matches!(self.origin, Origin::Incoming(_))
+        self.incoming_record().is_some()
     }
 
     /// 再发一次有没有意义：失败在文件到服务端之前，服务端那边什么都没有。
@@ -375,6 +390,7 @@ impl TransferRecord {
             Origin::Incoming(send) => Some(&send.id),
             Origin::FromDrive(_) => None,
             Origin::Outgoing(outgoing) => outgoing.send.as_ref().map(|send| send.id.as_str()),
+            Origin::History { send } => send.as_ref().map(|send| send.id.as_str()),
         }
     }
 
@@ -393,7 +409,7 @@ impl TransferRecord {
         let phase = match send.state {
             SendState::Offered => {
                 // 收到的文件还在等着收，本机不用改；发出去的文件已在服务端，等对方接收。
-                if matches!(self.origin, Origin::Outgoing(_))
+                if self.view.direction == Direction::Out
                     && self.view.phase != TransferPhase::Cancelled
                 {
                     self.view.phase = TransferPhase::Waiting;
@@ -432,6 +448,13 @@ impl TransferRecord {
 
     /// 服务端还在等这个收到的文件，而本机已经走到某一步：接着做，不从头再来。
     fn catch_up(&mut self, send: &SendRecord) {
+        // 中断并不表示接收失败，不能把它当成成功回执；服务端仍在等时重新排队。
+        if self.view.failure == Some(TransferFailure::Interrupted) {
+            let recorded_at = self.recorded_at;
+            *self = Self::incoming(send);
+            self.recorded_at = recorded_at;
+            return;
+        }
         match self.view.phase {
             // 还在排队或正在接收：它自己会走到头。
             TransferPhase::Queued | TransferPhase::InProgress => {}
@@ -681,6 +704,11 @@ impl Registry {
                     Updated::Applied
                 }
             }
+            Origin::History { send: stored } => {
+                *stored = Some(send.clone());
+                record.apply_update(send);
+                Updated::Applied
+            }
         }
     }
 
@@ -899,8 +927,13 @@ impl Registry {
         files
             .into_iter()
             .map(|file| {
-                let id = format!("out-{}", self.next_local);
-                self.next_local += 1;
+                let id = loop {
+                    let id = format!("out-{}", self.next_local);
+                    self.next_local = self.next_local.wrapping_add(1).max(1);
+                    if !self.transfers.iter().any(|record| record.id() == id) {
+                        break id;
+                    }
+                };
                 self.push(TransferRecord::outgoing_record(
                     id.clone(),
                     &destination,

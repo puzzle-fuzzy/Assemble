@@ -2,6 +2,7 @@ import {
   browserImageLoader,
   createBrowserMediaClient,
   createBrowserMediaCollectionsClient,
+  createPublicMediaClient,
   getMediaSession,
 } from "@assemble/media/browser-client";
 import type { MediaSession } from "@assemble/media/model";
@@ -20,6 +21,7 @@ import {
 import {
   EmptyContentView,
   LoadingContent,
+  PublicProfileLink,
   SiteLink,
 } from "./components/common";
 import { ReaderBoundary } from "./components/reader-boundary";
@@ -173,7 +175,9 @@ export function App() {
   const collectionsRoute =
     route.kind === "collections" || route.kind === "collection";
   const baseTitle =
-    route.kind === "wall" ? `${t(route.scope)} · ${t("brand")}` : t("title");
+    route.kind === "wall"
+      ? `${t(route.scope === "shared" ? "publicLibrary" : "private")} · ${t("brand")}`
+      : t("title");
   useEffect(() => {
     document.title = baseTitle;
   }, [baseTitle]);
@@ -250,10 +254,14 @@ export function App() {
             <SiteLink
               href="/movies/"
               aria-current={
-                !privateRoute && !collectionsRoute ? "page" : undefined
+                route.kind === "wall" &&
+                route.scope === "shared" &&
+                !route.query.ownerId
+                  ? "page"
+                  : undefined
               }
             >
-              {t("shared")}
+              {t("publicLibrary")}
             </SiteLink>
             <SiteLink
               href="/movies/private"
@@ -261,6 +269,14 @@ export function App() {
             >
               {t("private")}
             </SiteLink>
+            {account ? (
+              <PublicProfileLink
+                accountId={account.id}
+                active={
+                  route.kind === "wall" && route.query.ownerId === account.id
+                }
+              />
+            ) : null}
             <SiteLink
               href="/movies/collections"
               aria-current={collectionsRoute ? "page" : undefined}
@@ -270,6 +286,7 @@ export function App() {
             <a href={account ? "/web/account" : loginPath}>
               {account ? t("account") : t("signIn")}
             </a>
+            <a href="/download/">{t("downloadApp")}</a>
           </nav>
           <DisplayPreferencesMenu />
         </div>
@@ -303,8 +320,7 @@ function SiteContent({
   const { t } = useSiteTranslation();
   const shared = useMemo(
     () =>
-      createBrowserMediaClient(
-        "shared",
+      createPublicMediaClient(
         confirmedAnonymous
           ? { fetch: createHomePreloadFetch({ account: null }) }
           : undefined,

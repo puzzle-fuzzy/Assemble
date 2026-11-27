@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "artifacts": [
+    {
+      "platform": "windows",
+      "architecture": "x64",
+      "version": "0.1.0.abc1234",
+      "fileName": "Assemble-0.1.0.abc1234-windows-x64.exe",
+      "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "size": 12345678,
+      "publishedAt": "2026-11-27T00:00:00.000Z"
+    },
+    {
+      "platform": "macos",
+      "architecture": "arm64",
+      "version": "0.1.0.abc1234",
+      "fileName": "Assemble-0.1.0.abc1234-macos-arm64.dmg",
+      "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "size": 23456789,
+      "publishedAt": "2026-11-27T00:00:00.000Z"
+    }
+  ]
+}

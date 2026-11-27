@@ -244,6 +244,14 @@ describe("日程格式与本地时区", () => {
 });
 
 describe("传输与安全错误文案", () => {
+  test("重启后中断的记录有明确状态，保留用户文字", () => {
+    const item = transfer({ phase: "failed", failure: "interrupted" });
+    expect(transferStatus(item)).toBe("已中断");
+    setLanguage("en");
+    expect(transferStatus(item)).toBe("Interrupted");
+    expect(transferStatus({ ...item, direction: "in" })).toBe("Interrupted");
+    expect(item.name).toBe("报告 Report.pdf");
+  });
   test("发送、接收、上传和取回的进度及完成状态均跟随语言", () => {
     const item = transfer();
     const original = structuredClone(item);

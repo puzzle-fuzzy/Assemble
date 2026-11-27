@@ -220,10 +220,9 @@ pub(super) async fn remove(
     Ok(())
 }
 pub(super) async fn statistics(pool: &SqlitePool) -> Result<MediaStatistics, ApiError> {
-    let data: Vec<String> =
-        sqlx::query_scalar("SELECT data FROM media_entries WHERE scope = 'shared'")
-            .fetch_all(pool)
-            .await?;
+    let data: Vec<String> = sqlx::query_scalar("SELECT data FROM media_entries")
+        .fetch_all(pool)
+        .await?;
     let mut stats = MediaStatistics::default();
     let mut years = BTreeMap::new();
     let mut genres = BTreeMap::new();

@@ -155,7 +155,8 @@
     "searchPlaceholder": "File name, user name or email",
     "emptyTitle": "No cloud files yet",
     "emptyDescription": "Files stored in cloud drives by any account will appear here.",
-    "details": "File details"
+    "details": "File details",
+    "download": "Download"
   },
   "platform": {
     "windows": "Windows",

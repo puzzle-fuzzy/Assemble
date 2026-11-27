@@ -1,0 +1,13 @@
+{
+  "rename": "Rename",
+  "name": "File name",
+  "save": "Save",
+  "saving": "Saving",
+  "cancel": "Cancel",
+  "errors": {
+    "invalid": "Enter a valid file name: no . or .., path separators, or control characters; up to 255 characters.",
+    "missing": "This file no longer exists. Close this dialog and refresh your drive.",
+    "signIn": "Your session has expired. Sign in again.",
+    "failed": "Could not rename this file. Try again later."
+  }
+}

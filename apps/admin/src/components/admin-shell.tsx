@@ -1,11 +1,3 @@
-import {
-  Breadcrumb,
-  BreadcrumbItem,
-  BreadcrumbLink,
-  BreadcrumbList,
-  BreadcrumbPage,
-  BreadcrumbSeparator,
-} from "@assemble/ui/breadcrumb";
 import { Button } from "@assemble/ui/button";
 import { DisplayPreferencesItems } from "@assemble/ui/display-preferences";
 import {
@@ -18,6 +10,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@assemble/ui/dropdown-menu";
+import { PageBreadcrumbs } from "@assemble/ui/page-breadcrumbs";
 import {
   Sidebar,
   SidebarContent,
@@ -249,32 +242,19 @@ export function AdminShell({
                 </DropdownMenuGroup>
               </DropdownMenuContent>
             </DropdownMenu>
-            <Breadcrumb>
-              <BreadcrumbList>
-                <BreadcrumbItem className="hidden md:block">
-                  <BreadcrumbLink
-                    href="#overview"
-                    onClick={(event) => {
-                      event.preventDefault();
-                      navigate("overview");
-                    }}
-                  >
-                    {t("app.brand")}
-                  </BreadcrumbLink>
-                </BreadcrumbItem>
-                <BreadcrumbSeparator className="hidden md:block" />
-                <BreadcrumbItem>
-                  <BreadcrumbPage
-                    ref={pageHeading}
-                    role="heading"
-                    aria-level={1}
-                    tabIndex={-1}
-                  >
-                    {pageName}
-                  </BreadcrumbPage>
-                </BreadcrumbItem>
-              </BreadcrumbList>
-            </Breadcrumb>
+            <PageBreadcrumbs
+              ancestors={[
+                {
+                  id: "app",
+                  label: t("app.brand"),
+                  href: "#overview",
+                  onNavigate: () => navigate("overview"),
+                  hideOnNarrow: true,
+                },
+              ]}
+              current={pageName}
+              currentRef={pageHeading}
+            />
           </div>
           <div className="flex shrink-0 items-center px-4">
             <AdminSystemNotifications

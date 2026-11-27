@@ -6,6 +6,7 @@ import {
   type AdminDriveFile,
   type AdminPage,
   type AdminStorage,
+  adminDriveDownloadPath,
   listPath,
 } from "../lib/api";
 import { useAdminTranslation } from "../lib/i18n";
@@ -169,6 +170,12 @@ export function DrivePage({
             id: "details",
             label: t("table.viewDetails"),
             onSelect: () => setSelected(file),
+          },
+          {
+            id: "download",
+            label: t("drive.download"),
+            href: adminDriveDownloadPath(file.id),
+            download: true,
           },
         ]}
         emptyState={

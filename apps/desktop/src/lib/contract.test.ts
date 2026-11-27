@@ -102,6 +102,7 @@ describe("状态契约样本", () => {
         "fileUnreadable",
         "quotaExceeded",
         "vanished",
+        "interrupted",
       ]),
     );
     expect(new Set(transfers.map((t) => t.target))).toEqual(

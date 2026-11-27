@@ -39,7 +39,14 @@ function json(value: unknown, status = 200) {
 function normal(path: string) {
   if (path.endsWith("/status")) return json(samples.status);
   if (path.includes("/observations?"))
-    return json({ items: [samples.detail], total: 1, page: 1, pageSize: 10 });
+    return json({
+      items: [samples.detail],
+      total: 1,
+      page: 1,
+      pageSize: Number(
+        new URL(path, "http://localhost").searchParams.get("pageSize") ?? 20,
+      ),
+    });
   if (path.includes("/observations/")) return json(samples.detail);
   return json({}, 404);
 }

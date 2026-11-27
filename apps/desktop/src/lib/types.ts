@@ -79,7 +79,9 @@ export type TransferFailure =
   /** 云盘空间不够。 */
   | "quotaExceeded"
   /** 云盘里的文件在取回之前就被删掉了。 */
-  | "vanished";
+  | "vanished"
+  /** 应用退出前尚未完成，重启后保留记录但不恢复旧文件任务。 */
+  | "interrupted";
 
 /** 一条传输的另一头是谁。 */
 export type TransferTarget = /** 一台设备。 */ "device" /** 云盘。 */ | "drive";

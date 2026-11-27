@@ -243,7 +243,7 @@ describe("管理端中英文与显示偏好", () => {
     expect(host.textContent).toContain("2 devices / 1 online");
     expect(host.querySelector('thead [role="checkbox"]')).not.toBeNull();
     expect(host.querySelector('th[data-table-column="drag"]')).not.toBeNull();
-    expect(host.textContent).toContain("Page 1 / 124");
+    expect(host.textContent).toContain("Page 1 / 62");
     expect(host.querySelector("time")?.getAttribute("datetime")).toBe(
       createdAt,
     );
@@ -278,10 +278,10 @@ describe("管理端中英文与显示偏好", () => {
     expect(
       host.querySelector<HTMLInputElement>('input[type="search"]')?.value,
     ).toBe("张三");
-    expect(host.textContent).toContain("Page 2 / 124");
+    expect(host.textContent).toContain("Page 2 / 62");
     await changeLanguage("zh-CN");
     expect(host.textContent).toContain("2 台 / 1 在线");
-    expect(host.textContent).toContain("第 2 / 124 页");
+    expect(host.textContent).toContain("第 2 / 62 页");
     expect(document.title).toBe("用户 · Assemble 管理控制台");
   });
 

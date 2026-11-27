@@ -64,6 +64,7 @@ const cast = shape({
   photo: nullable(image),
 });
 const contentFields = {
+  published: flag,
   mediaType,
   title: text,
   originalTitle: text,
@@ -83,6 +84,9 @@ const entry = shape({
   id: text,
   version: integer,
   scope,
+  owner: nullable(
+    shape({ id: text, displayName: text, avatarUrl: nullable(text) }),
+  ),
   cast: array(cast),
   identities: array(identity),
   poster: nullable(image),
@@ -163,6 +167,10 @@ export const isMediaActorCredits = (
   shape({
     actor: shape({ identity: person, name: text, photo: nullable(image) }),
     items: array(candidate),
+    total: integer,
+    page: (value) => typeof value === "number" && integer(value) && value > 0,
+    pageSize: (value) =>
+      typeof value === "number" && integer(value) && value > 0 && value <= 48,
   })(value);
 export const isMediaCollection = (value: unknown): value is MediaCollection =>
   collection(value);

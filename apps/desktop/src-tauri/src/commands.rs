@@ -108,6 +108,26 @@ pub fn download_retry(app: AppHandle, task_id: String) -> Result<(), CommandErro
 }
 
 #[tauri::command]
+pub fn download_set_assistant_allowed(
+    app: AppHandle,
+    enabled: bool,
+) -> Result<crate::state::Snapshot, CommandError> {
+    let state = app.state::<AppState>();
+    let mut settings = state.settings();
+    settings.assistant_downloads_allowed = Some(enabled);
+    crate::transfers::save_settings(&app, &settings).map_err(|_| {
+        CommandError::local(
+            "SETTINGS_SAVE_FAILED",
+            "download preference could not be saved",
+        )
+    })?;
+    state.edit_settings(|current| current.assistant_downloads_allowed = Some(enabled));
+    app.state::<std::sync::Arc<assemble_download::DownloadManager>>()
+        .set_assistant_allowed(enabled);
+    Ok(state.snapshot())
+}
+
+#[tauri::command]
 pub async fn download_choose_folder(app: AppHandle) -> Result<(), CommandError> {
     let (chosen, answer) = tokio::sync::oneshot::channel();
     app.dialog().file().pick_folder(move |folder| {
@@ -488,6 +508,39 @@ pub fn drive_download(
     Ok(state.snapshot())
 }
 
+/// 给云盘里的文件改名。只接收服务端标识与名字，不操作本机路径。
+#[tauri::command]
+pub async fn drive_rename(
+    app: AppHandle,
+    file_id: String,
+    name: String,
+) -> Result<crate::state::Snapshot, CommandError> {
+    let state = app.state::<AppState>();
+    let name = assemble_protocol::drive::clean_file_name(&name)
+        .ok_or_else(|| CommandError::local("INVALID_REQUEST", "invalid drive file name"))?;
+    let call = MediaCall::new(&state);
+    call.finish(
+        &state,
+        state
+            .client
+            .drive_rename(
+                &file_id,
+                &assemble_protocol::drive::RenameInput {
+                    name: name.to_owned(),
+                },
+                &RequestOptions::new(&call.cancel),
+            )
+            .await,
+    )?;
+    // 服务端名单包含其他设备的改动；读取失败时让用户保留草稿，重试改名仍然幂等。
+    let listing = call.finish(
+        &state,
+        state.client.drive(&RequestOptions::new(&call.cancel)).await,
+    )?;
+    state.set_drive(Some(listing));
+    Ok(state.snapshot())
+}
+
 /// 从云盘里删掉一个文件。
 #[tauri::command]
 pub async fn drive_delete(
@@ -531,6 +584,17 @@ pub fn close_send_panel(app: AppHandle) {
 #[tauri::command]
 pub fn open_main(app: AppHandle) {
     crate::state::show_main(&app);
+}
+
+/// 只能打开当前服务的固定影视站，界面不能传入任意网址。
+#[tauri::command]
+pub fn open_public_media(app: AppHandle) -> Result<(), CommandError> {
+    use tauri_plugin_opener::OpenerExt;
+    let state = app.state::<AppState>();
+    let address = state.client.origin().join("/movies/");
+    app.opener()
+        .open_url(address.as_str(), None::<&str>)
+        .map_err(|_| CommandError::local("BROWSER_UNAVAILABLE", "browser could not be opened"))
 }
 
 /// 取消一条传输：还没发完的不发了，已经发到服务端的撤回。
@@ -1179,6 +1243,8 @@ pub async fn media_actor(
     app: AppHandle,
     identity: MediaPersonIdentity,
     media_type: MediaType,
+    page: Option<u32>,
+    page_size: Option<u32>,
 ) -> Result<MediaActorCredits, CommandError> {
     let state = app.state::<AppState>();
     let call = MediaCall::new(&state);
@@ -1186,7 +1252,13 @@ pub async fn media_actor(
         &state,
         state
             .client
-            .media_actor(&identity, media_type, &RequestOptions::new(&call.cancel))
+            .media_actor(
+                &identity,
+                media_type,
+                page.unwrap_or(1),
+                page_size.unwrap_or(24),
+                &RequestOptions::new(&call.cancel),
+            )
             .await,
     )
 }

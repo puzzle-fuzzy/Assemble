@@ -87,13 +87,33 @@ export interface DataTablePagination {
   onChange: (page: number, pageSize: number) => void;
   pending?: boolean;
 }
-export interface DataTableAction {
+interface DataTableActionOptions {
   /** 有翻译文案的操作可提供稳定标识，切换语言时保留原按钮和返回焦点。 */
   id?: string;
   label: string;
-  onSelect: () => void;
   destructive?: boolean;
   disabled?: boolean;
+}
+export type DataTableAction = DataTableActionOptions &
+  (
+    | { onSelect: () => void; href?: never; download?: never }
+    | { href: string; download?: boolean; onSelect?: never }
+  );
+
+function actionLink(action: DataTableAction) {
+  return (
+    <a
+      href={action.disabled ? undefined : action.href}
+      download={action.download || undefined}
+      aria-disabled={action.disabled || undefined}
+      tabIndex={action.disabled ? -1 : undefined}
+      onClick={(event) => {
+        if (action.disabled) event.preventDefault();
+      }}
+    >
+      {action.label}
+    </a>
+  );
 }
 export interface DataTableProps<T extends { id: string }> {
   variant?: "default" | "management";
@@ -102,6 +122,8 @@ export interface DataTableProps<T extends { id: string }> {
   columns: DataTableColumn<T>[];
   getRowLabel: (item: T) => string;
   pagination?: DataTablePagination;
+  /** 未提供服务端分页时的初始条数；不同应用可独立设置。 */
+  defaultPageSize?: number;
   toolbar?: ReactNode;
   actions?: ReactNode;
   rowActions?: (item: T) => DataTableAction[];
@@ -161,6 +183,7 @@ export function DataTable<T extends { id: string }>({
   columns: definitions,
   getRowLabel,
   pagination,
+  defaultPageSize = 10,
   toolbar,
   actions,
   rowActions,
@@ -179,7 +202,7 @@ export function DataTable<T extends { id: string }>({
     useState<ColumnVisibilityState>({});
   const [localPage, setLocalPage] = useState<PaginationState>({
     pageIndex: 0,
-    pageSize: 10,
+    pageSize: defaultPageSize,
   });
   const pageState = pagination
     ? { pageIndex: pagination.page - 1, pageSize: pagination.pageSize }
@@ -213,22 +236,37 @@ export function DataTable<T extends { id: string }>({
   function inlineActions(item: T) {
     return (
       <div className="flex items-center gap-1">
-        {rowActions?.(item).map((action) => (
-          <Button
-            key={action.id ?? action.label}
-            type="button"
-            variant="ghost"
-            size="default"
-            disabled={action.disabled}
-            aria-label={t("table.actionFor", {
-              action: action.label,
-              name: getRowLabel(item),
-            })}
-            onClick={action.onSelect}
-          >
-            {action.label}
-          </Button>
-        ))}
+        {rowActions?.(item).map((action) =>
+          action.href !== undefined ? (
+            <Button
+              key={action.id ?? action.label}
+              asChild
+              variant={action.destructive ? "destructive" : "ghost"}
+              size="default"
+              aria-label={t("table.actionFor", {
+                action: action.label,
+                name: getRowLabel(item),
+              })}
+            >
+              {actionLink(action)}
+            </Button>
+          ) : (
+            <Button
+              key={action.id ?? action.label}
+              type="button"
+              variant="ghost"
+              size="default"
+              disabled={action.disabled}
+              aria-label={t("table.actionFor", {
+                action: action.label,
+                name: getRowLabel(item),
+              })}
+              onClick={action.onSelect}
+            >
+              {action.label}
+            </Button>
+          ),
+        )}
       </div>
     );
   }
@@ -279,6 +317,7 @@ export function DataTable<T extends { id: string }>({
                       <DropdownMenuGroup>
                         {rowActions(row.original).map((action) => (
                           <DropdownMenuItem
+                            asChild={action.href !== undefined}
                             key={action.id ?? action.label}
                             variant={
                               action.destructive ? "destructive" : "default"
@@ -286,7 +325,9 @@ export function DataTable<T extends { id: string }>({
                             disabled={action.disabled}
                             onSelect={action.onSelect}
                           >
-                            {action.label}
+                            {action.href !== undefined
+                              ? actionLink(action)
+                              : action.label}
                           </DropdownMenuItem>
                         ))}
                       </DropdownMenuGroup>

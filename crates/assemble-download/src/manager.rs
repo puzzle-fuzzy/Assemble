@@ -6,8 +6,8 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
 use assemble_protocol::downloads::{
-    DownloadInput, DownloadKind, DownloadPhase, DownloadPreview, DownloadTask, DownloadVariant,
-    DownloadsView,
+    DownloadInitiator, DownloadInput, DownloadKind, DownloadPhase, DownloadPreview, DownloadTask,
+    DownloadVariant, DownloadsView,
 };
 use assemble_protocol::primitives::Timestamp;
 use assemble_store::json::{read_json, write_private_json};
@@ -36,6 +36,7 @@ enum Source {
 }
 #[derive(Clone)]
 struct Prepared {
+    initiated_by: Option<DownloadInitiator>,
     preview: DownloadPreview,
     sources: Vec<(String, Source)>,
     headers: HeaderMap,
@@ -60,6 +61,7 @@ struct History {
     records: Vec<Record>,
 }
 struct State {
+    assistant_allowed: bool,
     browser_task_id: Option<String>,
     history: History,
     prepared: HashMap<String, Prepared>,
@@ -105,6 +107,7 @@ impl DownloadManager {
         write_private_json(&history_path, &history).map_err(|_| DownloadError::Storage)?;
         Ok(Arc::new(Self {
             state: Mutex::new(State {
+                assistant_allowed: true,
                 browser_task_id: None,
                 history,
                 prepared: HashMap::new(),
@@ -168,6 +171,7 @@ impl DownloadManager {
     }
     fn view_of(&self, state: &State) -> DownloadsView {
         DownloadsView {
+            assistant_allowed: state.assistant_allowed,
             browser_task_id: state.browser_task_id.clone(),
             folder_name: state
                 .history
@@ -185,6 +189,46 @@ impl DownloadManager {
     }
     pub fn view(&self) -> DownloadsView {
         self.view_of(&self.lock())
+    }
+
+    pub fn set_assistant_allowed(&self, allowed: bool) {
+        self.lock().assistant_allowed = allowed;
+        self.emit();
+    }
+
+    pub fn ensure_assistant_allowed(&self) -> Result<()> {
+        if self.lock().assistant_allowed {
+            Ok(())
+        } else {
+            Err(DownloadError::AssistantDisabled)
+        }
+    }
+
+    pub async fn prepare_assistant(&self, input: DownloadInput) -> Result<DownloadPreview> {
+        self.ensure_assistant_allowed()?;
+        let preview = self.prepare(input).await?;
+        let mut state = self.lock();
+        if !state.assistant_allowed {
+            state.prepared.remove(&preview.id);
+            return Err(DownloadError::AssistantDisabled);
+        }
+        state
+            .prepared
+            .get_mut(&preview.id)
+            .ok_or(DownloadError::Expired)?
+            .initiated_by = Some(DownloadInitiator::Assistant);
+        Ok(preview)
+    }
+
+    pub fn assistant_task(&self, id: &str) -> Result<DownloadTask> {
+        self.ensure_assistant_allowed()?;
+        self.lock()
+            .history
+            .records
+            .iter()
+            .find(|r| r.view.id == id && r.view.initiated_by == Some(DownloadInitiator::Assistant))
+            .map(|r| r.view.clone())
+            .ok_or(DownloadError::Expired)
     }
     fn persist(&self, state: &State) -> Result<()> {
         write_private_json(&self.history_path, &state.history).map_err(|_| DownloadError::Storage)
@@ -386,6 +430,7 @@ impl DownloadManager {
         state.prepared.insert(
             preview.id.clone(),
             Prepared {
+                initiated_by: None,
                 preview: preview.clone(),
                 sources: sources.into_iter().map(|(v, s)| (v.id, s)).collect(),
                 headers,
@@ -396,6 +441,25 @@ impl DownloadManager {
     }
 
     pub async fn start(self: &Arc<Self>, preview_id: &str, variant_id: &str) -> Result<String> {
+        self.start_as(preview_id, variant_id, None).await
+    }
+
+    pub async fn start_assistant(
+        self: &Arc<Self>,
+        preview_id: &str,
+        variant_id: &str,
+    ) -> Result<String> {
+        self.ensure_assistant_allowed()?;
+        self.start_as(preview_id, variant_id, Some(DownloadInitiator::Assistant))
+            .await
+    }
+
+    async fn start_as(
+        self: &Arc<Self>,
+        preview_id: &str,
+        variant_id: &str,
+        initiated_by: Option<DownloadInitiator>,
+    ) -> Result<String> {
         if !self.tools.available() {
             return Err(DownloadError::ToolsUnavailable);
         }
@@ -411,6 +475,9 @@ impl DownloadManager {
         let id = random_id()?;
         {
             let mut state = self.lock();
+            if initiated_by.is_some() && !state.assistant_allowed {
+                return Err(DownloadError::AssistantDisabled);
+            }
             if state
                 .history
                 .records
@@ -427,6 +494,9 @@ impl DownloadManager {
                 .filter(|p| p.at.elapsed() < Duration::from_secs(600))
                 .cloned()
                 .ok_or(DownloadError::Expired)?;
+            if prepared.initiated_by != initiated_by {
+                return Err(DownloadError::Expired);
+            }
             let source = prepared
                 .sources
                 .iter()
@@ -446,6 +516,7 @@ impl DownloadManager {
                 Record {
                     view: DownloadTask {
                         id: id.clone(),
+                        initiated_by,
                         kind: prepared.preview.kind,
                         title: prepared.preview.title,
                         file_name: None,
@@ -820,6 +891,7 @@ mod tests {
             state.history.records.push(Record {
                 view: DownloadTask {
                     id: "running".into(),
+                    initiated_by: None,
                     kind: DownloadKind::Hls,
                     title: "历史任务".into(),
                     file_name: None,

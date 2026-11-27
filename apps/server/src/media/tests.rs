@@ -22,6 +22,7 @@ fn png() -> Vec<u8> {
 }
 fn content(status: MediaStatus) -> MediaContent {
     MediaContent {
+        published: false,
         media_type: MediaType::Movie,
         title: "电影".into(),
         original_title: "A Film".into(),
@@ -36,6 +37,601 @@ fn content(status: MediaStatus) -> MediaContent {
         notes: Some("notes-secret".into()),
         magnet_uri: Some("magnet:?xt=urn:btih:0123456789012345678901234567890123456789".into()),
     }
+}
+
+#[tokio::test]
+async fn publishing_and_withdrawing_private_entries_rechecks_every_public_projection() {
+    let h = Harness::start(None).await;
+    let created = value(
+        h.write(reqwest::Method::POST, "/v1/media/private/entries", "alice")
+            .json(&MediaCreate {
+                content: content(MediaStatus::Watching),
+                request_id: "publication-create".into(),
+            })
+            .send()
+            .await
+            .unwrap(),
+    )
+    .await;
+    let mut entry: MediaEntry = serde_json::from_value(created["item"].clone()).unwrap();
+    assert!(!entry.content.published);
+    assert_eq!(entry.owner.as_ref().unwrap().id, "alice");
+    let image = assets::store(&h.state.pool, "alice", png(), false)
+        .await
+        .unwrap();
+    let mut tx = h.state.pool.begin().await.unwrap();
+    assets::link(&mut tx, &entry.id, std::slice::from_ref(&image), "gallery")
+        .await
+        .unwrap();
+    assets::link(&mut tx, &entry.id, std::slice::from_ref(&image), "cast")
+        .await
+        .unwrap();
+    entry.poster = Some(image.clone());
+    entry.cast.push(MediaCast {
+        name: "Private performer".into(),
+        character: "role".into(),
+        identity: None,
+        photo: Some(image.clone()),
+    });
+    entry = store::save(&mut tx, entry).await.unwrap();
+    tx.commit().await.unwrap();
+    let private_path = format!("/v1/media/private/entries/{}", entry.id);
+    let public_path = format!("/v1/media/public/entries/{}", entry.id);
+    let image_path = format!("/v1/media/assets/{}/content", image.asset_id);
+    assert_eq!(h.get(&public_path).send().await.unwrap().status(), 404);
+    assert_eq!(
+        h.cookie(&private_path, "bob")
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        404
+    );
+    assert_eq!(h.get(&image_path).send().await.unwrap().status(), 404);
+    let listing = value(
+        h.get("/v1/media/public/entries?ownerId=alice")
+            .send()
+            .await
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(listing["total"], 0);
+    let mut published = entry.content.clone();
+    published.published = true;
+    let published = value(
+        h.write(reqwest::Method::PUT, &private_path, "alice")
+            .json(&MediaUpdate {
+                version: entry.version,
+                content: published,
+            })
+            .send()
+            .await
+            .unwrap(),
+    )
+    .await;
+    let version = published["item"]["version"].as_u64().unwrap();
+    let public = value(h.get(&public_path).send().await.unwrap()).await;
+    assert_eq!(public["item"]["owner"]["id"], "alice");
+    assert_eq!(public["item"]["review"], "review-secret");
+    assert!(public["item"]["notes"].is_null());
+    assert!(public["item"]["magnetUri"].is_null());
+    assert_eq!(
+        public["item"]["cast"][0]["photo"]["assetId"],
+        image.asset_id
+    );
+    let bob = value(h.cookie(&public_path, "bob").send().await.unwrap()).await;
+    assert!(bob["item"]["notes"].is_null());
+    assert!(bob["item"]["magnetUri"].as_str().is_some());
+    let gallery = format!("{public_path}/gallery");
+    assert_eq!(h.get(&gallery).send().await.unwrap().status(), 200);
+    let response = h.get(&image_path).send().await.unwrap();
+    assert_eq!(response.status(), 200);
+    assert_eq!(response.headers()["cache-control"], "no-store");
+    let alice = value(
+        h.get("/v1/media/public/entries?ownerId=alice")
+            .send()
+            .await
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(alice["total"], 1);
+    let bob = value(
+        h.get("/v1/media/public/entries?ownerId=bob")
+            .send()
+            .await
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(bob["total"], 0);
+    let mut withdrawn = entry.content.clone();
+    withdrawn.published = false;
+    assert_eq!(
+        h.write(reqwest::Method::PUT, &private_path, "bob")
+            .json(&MediaUpdate {
+                version,
+                content: withdrawn.clone()
+            })
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        404
+    );
+    assert_eq!(
+        h.write(reqwest::Method::PUT, &private_path, "alice")
+            .json(&MediaUpdate {
+                version: entry.version,
+                content: withdrawn.clone()
+            })
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        409
+    );
+    value(
+        h.write(reqwest::Method::PUT, &private_path, "alice")
+            .json(&MediaUpdate {
+                version,
+                content: withdrawn,
+            })
+            .send()
+            .await
+            .unwrap(),
+    )
+    .await;
+    for path in [&public_path, &gallery, &image_path] {
+        assert_eq!(h.get(path).send().await.unwrap().status(), 404);
+    }
+    assert_eq!(
+        h.cookie(&image_path, "bob").send().await.unwrap().status(),
+        404
+    );
+    assert_eq!(
+        h.cookie(&image_path, "alice")
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        200
+    );
+    assert_eq!(
+        h.cookie(&image_path, "admin")
+            .header("sec-fetch-site", "same-origin")
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        200
+    );
+    assert_eq!(
+        h.cookie(&image_path, "admin")
+            .header("sec-fetch-site", "cross-site")
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        404
+    );
+    let own = value(h.cookie(&private_path, "alice").send().await.unwrap()).await;
+    assert_eq!(own["item"]["notes"], "notes-secret");
+    let own_collection = MediaCollectionCreate {
+        title: "bad member".into(),
+        description: String::new(),
+        entry_ids: vec![entry.id.clone()],
+        request_id: "reject-private-collection".into(),
+    };
+    assert_eq!(
+        h.write(
+            reqwest::Method::POST,
+            "/v1/admin/media/collections",
+            "admin"
+        )
+        .json(&own_collection)
+        .send()
+        .await
+        .unwrap()
+        .status(),
+        404
+    );
+    h.stop().await;
+}
+
+#[tokio::test]
+async fn only_the_owner_can_publish_private_entries_while_admins_can_keep_or_withdraw_them() {
+    let h = Harness::start(None).await;
+    let original = content(MediaStatus::Planned);
+    let created = value(
+        h.write(reqwest::Method::POST, "/v1/media/private/entries", "alice")
+            .json(&MediaCreate {
+                content: original.clone(),
+                request_id: "owner-publication-choice".into(),
+            })
+            .send()
+            .await
+            .unwrap(),
+    )
+    .await;
+    let entry: MediaEntry = serde_json::from_value(created["item"].clone()).unwrap();
+    let admin_path = format!("/v1/admin/media/entries/{}", entry.id);
+    let owner_path = format!("/v1/media/private/entries/{}", entry.id);
+    let public_path = format!("/v1/media/public/entries/{}", entry.id);
+    let mut proposed = original.clone();
+    proposed.published = true;
+    proposed.title = "Must not be saved".into();
+    let denied = h
+        .write(reqwest::Method::PUT, &admin_path, "admin")
+        .json(&MediaUpdate {
+            version: entry.version,
+            content: proposed.clone(),
+        })
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(denied.status(), 403);
+    let error: Value = denied.json().await.unwrap();
+    assert!(error.get("item").is_none());
+    assert!(!error.to_string().contains("notes-secret"));
+    assert!(!error.to_string().contains("magnet:"));
+    let unchanged = store::load(&h.state.pool, MediaScope::Private, Some("alice"), &entry.id)
+        .await
+        .unwrap();
+    assert_eq!(unchanged.version, entry.version);
+    assert_eq!(unchanged.content, original);
+    let mutations: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM audit_log WHERE action='media.updated'")
+            .fetch_one(&h.state.pool)
+            .await
+            .unwrap();
+    assert_eq!(mutations, 0);
+    proposed.title = "Owner published".into();
+    let published = value(
+        h.write(reqwest::Method::PUT, &owner_path, "alice")
+            .json(&MediaUpdate {
+                version: entry.version,
+                content: proposed.clone(),
+            })
+            .send()
+            .await
+            .unwrap(),
+    )
+    .await;
+    let version = published["item"]["version"].as_u64().unwrap();
+    let kept = value(
+        h.write(reqwest::Method::PUT, &admin_path, "admin")
+            .json(&MediaUpdate {
+                version,
+                content: proposed.clone(),
+            })
+            .send()
+            .await
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(kept["item"]["published"], true);
+    assert_eq!(kept["item"]["owner"]["id"], "alice");
+    let mut withdrawn = proposed.clone();
+    withdrawn.published = false;
+    let removed = value(
+        h.write(reqwest::Method::PUT, &admin_path, "admin")
+            .json(&MediaUpdate {
+                version: kept["item"]["version"].as_u64().unwrap(),
+                content: withdrawn,
+            })
+            .send()
+            .await
+            .unwrap(),
+    )
+    .await;
+    let version = removed["item"]["version"].as_u64().unwrap();
+    assert_eq!(removed["item"]["published"], false);
+    assert_eq!(h.get(&public_path).send().await.unwrap().status(), 404);
+    assert_eq!(
+        h.write(reqwest::Method::PUT, &admin_path, "admin")
+            .json(&MediaUpdate {
+                version,
+                content: proposed.clone()
+            })
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        403
+    );
+    let republished = value(
+        h.write(reqwest::Method::PUT, &owner_path, "alice")
+            .json(&MediaUpdate {
+                version,
+                content: proposed.clone(),
+            })
+            .send()
+            .await
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(republished["item"]["published"], true);
+    let own = value(
+        h.write(reqwest::Method::POST, "/v1/media/private/entries", "admin")
+            .json(&MediaCreate {
+                content: original.clone(),
+                request_id: "admin-own-publication".into(),
+            })
+            .send()
+            .await
+            .unwrap(),
+    )
+    .await;
+    let id = own["item"]["id"].as_str().unwrap();
+    let own = value(
+        h.write(
+            reqwest::Method::PUT,
+            &format!("/v1/admin/media/entries/{id}"),
+            "admin",
+        )
+        .json(&MediaUpdate {
+            version: 1,
+            content: proposed,
+        })
+        .send()
+        .await
+        .unwrap(),
+    )
+    .await;
+    assert_eq!(own["item"]["published"], true);
+    assert_eq!(own["item"]["owner"]["id"], "admin");
+    let shared = value(
+        h.write(reqwest::Method::POST, "/v1/admin/media/entries", "admin")
+            .json(&MediaCreate {
+                content: original,
+                request_id: "shared-not-owner-restricted".into(),
+            })
+            .send()
+            .await
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(shared["item"]["published"], true);
+    assert_eq!(shared["item"]["scope"], "shared");
+    h.stop().await;
+}
+
+#[tokio::test]
+async fn administration_manages_other_owners_without_granting_devices_admin_access() {
+    let h = Harness::start(None).await;
+    let created = value(
+        h.write(reqwest::Method::POST, "/v1/media/private/entries", "alice")
+            .json(&MediaCreate {
+                content: content(MediaStatus::Planned),
+                request_id: "admin-private-create".into(),
+            })
+            .send()
+            .await
+            .unwrap(),
+    )
+    .await;
+    let entry: MediaEntry = serde_json::from_value(created["item"].clone()).unwrap();
+    let path = format!("/v1/admin/media/entries/{}", entry.id);
+    let result = value(
+        h.cookie(
+            "/v1/admin/media/entries?ownerId=alice&scope=private",
+            "admin",
+        )
+        .header("sec-fetch-site", "same-origin")
+        .send()
+        .await
+        .unwrap(),
+    )
+    .await;
+    assert_eq!(result["total"], 1);
+    assert_eq!(result["items"][0]["notes"], "notes-secret");
+    let stats = value(
+        h.cookie("/v1/admin/media/statistics", "admin")
+            .header("sec-fetch-site", "same-origin")
+            .send()
+            .await
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(stats["total"], 1);
+    assert_eq!(stats["planned"], 1);
+    let by_owner = value(
+        h.cookie("/v1/admin/media/entries?q=alice&scope=private", "admin")
+            .header("sec-fetch-site", "same-origin")
+            .send()
+            .await
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(by_owner["total"], 1);
+    for user in ["alice", "bob"] {
+        assert_eq!(
+            h.cookie(&path, user)
+                .header("sec-fetch-site", "same-origin")
+                .send()
+                .await
+                .unwrap()
+                .status(),
+            403
+        );
+    }
+    assert_eq!(
+        h.get(&path)
+            .bearer_auth("bearer-admin")
+            .header("sec-fetch-site", "same-origin")
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        403
+    );
+    assert_eq!(
+        h.cookie(&path, "admin")
+            .header("sec-fetch-site", "cross-site")
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        403
+    );
+    let mut content = entry.content;
+    content.title = "Moderated title".into();
+    let updated = value(
+        h.write(reqwest::Method::PUT, &path, "admin")
+            .json(&MediaUpdate {
+                version: entry.version,
+                content,
+            })
+            .send()
+            .await
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(updated["item"]["owner"]["id"], "alice");
+    assert_eq!(updated["item"]["scope"], "private");
+    assert_eq!(updated["item"]["published"], false);
+    let shared = format!("/v1/media/shared/entries/{}", entry.id);
+    assert_eq!(h.get(&shared).send().await.unwrap().status(), 404);
+    let audit:(String,String)=sqlx::query_as("SELECT account_id,target FROM audit_log WHERE action='media.updated' ORDER BY id DESC LIMIT 1").fetch_one(&h.state.pool).await.unwrap();
+    assert_eq!(audit.0, "admin");
+    assert_eq!(audit.1, format!("private:alice:{}", entry.id));
+    let job = MediaJob {
+        id: "private-job".into(),
+        scope: MediaScope::Private,
+        status: MediaJobStatus::Completed,
+        stage: None,
+        completed_items: None,
+        total_items: None,
+        entry_id: Some(entry.id.clone()),
+        error_code: None,
+    };
+    sqlx::query("INSERT INTO media_jobs(id,actor_id,owner_key,credential_kind,credential_id,data,input,created_at,updated_at) VALUES('private-job','alice','alice','web','session-alice',?,'{}',?,?)").bind(encode(&job).unwrap()).bind(now()).bind(now()).execute(&h.state.pool).await.unwrap();
+    assert_eq!(
+        h.cookie("/v1/media/private/jobs/private-job", "bob")
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        404
+    );
+    assert_eq!(
+        h.get("/v1/media/public/jobs/private-job")
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        404
+    );
+    let projected = value(
+        h.cookie("/v1/admin/media/jobs/private-job", "admin")
+            .header("sec-fetch-site", "same-origin")
+            .send()
+            .await
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(projected["entryId"], entry.id);
+    assert_eq!(
+        h.get("/v1/admin/media/jobs/private-job")
+            .bearer_auth("bearer-admin")
+            .header("sec-fetch-site", "same-origin")
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        403
+    );
+    let version = updated["item"]["version"].as_u64().unwrap();
+    value(
+        h.write(reqwest::Method::DELETE, &path, "admin")
+            .json(&MediaVersion { version })
+            .send()
+            .await
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(
+        h.cookie(&path, "admin")
+            .header("sec-fetch-site", "same-origin")
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        404
+    );
+    h.stop().await;
+}
+
+#[tokio::test]
+async fn publication_migration_keeps_existing_shared_libraries_and_private_defaults() {
+    let pool = sqlx::sqlite::SqlitePoolOptions::new()
+        .max_connections(1)
+        .connect("sqlite::memory:")
+        .await
+        .unwrap();
+    let mut legacy = sqlx::migrate!("./migrations");
+    legacy.migrations.to_mut().retain(|m| m.version < 12);
+    legacy.run(&pool).await.unwrap();
+    account(&pool, "alice", false).await;
+    let mut data = serde_json::to_value(
+        store::new_entry(MediaScope::Shared, content(MediaStatus::Planned)).unwrap(),
+    )
+    .unwrap();
+    data.as_object_mut().unwrap().remove("published");
+    data.as_object_mut().unwrap().remove("owner");
+    for index in 0..147 {
+        let id = format!("legacy-shared-{index}");
+        data["id"] = json!(id);
+        sqlx::query("INSERT INTO media_entries(id,scope,owner_id,version,data,created_at,updated_at) VALUES(?,'shared',NULL,1,?,?,?)").bind(id).bind(data.to_string()).bind(now()).bind(now()).execute(&pool).await.unwrap();
+    }
+    data["id"] = json!("legacy-private");
+    data["scope"] = json!("private");
+    sqlx::query("INSERT INTO media_entries(id,scope,owner_id,version,data,created_at,updated_at) VALUES('legacy-private','private','alice',1,?,?,?)").bind(data.to_string()).bind(now()).bind(now()).execute(&pool).await.unwrap();
+    for index in 0..16 {
+        sqlx::query("INSERT INTO media_collections(id,version,title,description,created_at,updated_at) VALUES(?,1,'legacy','',?,?)").bind(format!("legacy-collection-{index}")).bind(now()).bind(now()).execute(&pool).await.unwrap();
+    }
+    sqlx::migrate!("./migrations").run(&pool).await.unwrap();
+    let private = store::load(&pool, MediaScope::Private, Some("alice"), "legacy-private")
+        .await
+        .unwrap();
+    assert!(!private.content.published);
+    assert_eq!(private.owner.unwrap().id, "alice");
+    let shared = store::list_visible(&pool, None, &MediaQuery::default(), false)
+        .await
+        .unwrap();
+    assert_eq!(shared.total, 147);
+    assert!(
+        shared
+            .items
+            .iter()
+            .all(|e| e.content.published && e.owner.is_none())
+    );
+    let second = store::list_visible(
+        &pool,
+        None,
+        &MediaQuery {
+            page: Some(2),
+            page_size: Some(1),
+            q: Some("电影".into()),
+            genre: Some("剧情".into()),
+            year: Some(2026),
+            media_type: Some(MediaType::Movie),
+            sort: Some(MediaSort::Title),
+            ..MediaQuery::default()
+        },
+        false,
+    )
+    .await
+    .unwrap();
+    assert_eq!(second.total, 147);
+    assert_eq!(second.counts.all, 147);
+    assert_eq!(second.items.len(), 1);
+    assert_eq!(second.items[0].id, "legacy-shared-1");
+    let collections: i64 = sqlx::query_scalar("SELECT count(*) FROM media_collections")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(collections, 16);
+    pool.close().await;
 }
 
 async fn account(pool: &sqlx::SqlitePool, id: &str, admin: bool) {
@@ -265,8 +861,8 @@ async fn public_projection_private_ownership_and_all_statuses_are_enforced_over_
             .unwrap(),
     )
     .await;
-    assert_eq!(stats["total"], 3);
-    assert_eq!(stats["byMonth"], json!([{"month":"2026-11","count":1}]));
+    assert_eq!(stats["total"], 6);
+    assert_eq!(stats["byMonth"], json!([{"month":"2026-11","count":2}]));
     assert_eq!(
         h.cookie("/v1/admin/media/statistics", "alice")
             .header("sec-fetch-site", "same-origin")
@@ -385,6 +981,7 @@ async fn cookies_require_origin_csrf_admin_device_cannot_write_shared_and_replay
     .await;
     assert_eq!(private["item"]["scope"], "private");
     let principal = auth::Principal {
+        target_owner: None,
         account_id: "alice".into(),
         credential_kind: "device".into(),
         credential_id: "device-alice".into(),
@@ -577,10 +1174,129 @@ impl providers::Transport for BlockedTransport {
             Ok(providers::Reply {
                 status: 200,
                 content_type: "application/json".into(),
-                bytes: serde_json::to_vec(&json!({"id":42,"title":"电影","credits":{"cast":[]}}))
-                    .unwrap(),
+                bytes: serde_json::to_vec(
+                    &json!({"id":42,"title":"电影","credits":{"cast":[]},"posters":[]}),
+                )
+                .unwrap(),
             })
         })
+    }
+}
+
+#[tokio::test]
+async fn suspended_accounts_cannot_finish_device_or_browser_imports_and_gallery_jobs() {
+    for device in [true, false] {
+        for gallery in [true, false] {
+            let transport = Arc::new(BlockedTransport {
+                entered: tokio::sync::Notify::new(),
+                release: tokio::sync::Notify::new(),
+            });
+            let providers = Arc::new(providers::Providers::with_transport(
+                MediaConfig {
+                    tmdb_token: Some(assemble_store::secret::SecretString::new("test")),
+                },
+                transport.clone(),
+            ));
+            let h = Harness::start(Some(providers)).await;
+            let identity = MediaIdentity {
+                provider: MediaProvider::Tmdb,
+                media_type: MediaType::Movie,
+                external_id: "42".into(),
+            };
+            let mut original = None;
+            let (path, body) = if gallery {
+                let created = value(
+                    h.write(reqwest::Method::POST, "/v1/media/private/entries", "alice")
+                        .json(&MediaCreate {
+                            content: content(MediaStatus::Planned),
+                            request_id: "suspended-gallery-record".into(),
+                        })
+                        .send()
+                        .await
+                        .unwrap(),
+                )
+                .await;
+                let mut entry: MediaEntry =
+                    serde_json::from_value(created["item"].clone()).unwrap();
+                entry.identities.push(identity.clone());
+                let mut tx = h.state.pool.begin().await.unwrap();
+                entry = store::save(&mut tx, entry).await.unwrap();
+                tx.commit().await.unwrap();
+                original = Some((entry.id.clone(), entry.version));
+                (
+                    format!("/v1/media/private/entries/{}/gallery/sync", entry.id),
+                    json!({"version":entry.version,"requestId":"suspended-gallery"}),
+                )
+            } else {
+                (
+                    "/v1/media/private/imports".into(),
+                    json!({"identity":identity,"requestId":"suspended-import"}),
+                )
+            };
+            let request = if device {
+                h.client
+                    .post(format!("{}{path}", h.origin))
+                    .bearer_auth("bearer-alice")
+            } else {
+                h.write(reqwest::Method::POST, &path, "alice")
+            };
+            let job: MediaJob =
+                serde_json::from_value(value(request.json(&body).send().await.unwrap()).await)
+                    .unwrap();
+            tokio::time::timeout(
+                std::time::Duration::from_secs(2),
+                transport.entered.notified(),
+            )
+            .await
+            .unwrap();
+            // 保留设备和网页会话，证明事务检查本身也拒绝停用账户，而不依赖外围清理。
+            sqlx::query("UPDATE accounts SET suspended_at = ? WHERE id='alice'")
+                .bind(now())
+                .execute(&h.state.pool)
+                .await
+                .unwrap();
+            transport.release.notify_one();
+            let mut finished = None;
+            for _ in 0..200 {
+                let data: String = sqlx::query_scalar("SELECT data FROM media_jobs WHERE id=?")
+                    .bind(&job.id)
+                    .fetch_one(&h.state.pool)
+                    .await
+                    .unwrap();
+                let current: MediaJob = decode(&data).unwrap();
+                if !matches!(
+                    current.status,
+                    MediaJobStatus::Queued | MediaJobStatus::Running
+                ) {
+                    finished = Some(current);
+                    break;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            }
+            let final_job = finished.expect("suspended task did not finish");
+            assert_eq!(final_job.status, MediaJobStatus::Failed);
+            assert_eq!(final_job.error_code.as_deref(), Some("UNAUTHORIZED"));
+            if let Some((id, version)) = original {
+                let entry = store::load(&h.state.pool, MediaScope::Private, Some("alice"), &id)
+                    .await
+                    .unwrap();
+                assert_eq!(entry.version, version);
+                let refs: i64 =
+                    sqlx::query_scalar("SELECT count(*) FROM media_entry_assets WHERE entry_id=?")
+                        .bind(id)
+                        .fetch_one(&h.state.pool)
+                        .await
+                        .unwrap();
+                assert_eq!(refs, 0);
+            } else {
+                let count: i64 = sqlx::query_scalar("SELECT count(*) FROM media_entries")
+                    .fetch_one(&h.state.pool)
+                    .await
+                    .unwrap();
+                assert_eq!(count, 0);
+            }
+            h.stop().await;
+        }
     }
 }
 
@@ -629,6 +1345,7 @@ async fn jobs_recheck_revocation_before_publication_and_shutdown_records_cancell
                 .unwrap();
             transport.release.notify_one();
             let principal = auth::Principal {
+                target_owner: None,
                 account_id: "alice".into(),
                 credential_kind: "device".into(),
                 credential_id: "device-alice".into(),
@@ -802,7 +1519,36 @@ async fn source_response(
         assert!(!headers.contains_key("authorization"));
     }
     calls.lock().await.push(path.clone());
+    if path.ends_with("/poster-3001.png")
+        && calls
+            .lock()
+            .await
+            .iter()
+            .filter(|called| *called == &path)
+            .count()
+            == 1
+    {
+        return StatusCode::SERVICE_UNAVAILABLE.into_response();
+    }
     if path.starts_with("image.tmdb.org/") || path.starts_with("img3.doubanio.com/") {
+        if let Some(id) = path
+            .rsplit('/')
+            .next()
+            .and_then(|name| name.strip_prefix("poster-"))
+            .and_then(|name| name.strip_suffix(".png"))
+            .and_then(|id| id.parse::<u16>().ok())
+        {
+            let image = image::RgbaImage::from_pixel(
+                12,
+                16,
+                image::Rgba([id as u8, (id >> 8) as u8, 0, 255]),
+            );
+            let mut bytes = Cursor::new(Vec::new());
+            image::DynamicImage::ImageRgba8(image)
+                .write_to(&mut bytes, image::ImageFormat::Png)
+                .unwrap();
+            return ([("content-type", "image/png")], bytes.into_inner()).into_response();
+        }
         return ([("content-type", "image/png")], png()).into_response();
     }
     let tmdb = json!({"id":42,"title":"来源电影","overview":"来源简介","original_title":"Source Film","release_date":"2026-01-02","poster_path":"/poster.png","genres":[{"id":18,"name":"剧情"}],"credits":{"cast":[{"id":7,"name":"演员","character":"主角","profile_path":"/actor.png"}]}});
@@ -815,6 +1561,9 @@ async fn source_response(
         json!({"id":42,"posters":[{"file_path":"/poster.png","width":12,"height":16}]})
     } else if path == "api.tmdb.org/3/person/7" {
         json!({"id":7,"name":"演员","profile_path":"/actor.png","movie_credits":{"cast":[tmdb]},"tv_credits":{"cast":[]}})
+    } else if path == "api.tmdb.org/3/person/8" {
+        let works: Vec<_> = (3000..3026).map(|id| json!({"id":id,"title":format!("作品{id}"),"release_date":"2026-01-01","poster_path":if id == 3000 {None} else {Some(format!("/poster-{id}.png"))}})).collect();
+        json!({"id":8,"name":"分页演员","profile_path":"/actor.png","movie_credits":{"cast":works},"tv_credits":{"cast":[]}})
     } else if path == "m.douban.com/rexxar/api/v2/search/movie" {
         json!({"items":[{"target_type":"movie","target":douban.clone()}]})
     } else if path == "m.douban.com/rexxar/api/v2/movie/42" {
@@ -825,7 +1574,7 @@ async fn source_response(
         json!({"id":999,"name":"演员","avatar":{"large":"https://img3.doubanio.com/view/personage/m/public/actor.png"}})
     } else if path == "m.douban.com/rexxar/api/v2/celebrity/7/works" {
         let start = query.get("start").unwrap().parse::<u64>().unwrap();
-        let works:Vec<_>=(start..11.min(start+10)).map(|n|json!({"roles":["演员 (饰 主角)"],"work":{"id":42+n,"type":"movie","title":format!("作品{n}"),"year":"2026"}})).collect();
+        let works:Vec<_>=(start..11.min(start+10)).map(|n|json!({"roles":["演员 (饰 主角)"],"work":{"id":42+n,"type":"movie","title":format!("作品{n}"),"year":"2026","cover":{"url":format!("https://img3.doubanio.com/view/photo/l/public/p{}.png",42+n)}}})).collect();
         json!({"start":start,"count":10,"total":11,"works":works})
     } else if path == "movie.douban.com/subject/42/photos" {
         return ([("content-type","text/html")],"<h1>电影 海报</h1><a href='/subject/42/'>电影</a><ul class='poster-col3'><li data-id='9'></li></ul>").into_response();
@@ -885,6 +1634,7 @@ async fn both_sources_search_metadata_cast_actor_pagination_and_gallery_use_real
             .unwrap();
         assert_eq!(actor.identity.external_id, "7");
         assert!(photo.is_some());
+        assert!(credits.iter().all(|credit| credit.poster.is_some()));
         assert_eq!(
             credits.len(),
             if provider == MediaProvider::Tmdb {
@@ -904,6 +1654,98 @@ async fn both_sources_search_metadata_cast_actor_pagination_and_gallery_use_real
             .iter()
             .any(|p| p.ends_with("celebrity/7/works"))
     );
+    source.stop().await;
+}
+
+#[tokio::test]
+async fn actor_pages_publish_real_posters_revalidate_every_image_and_keep_failures_local() {
+    let source = SourceFixture::start().await;
+    let h = Harness::start(Some(source.providers.clone())).await;
+    let path = "/v1/media/catalog/actors/tmdb/8?mediaType=movie&page=1&pageSize=24";
+    let first = value(h.get(path).send().await.unwrap()).await;
+    let page: MediaActorCredits = serde_json::from_value(first.clone()).unwrap();
+    assert_eq!((page.total, page.page, page.page_size), (26, 1, 24));
+    assert_eq!(page.items.len(), 24);
+    assert!(page.items.iter().all(|item| item.poster.is_some()));
+    assert_eq!(page.items[0].identity.external_id, "3025");
+    assert_eq!(page.items[23].identity.external_id, "3002");
+    let serialized = first.to_string();
+    for secret in ["fixture-token", "image.tmdb.org", "notes-secret", "magnet:"] {
+        assert!(!serialized.contains(secret));
+    }
+    for item in &page.items {
+        let image = item.poster.as_ref().unwrap();
+        let response = h
+            .get(&format!(
+                "/v1/media/assets/{}/content?variant=360",
+                image.asset_id
+            ))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(response.headers()["content-type"], "image/png");
+        assert!(image::load_from_memory(&response.bytes().await.unwrap()).is_ok());
+    }
+    let before = source.calls.lock().await.len();
+    assert_eq!(value(h.get(path).send().await.unwrap()).await, first);
+    assert_eq!(source.calls.lock().await.len(), before);
+    assert!(
+        !source
+            .calls
+            .lock()
+            .await
+            .iter()
+            .any(|path| path.ends_with("poster-3001.png"))
+    );
+    let expired = &page.items[0].poster.as_ref().unwrap().asset_id;
+    assert_ne!(expired, &page.actor.photo.as_ref().unwrap().asset_id);
+    sqlx::query("UPDATE media_catalog_assets SET expires_at = 0 WHERE asset_id = ?")
+        .bind(expired)
+        .execute(&h.state.pool)
+        .await
+        .unwrap();
+    value(h.get(path).send().await.unwrap()).await;
+    assert!(
+        source.calls.lock().await.len() > before,
+        "a live portrait cannot hide expired work posters"
+    );
+    let second_path = "/v1/media/catalog/actors/tmdb/8?mediaType=movie&page=2&pageSize=24";
+    let second = value(h.get(second_path).send().await.unwrap()).await;
+    assert_eq!(second["items"].as_array().unwrap().len(), 2);
+    assert_eq!(second["items"][0]["identity"]["externalId"], "3001");
+    assert!(second["items"][0]["poster"].is_null());
+    assert!(second["items"][1]["poster"].is_null());
+    let before = source.calls.lock().await.len();
+    let recovered = value(h.get(second_path).send().await.unwrap()).await;
+    assert!(recovered["items"][0]["poster"].is_object());
+    assert!(recovered["items"][1]["poster"].is_null());
+    assert!(
+        source.calls.lock().await.len() > before,
+        "failed poster downloads remain retryable"
+    );
+    let empty = value(
+        h.get("/v1/media/catalog/actors/tmdb/8?mediaType=tv")
+            .send()
+            .await
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(empty["total"], 0);
+    assert_eq!(empty["page"], 1);
+    for suffix in ["page=0", "page=-1", "pageSize=0", "pageSize=49"] {
+        assert_eq!(
+            h.get(&format!(
+                "/v1/media/catalog/actors/tmdb/8?mediaType=movie&{suffix}"
+            ))
+            .send()
+            .await
+            .unwrap()
+            .status(),
+            StatusCode::BAD_REQUEST
+        );
+    }
+    h.stop().await;
     source.stop().await;
 }
 

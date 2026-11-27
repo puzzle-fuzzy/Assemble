@@ -155,7 +155,8 @@
     "searchPlaceholder": "文件名、用户姓名或邮箱",
     "emptyTitle": "还没有云盘文件",
     "emptyDescription": "所有账户存入云盘的文件会出现在这里。",
-    "details": "文件详情"
+    "details": "文件详情",
+    "download": "下载"
   },
   "platform": {
     "windows": "Windows",

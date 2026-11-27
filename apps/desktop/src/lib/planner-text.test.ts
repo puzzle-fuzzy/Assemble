@@ -39,6 +39,13 @@ describe("planner-text", () => {
     }
     // 2 月没有 30 日。
     expect(fromLocalInput("2026-02-30T09:00")).toBeNull();
+    for (const broken of [
+      "2026-11-25T25:00",
+      "2026-11-25T09:60",
+      "2026-11-25T09:00:60",
+    ]) {
+      expect(fromLocalInput(broken)).toBeNull();
+    }
     expect(toLocalInput("不是时间")).toBe("");
   });
 

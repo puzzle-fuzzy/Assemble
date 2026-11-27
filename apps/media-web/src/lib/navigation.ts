@@ -17,7 +17,12 @@ export type SiteRoute =
   | { kind: "wall"; scope: MediaScope; query: MediaQuery; pages: ShelfPages }
   | { kind: "entry"; scope: MediaScope; id: string }
   | { kind: "catalog"; identity: MediaIdentity }
-  | { kind: "actor"; identity: MediaPersonIdentity; mediaType: MediaType }
+  | {
+      kind: "actor";
+      identity: MediaPersonIdentity;
+      mediaType: MediaType;
+      page: number;
+    }
   | { kind: "collections"; page: number }
   | { kind: "collection"; id: string }
   | { kind: "missing" };
@@ -60,6 +65,18 @@ export function readRoute(location: string): SiteRoute {
     return { kind: "missing" };
   }
   if (!url.pathname.startsWith("/movies/")) return { kind: "missing" };
+  if (parts.length === 2 && parts[0] === "users" && validId(parts[1])) {
+    return {
+      kind: "wall",
+      scope: "shared",
+      query: { ...readQuery(url.searchParams), ownerId: parts[1] },
+      pages: {
+        planned: positive(url.searchParams.get("plannedPage")),
+        watching: positive(url.searchParams.get("watchingPage")),
+        completed: positive(url.searchParams.get("completedPage")),
+      },
+    };
+  }
   if (parts.length === 0 || (parts.length === 1 && parts[0] === "private")) {
     return {
       kind: "wall",
@@ -112,6 +129,7 @@ export function readRoute(location: string): SiteRoute {
         kind: "actor",
         identity: { provider: parts[1], externalId: parts[2] },
         mediaType: url.searchParams.get("mediaType") === "tv" ? "tv" : "movie",
+        page: positive(url.searchParams.get("page")),
       };
     }
   }
@@ -133,8 +151,16 @@ export function wallPath(
     parameters.set("plannedPage", String(query.page));
   }
   const search = parameters.toString();
-  return `/movies/${scope === "private" ? "private" : ""}${search ? `?${search}` : ""}`;
+  const base =
+    scope === "private"
+      ? "/movies/private"
+      : query.ownerId
+        ? userLibraryPath(query.ownerId)
+        : "/movies/";
+  return `${base}${search ? `?${search}` : ""}`;
 }
+export const userLibraryPath = (accountId: string) =>
+  `/movies/users/${encodeURIComponent(accountId)}`;
 
 export function readerBackPath(scope: MediaScope) {
   const from = new URLSearchParams(window.location.search).get("from");
@@ -152,8 +178,9 @@ export const catalogPath = (identity: MediaIdentity) =>
 export const actorPath = (
   identity: MediaPersonIdentity,
   mediaType: MediaType,
+  page = 1,
 ) =>
-  `/movies/actors/${identity.provider}/${encodeURIComponent(identity.externalId)}?mediaType=${mediaType}`;
+  `/movies/actors/${identity.provider}/${encodeURIComponent(identity.externalId)}?mediaType=${mediaType}${page > 1 ? `&page=${page}` : ""}`;
 
 export function navigate(path: string, replace = false) {
   if (!path.startsWith("/movies/")) throw new Error("INVALID_MEDIA_NAVIGATION");

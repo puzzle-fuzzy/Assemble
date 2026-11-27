@@ -69,6 +69,9 @@ pub struct MediaCast {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MediaContent {
+    /// 私人记录默认不公开；共享记录保持既有公开行为。
+    #[serde(default)]
+    pub published: bool,
     pub media_type: MediaType,
     pub title: String,
     pub original_title: String,
@@ -89,6 +92,8 @@ pub struct MediaEntry {
     pub id: String,
     pub version: u64,
     pub scope: MediaScope,
+    #[serde(default)]
+    pub owner: Option<MediaAccount>,
     #[serde(flatten)]
     pub content: MediaContent,
     pub cast: Vec<MediaCast>,
@@ -118,6 +123,8 @@ pub struct MediaList {
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MediaQuery {
+    pub owner_id: Option<String>,
+    pub scope: Option<MediaScope>,
     pub q: Option<String>,
     pub page: Option<u32>,
     pub page_size: Option<u32>,
@@ -181,6 +188,9 @@ pub struct MediaActor {
 pub struct MediaActorCredits {
     pub actor: MediaActor,
     pub items: Vec<MediaCandidate>,
+    pub total: u64,
+    pub page: u32,
+    pub page_size: u32,
 }
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -323,6 +333,12 @@ mod tests {
         let _: MediaJob = serde_json::from_value(sample["job"].clone()).unwrap();
         let _: MediaGallery = serde_json::from_value(sample["gallery"].clone()).unwrap();
         let _: MediaCandidate = serde_json::from_value(sample["candidate"].clone()).unwrap();
+        let credits: MediaActorCredits =
+            serde_json::from_value(sample["actorCredits"].clone()).unwrap();
+        assert_eq!(
+            serde_json::to_value(credits).unwrap(),
+            sample["actorCredits"]
+        );
         let _: MediaCollection = serde_json::from_value(sample["collection"].clone()).unwrap();
         let _: MediaStatistics = serde_json::from_value(sample["statistics"].clone()).unwrap();
     }

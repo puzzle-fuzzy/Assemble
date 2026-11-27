@@ -1,3 +1,4 @@
+import { Alert, AlertDescription } from "@assemble/ui/alert";
 import { Button } from "@assemble/ui/button";
 import {
   DataTable,
@@ -11,7 +12,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@assemble/ui/dropdown-menu";
-import { Field, FieldLabel } from "@assemble/ui/field";
+import { Field, FieldError, FieldLabel } from "@assemble/ui/field";
 import { Input } from "@assemble/ui/input";
 import {
   Tooltip,
@@ -268,9 +269,9 @@ export function DhtPage({
         <RequestError failure={status.resource.failure} retry={status.retry} />
       )}
       {failure && (
-        <p role="alert" className="text-sm text-destructive">
-          {t(errorKey(failure))}
-        </p>
+        <Alert variant="destructive">
+          <AlertDescription>{t(errorKey(failure))}</AlertDescription>
+        </Alert>
       )}
       <p
         role="status"
@@ -465,11 +466,7 @@ export function DhtPage({
                 {t("queryHint")}
               </p>
             </Field>
-            {failure && (
-              <p role="alert" className="text-sm text-destructive">
-                {t(errorKey(failure))}
-              </p>
-            )}
+            {failure && <FieldError>{t(errorKey(failure))}</FieldError>}
             <Button type="submit" disabled={busy || !hash.trim()}>
               {t(busy ? "working" : "queryAction")}
             </Button>
@@ -503,9 +500,9 @@ function RuntimeStatus({ status }: { status: DhtStatus }) {
         <p role="status">{t("starting")}</p>
       )}
       {status.lastError && (
-        <p role="alert" className="text-destructive">
-          {t(errorKey(status.lastError))}
-        </p>
+        <Alert variant="destructive">
+          <AlertDescription>{t(errorKey(status.lastError))}</AlertDescription>
+        </Alert>
       )}
       <p>
         {t("totals", {
@@ -518,7 +515,9 @@ function RuntimeStatus({ status }: { status: DhtStatus }) {
       </p>
       {(status.total >= status.maxRecords ||
         status.metadataBytes >= status.metadataBudgetBytes) && (
-        <p role="alert">{t("capacity")}</p>
+        <Alert>
+          <AlertDescription>{t("capacity")}</AlertDescription>
+        </Alert>
       )}
       <dl className="grid gap-4 sm:grid-cols-3 xl:grid-cols-4">
         {[
@@ -662,6 +661,7 @@ function ObservationDetail({
             />
             <DataTable
               label={t("files")}
+              defaultPageSize={20}
               data={files}
               getRowLabel={(file) => file.path.join("/")}
               columns={[

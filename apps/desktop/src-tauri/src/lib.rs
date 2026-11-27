@@ -22,6 +22,7 @@ mod send_panel;
 mod session;
 mod state;
 mod system_notifications;
+mod transfer_history;
 mod transfers;
 mod tray;
 
@@ -122,6 +123,9 @@ fn stop(app: &tauri::AppHandle) {
     if let Some(bridge) = bridge.as_ref().and_then(|state| state.inner().as_ref()) {
         tauri::async_runtime::block_on(bridge.shutdown());
     }
+    if app.state::<AppState>().flush_transfer_history().is_err() {
+        tracing::warn!("the transfer history could not be saved before exit");
+    }
 }
 
 // 命令清单单独集中，启动函数只保留生命周期编排。
@@ -150,6 +154,7 @@ fn handlers() -> impl Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool + Send + Sync +
         commands::media_image,
         commands::media_copy_magnet,
         commands::snapshot,
+        commands::download_set_assistant_allowed,
         commands::download_prepare,
         commands::download_import_hls,
         commands::download_start,
@@ -175,11 +180,13 @@ fn handlers() -> impl Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool + Send + Sync +
         commands::drive_refresh,
         commands::drive_upload,
         commands::drive_download,
+        commands::drive_rename,
         commands::drive_delete,
         commands::close_send_panel,
         commands::cancel_transfer,
         commands::retry_transfer,
         commands::open_main,
+        commands::open_public_media,
         commands::dismiss_notice,
         commands::system_notifications_refresh,
         commands::system_notifications_read,
@@ -242,6 +249,9 @@ fn start(
         notifier,
     ));
     let downloads_handle = handle.clone();
+    handle
+        .state::<AppState>()
+        .attach_transfer_history(handle.path().app_data_dir()?.join("transfers.json"))?;
     handle.state::<AppState>().attach_system_notifications(
         handle
             .path()
@@ -256,6 +266,13 @@ fn start(
         assemble_download::MediaTools::discover(),
         move |view| downloads_handle.state::<AppState>().set_downloads(view),
     )?;
+    downloads.set_assistant_allowed(
+        handle
+            .state::<AppState>()
+            .settings()
+            .assistant_downloads_allowed
+            .unwrap_or(true),
+    );
     handle.state::<AppState>().set_downloads(downloads.view());
     handle.manage(Arc::clone(&downloads));
     // 上次崩溃留下的下载暂存目录趁现在清掉：窗口还没开出来，不可能有任务在跑。

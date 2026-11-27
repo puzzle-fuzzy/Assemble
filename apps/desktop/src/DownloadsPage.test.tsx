@@ -3,7 +3,11 @@ import { setLanguage } from "@assemble/display";
 import { act } from "react";
 import { BridgeError } from "@/lib/bridge";
 import { downloadError } from "@/lib/download-i18n";
-import { type DownloadTask, downloadProgress } from "@/lib/downloads";
+import {
+  type DownloadTask,
+  downloadProgress,
+  isDownloadsView,
+} from "@/lib/downloads";
 import {
   button,
   cleanup,
@@ -27,6 +31,56 @@ function currentDialog() {
   if (!dialog) throw new Error("download dialog missing");
   return dialog;
 }
+
+test("助手任务标记跟随语言，普通任务不增加标记", async () => {
+  const source = new FakeBridge(snapshot());
+  const task: DownloadTask = {
+    id: "assistant-task",
+    initiatedBy: "assistant",
+    kind: "hls",
+    title: "用户的中文视频 <film>",
+    fileName: "用户的中文视频 <film>.mp4",
+    sourceHost: "example.com",
+    phase: "completed",
+    receivedBytes: 1024,
+    totalBytes: 1024,
+    completedSegments: 1,
+    totalSegments: 1,
+    bytesPerSecond: 0,
+    mediaSeconds: 10,
+    durationSeconds: 10,
+    errorCode: null,
+    retryable: false,
+    createdAt: "2026-11-27T01:00:00Z",
+  };
+  const downloads = { ...source.current.downloads, tasks: [task] };
+  expect(isDownloadsView(downloads)).toBe(true);
+  expect(
+    isDownloadsView({
+      ...downloads,
+      tasks: [{ ...task, initiatedBy: "unknown" }],
+    }),
+  ).toBe(false);
+  expect(isDownloadsView({ ...downloads, assistantAllowed: "false" })).toBe(
+    false,
+  );
+  const view = await render(<DownloadsPage source={source} view={downloads} />);
+  expect(text(view.host)).toContain("由助手发起");
+  expect(text(view.host)).not.toContain("已保存");
+  expect(text(view.host)).not.toContain("资源 1 / 1");
+  expect(text(view.host)).toContain("用户的中文视频 <film>.mp4");
+  await act(async () => setLanguage("en"));
+  expect(text(view.host)).toContain("Started by assistant");
+  expect(text(view.host)).not.toContain("由助手发起");
+  expect(view.host.querySelector("film")).toBeNull();
+  await view.unmount();
+  const normal = { ...task };
+  delete normal.initiatedBy;
+  const regular = await render(
+    <DownloadsPage source={source} view={{ ...downloads, tasks: [normal] }} />,
+  );
+  expect(text(regular.host)).not.toContain("Started by assistant");
+});
 test("未登录可以进入下载页，解析后选择画质并下载", async () => {
   const source = new FakeBridge(snapshot());
   const view = await renderApp(source);

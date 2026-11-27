@@ -1552,3 +1552,96 @@ async fn a_drive_upload_that_does_not_fit_is_reported_and_a_smaller_one_still_fi
     assert_eq!(listing.used_bytes, 500);
     f.finish().await;
 }
+
+fn attach_history(fixture: &Fixture) -> PathBuf {
+    let path = fixture.dir.path().join("desktop-data/transfers.json");
+    fixture
+        .state()
+        .attach_transfer_history(path.clone())
+        .unwrap();
+    path
+}
+
+fn rebuild_shell(fixture: &mut Fixture, history: &Path, session: SessionView) {
+    let client = fixture.state().client.clone();
+    let settings = fixture.state().settings();
+    fixture.state().lifetime.cancel();
+    let app = tauri::test::mock_app();
+    app.manage(AppState::new(
+        app.handle().clone(),
+        client,
+        None,
+        settings,
+        fixture.dir.path().join("Downloads"),
+        fixture.notifications.clone(),
+    ));
+    app.state::<Shell>()
+        .attach_transfer_history(history.to_owned())
+        .unwrap();
+    // 登录状态还没有核对前，文件名和本机位置都不会出现在可见状态里。
+    assert_eq!(app.state::<Shell>().snapshot().transfers.len(), 0);
+    app.state::<Shell>().set_session(session);
+    app.state::<Shell>().begin_session();
+    fixture.app = app;
+}
+
+#[tokio::test]
+async fn restarting_the_shell_restores_received_files_without_download_or_path_disclosure() {
+    let mut f = fixture().await;
+    let history = attach_history(&f);
+    f.start_receiving();
+    let bytes = payload(2_001);
+    f.send("重启后仍可定位.txt", &bytes).await;
+    let offered = f.next_send_event().await;
+    f.state().offer(&offered);
+    until("the received file and its receipt", || {
+        acknowledged(&f.state(), &offered.id)
+    })
+    .await;
+    let path = f.state().saved_file(&offered.id).unwrap();
+    let session = f.state().snapshot().session;
+    f.state().flush_transfer_history().unwrap();
+    rebuild_shell(&mut f, &history, session);
+
+    assert_eq!(f.state().saved_file(&offered.id), Some(path.clone()));
+    assert_eq!(std::fs::read(&path).unwrap(), bytes);
+    assert_eq!(view_of(&f, &offered.id).phase, TransferPhase::Complete);
+    assert_eq!(f.state().next_job(), Next::Nothing);
+    let snapshot = serde_json::to_value(f.state().snapshot()).unwrap();
+    assert!(snapshot["transfers"][0].get("savedPath").is_none());
+    let cancel = CancellationToken::new();
+    resync(&f.state(), &cancel).await.unwrap();
+    assert_eq!(f.state().snapshot().transfers.len(), 1);
+    assert_eq!(entries(&f.inbox()), ["重启后仍可定位.txt"]);
+    f.finish().await;
+}
+
+#[tokio::test]
+async fn revoked_sessions_hide_history_until_the_same_account_returns_and_logout_clears_it() {
+    let mut f = fixture().await;
+    let history = attach_history(&f);
+    let session = f.state().snapshot().session;
+    let file = pick(&f.dir, "还没发出的文件.txt", &payload(10)).await;
+    let ids = f.state().queue_files(Destination::Drive, vec![file]);
+    f.state()
+        .set_draft(vec![pick(&f.dir, "未发送的草稿.txt", &payload(2)).await]);
+    f.state().end_session();
+    f.state().set_session(SessionView::SignedOut);
+    assert_eq!(f.state().snapshot().transfers.len(), 0);
+
+    rebuild_shell(&mut f, &history, session.clone());
+    let restored = view_of(&f, &ids[0]);
+    assert_eq!(restored.phase, TransferPhase::Failed);
+    assert_eq!(restored.failure, Some(TransferFailure::Interrupted));
+    assert!(!restored.retryable);
+    assert!(f.state().snapshot().draft.is_none());
+    assert_eq!(f.state().next_job(), Next::Nothing);
+    assert!(!f.state().retry_failed_send(&ids[0]));
+
+    // 用户显式退出、且服务端已确认后，调用这条清理；失效没有走这条路。
+    f.state().clear_transfer_history().unwrap();
+    f.state().end_session();
+    rebuild_shell(&mut f, &history, session);
+    assert_eq!(f.state().snapshot().transfers.len(), 0);
+    f.finish().await;
+}

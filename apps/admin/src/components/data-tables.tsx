@@ -110,6 +110,7 @@ export function UsersTable({
   return (
     <DataTable
       variant="management"
+      defaultPageSize={20}
       {...options}
       label={t("table.usersRegion")}
       data={users}
@@ -167,6 +168,7 @@ export function DevicesTable({
     <>
       <DataTable
         variant="management"
+        defaultPageSize={20}
         {...options}
         label={t("table.devicesRegion")}
         data={devices}
@@ -255,6 +257,7 @@ export function LoginsTable({
     <>
       <DataTable
         variant="management"
+        defaultPageSize={20}
         {...options}
         label={t("table.loginsRegion")}
         data={logins}

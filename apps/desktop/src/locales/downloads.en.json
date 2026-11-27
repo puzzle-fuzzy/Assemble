@@ -21,6 +21,8 @@
   "empty": "No download tasks yet",
   "emptyHint": "Paste a URL or import a playlist, then select quality and start downloading.",
   "queue": "Downloads",
+  "assistantAllowed": "Allow assistant downloads on this computer",
+  "initiatedByAssistant": "Started by assistant",
   "cancel": "Cancel",
   "retry": "Retry",
   "open": "Open video",
@@ -37,6 +39,8 @@
   "cancelled": "Cancelled",
   "interrupted": "Interrupted on exit. Parse the source again.",
   "error": {
+    "SETTINGS_SAVE_FAILED": "Settings were not saved. Check local disk space and permissions, then try again.",
+    "DOWNLOAD_ASSISTANT_DISABLED": "Assistant downloads are disabled. Enable them in device settings.",
     "DOWNLOAD_INVALID_SOURCE": "Enter a publicly accessible video download link or paste a Douyin share message.",
     "IMPORT_DOWNLOAD_LINK_NEEDED": "Could not get the video from this file. Paste the link used to download the M3U8 file and select the file again, or use the browser extension.",
     "DOWNLOAD_SOURCE_UNAVAILABLE": "The source is unavailable or expired. Obtain a new URL.",

@@ -116,6 +116,12 @@ pub fn router(state: Shared) -> Router {
         .merge(crate::media_web_assets::routes(
             &state.config.media_web_assets_dir,
         ))
+        .merge(crate::releases::routes(
+            &state.config.data_dir.join("releases"),
+        ))
+        .merge(crate::releases::web_routes(
+            &state.config.releases_web_assets_dir,
+        ))
         // 桌面端的接口
         .route(EXCHANGE_PATH, post(crate::desktop_login::exchange))
         // 手机扫码登录的两个接口：不带 Cookie，也不带令牌

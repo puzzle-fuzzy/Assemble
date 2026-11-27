@@ -56,10 +56,14 @@ export function MediaPage({
     };
     return () => controller.abort();
   }, [session.account.id, session.csrfToken]);
-  const { library, collections } = useMemo(() => {
+  const { library, sharedLibrary, collections } = useMemo(() => {
     const options = { csrfToken: () => session.csrfToken };
     return {
-      library: createBrowserMediaClient("shared", options),
+      library: createBrowserMediaClient("shared", {
+        ...options,
+        readMode: "admin",
+      }),
+      sharedLibrary: createBrowserMediaClient("shared", options),
       collections: createBrowserMediaCollectionsClient(options),
     };
   }, [session.csrfToken]);
@@ -82,7 +86,9 @@ export function MediaPage({
   return (
     <Tabs defaultValue="library">
       <TabsList>
-        <TabsTrigger value="library">{t("scope.shared")}</TabsTrigger>
+        <TabsTrigger value="library">
+          {t("publication.allLibraries")}
+        </TabsTrigger>
         <TabsTrigger value="collections">{t("collections.title")}</TabsTrigger>
         <TabsTrigger value="statistics">{t("statistics.title")}</TabsTrigger>
       </TabsList>
@@ -113,7 +119,7 @@ export function MediaPage({
             />
           }
           client={collections}
-          libraryClient={library}
+          libraryClient={sharedLibrary}
           imageLoader={browserImageLoader}
           accountKey={session.account.id}
           onAccessFailure={onAccessFailure}

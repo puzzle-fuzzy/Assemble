@@ -175,6 +175,13 @@ pub(super) async fn gallery(
         entry_id,
     )
     .await?;
+    gallery_for_entry(pool, &entry).await
+}
+pub(super) async fn gallery_for_entry(
+    pool: &SqlitePool,
+    entry: &assemble_protocol::media::MediaEntry,
+) -> Result<MediaGallery, ApiError> {
+    let entry_id = &entry.id;
     let rows:Vec<(String,i64,i64,String)>=sqlx::query_as("SELECT a.id,a.width,a.height,a.content_type FROM media_assets a JOIN media_entry_assets r ON r.asset_id = a.id WHERE r.entry_id = ? AND r.role = 'gallery' ORDER BY r.position,a.id").bind(entry_id).fetch_all(pool).await?;
     let items = rows
         .into_iter()
@@ -188,7 +195,7 @@ pub(super) async fn gallery(
         })
         .collect::<Result<_, ApiError>>()?;
     Ok(MediaGallery {
-        entry_id: entry.id,
+        entry_id: entry.id.clone(),
         version: entry.version,
         items,
     })
@@ -204,8 +211,8 @@ pub(super) async fn content(
         return Err(ApiError::invalid("unknown image variant"));
     }
     // 可公开引用和私人所有权都由关系表核对，资产存在本身从来不构成读取权限。
-    let allowed:bool=sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM media_entry_assets r JOIN media_entries e ON e.id = r.entry_id WHERE r.asset_id = ? AND (e.scope = 'shared' OR (e.scope = 'private' AND e.owner_id = ?))) OR EXISTS(SELECT 1 FROM media_catalog_assets WHERE asset_id = ? AND expires_at > ?) OR EXISTS(SELECT 1 FROM media_import_catalog_assets WHERE asset_id = ?)")
-        .bind(asset_id).bind(principal.map(|p|p.account_id.as_str())).bind(asset_id).bind(super::now()).bind(asset_id).fetch_one(&state.pool).await?;
+    let allowed:bool=sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM media_entry_assets r JOIN media_entries e ON e.id = r.entry_id WHERE r.asset_id = ? AND (e.scope = 'shared' OR json_extract(e.data, '$.published') = 1 OR e.owner_id = ? OR ?)) OR EXISTS(SELECT 1 FROM media_catalog_assets WHERE asset_id = ? AND expires_at > ?) OR EXISTS(SELECT 1 FROM media_import_catalog_assets WHERE asset_id = ?)")
+        .bind(asset_id).bind(principal.map(|p|p.account_id.as_str())).bind(principal.is_some_and(|p|p.admin && p.credential_kind == "web")).bind(asset_id).bind(super::now()).bind(asset_id).fetch_one(&state.pool).await?;
     if !allowed {
         return Err(ApiError::not_found());
     }

@@ -338,6 +338,8 @@ pub trait Notifier: Send + Sync {
 #[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct Settings {
+    /// 不设置时允许助手下载；用户开关只影响这台电脑。
+    pub assistant_downloads_allowed: Option<bool>,
     /// 用户选的接收文件夹（规范路径）；`None` 表示默认位置。
     pub receive_directory: Option<PathBuf>,
     /// Windows 右键菜单"用 Assemble 发送"要不要有；`None` 表示默认（有）。
@@ -486,6 +488,7 @@ impl View {
 }
 
 pub struct AppState<R: tauri::Runtime = tauri::Wry> {
+    transfer_history: Mutex<crate::transfer_history::HistoryStore>,
     system_inbox: Mutex<crate::system_notifications::Inbox>,
     app: AppHandle<R>,
     pub client: Client,
@@ -531,6 +534,7 @@ impl<R: tauri::Runtime> AppState<R> {
                 .with_planner_muted(settings.planner_muted),
         );
         Self {
+            transfer_history: Mutex::new(crate::transfer_history::HistoryStore::new(&origin)),
             system_inbox: Mutex::new(crate::system_notifications::Inbox::default()),
             app,
             client,
@@ -642,7 +646,78 @@ impl<R: tauri::Runtime> AppState<R> {
     }
 
     pub fn set_session(&self, session: SessionView) {
-        self.update(|view| view.session = session);
+        let launch_at_login = launch_state(&self.app);
+        let mut history = self
+            .transfer_history
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        let ((), snapshot) = revise(
+            &self.view,
+            |view| {
+                if let SessionView::SignedIn { account, .. } = &session {
+                    if history.restore(&account.id, &mut view.registry).is_err() {
+                        tracing::warn!("the transfer history could not be restored");
+                    }
+                } else {
+                    history.detach();
+                    view.registry.clear();
+                }
+                view.session = session;
+            },
+            || launch_at_login,
+        );
+        drop(history);
+        if let Some(snapshot) = snapshot {
+            let _ = self
+                .app
+                .emit(SNAPSHOT_EVENT, self.with_system_notifications(snapshot));
+        }
+    }
+
+    pub fn attach_transfer_history(
+        &self,
+        path: PathBuf,
+    ) -> Result<(), assemble_store::json::StoreError> {
+        let launch_at_login = launch_state(&self.app);
+        let mut history = self
+            .transfer_history
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        history.attach(path);
+        let (result, snapshot) = revise(
+            &self.view,
+            |view| {
+                if let SessionView::SignedIn { account, .. } = &view.session {
+                    history.restore(&account.id, &mut view.registry)
+                } else {
+                    Ok(())
+                }
+            },
+            || launch_at_login,
+        );
+        drop(history);
+        if let Some(snapshot) = snapshot {
+            let _ = self
+                .app
+                .emit(SNAPSHOT_EVENT, self.with_system_notifications(snapshot));
+        }
+        result
+    }
+
+    pub fn flush_transfer_history(&self) -> Result<(), assemble_store::json::StoreError> {
+        let mut history = self
+            .transfer_history
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        let view = self.view.lock().unwrap_or_else(PoisonError::into_inner);
+        history.persist(&view.registry)
+    }
+
+    pub fn clear_transfer_history(&self) -> Result<(), assemble_store::json::StoreError> {
+        self.transfer_history
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clear()
     }
 
     /// 换上账户里当前的设备列表。
@@ -754,6 +829,10 @@ impl<R: tauri::Runtime> AppState<R> {
 
     /// 结束登录会话：后台任务停下来，与账户有关的状态清空。
     pub fn end_session(&self) {
+        self.transfer_history
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .detach();
         self.session_cancel
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
@@ -811,11 +890,22 @@ impl<R: tauri::Runtime> AppState<R> {
     fn registry<T>(&self, change: impl FnOnce(&mut Registry) -> T) -> T {
         // 开机启动的状态要问系统，放到锁外面取：持锁期间不该等任何别的东西。
         let launch_at_login = launch_state(&self.app);
+        let mut history = self
+            .transfer_history
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
         let (result, snapshot) = revise(
             &self.view,
-            |view| change(&mut view.registry),
+            |view| {
+                let result = change(&mut view.registry);
+                if history.persist(&view.registry).is_err() {
+                    tracing::warn!("the transfer history could not be saved");
+                }
+                result
+            },
             || launch_at_login,
         );
+        drop(history);
         // 没有窗口时什么都不做。
         if let Some(snapshot) = snapshot {
             let snapshot = self.with_system_notifications(snapshot);

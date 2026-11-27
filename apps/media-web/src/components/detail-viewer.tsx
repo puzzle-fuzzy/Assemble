@@ -8,8 +8,8 @@ import type {
 import { MediaPosterViewer } from "@assemble/media/components/poster-viewer";
 import { Badge } from "@assemble/ui/badge";
 import { Button } from "@assemble/ui/button";
-import { CopyIcon } from "lucide-react";
-import { type ReactNode, useState } from "react";
+import { CheckIcon, CopyIcon } from "lucide-react";
+import { type ReactNode, useEffect, useRef, useState } from "react";
 import { useSiteTranslation } from "../lib/i18n";
 import { useResource } from "../lib/use-resource";
 import { RequestError } from "./common";
@@ -40,13 +40,34 @@ export function DetailViewer({
   const [copy, setCopy] = useState<"idle" | "pending" | "done" | "error">(
     "idle",
   );
+  const [copyCount, setCopyCount] = useState(0);
+  const copyReset = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const copyGeneration = useRef(0);
+  useEffect(
+    () => () => {
+      copyGeneration.current++;
+      if (copyReset.current !== null) clearTimeout(copyReset.current);
+    },
+    [],
+  );
   async function copyMagnet() {
-    if (copy === "pending" || !onCopyMagnet) return;
+    if (copy === "pending" || !onCopyMagnet || sessionSignal.aborted) return;
+    if (copyReset.current !== null) clearTimeout(copyReset.current);
+    const generation = copyGeneration.current;
     setCopy("pending");
     try {
       await onCopyMagnet(entry);
+      if (sessionSignal.aborted || generation !== copyGeneration.current)
+        return;
+      setCopyCount((count) => count + 1);
       setCopy("done");
+      copyReset.current = setTimeout(() => {
+        setCopy("idle");
+        copyReset.current = null;
+      }, 2_000);
     } catch {
+      if (sessionSignal.aborted || generation !== copyGeneration.current)
+        return;
       setCopy("error");
     }
   }
@@ -154,33 +175,48 @@ export function DetailViewer({
         )}
         {entry.magnetAvailable && (
           <DetailSection title={mediaText("entry.magnet")}>
-            {entry.magnetUri && onCopyMagnet ? (
-              <Button
-                variant="outline"
-                onClick={() => void copyMagnet()}
-                disabled={copy === "pending"}
-              >
-                <CopyIcon data-icon="inline-start" />
-                {mediaText(
-                  copy === "done" ? "entry.copied" : "entry.copyMagnet",
+            {entry.magnetUri ? (
+              <div className="detail-magnet">
+                <code className="detail-magnet-uri">{entry.magnetUri}</code>
+                {onCopyMagnet && (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    className="detail-magnet-copy"
+                    aria-label={mediaText(
+                      copy === "done" ? "entry.copied" : "entry.copyMagnet",
+                    )}
+                    title={mediaText(
+                      copy === "done" ? "entry.copied" : "entry.copyMagnet",
+                    )}
+                    aria-busy={copy === "pending"}
+                    onClick={() => void copyMagnet()}
+                    disabled={copy === "pending"}
+                  >
+                    {copy === "done" ? (
+                      <CheckIcon aria-hidden="true" />
+                    ) : (
+                      <CopyIcon aria-hidden="true" />
+                    )}
+                  </Button>
                 )}
-              </Button>
+              </div>
             ) : onSignIn ? (
               <Button variant="outline" onClick={onSignIn}>
                 {mediaText("entry.signInMagnet")}
               </Button>
             ) : null}
-            <p
-              className="detail-copy-feedback"
-              role={copy === "error" ? "alert" : "status"}
-              aria-live="polite"
-            >
-              {copy === "error"
-                ? mediaText("entry.copyFailed")
-                : copy === "done"
-                  ? t("copied")
-                  : ""}
+            <p className="sr-only" role="status" aria-atomic="true">
+              {copy === "done"
+                ? `${t("copied")}${copyCount % 2 ? "\u00a0" : ""}`
+                : ""}
             </p>
+            {copy === "error" && (
+              <p className="detail-copy-feedback" role="alert">
+                {mediaText("entry.copyFailed")}
+              </p>
+            )}
           </DetailSection>
         )}
         {entry.cast.length > 0 && (

@@ -10,6 +10,7 @@ import type {
 } from "../lib/system-notifications";
 import en from "../locales/system.en.json";
 import zh from "../locales/system.zh-CN.json";
+import { Alert, AlertDescription } from "./alert";
 import { Button } from "./button";
 import {
   Dialog,
@@ -19,6 +20,7 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "./dialog";
+import { Empty, EmptyDescription, EmptyHeader } from "./empty";
 
 registerTranslations("systemNotifications", { "zh-CN": zh, en });
 
@@ -151,21 +153,25 @@ export function SystemNotificationCenter({
         </DialogHeader>
         <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 pb-4">
           {error && (
-            <p role="status" className="py-3 text-sm text-destructive">
-              {t("error")}
-            </p>
+            <Alert variant="destructive" role="status">
+              <AlertDescription>{t("error")}</AlertDescription>
+            </Alert>
           )}
           {readError && (
-            <p role="status" className="py-3 text-sm text-destructive">
-              {t("readError")}
-            </p>
+            <Alert variant="destructive" role="status">
+              <AlertDescription>{t("readError")}</AlertDescription>
+            </Alert>
           )}
           {loading && items.length === 0 ? (
             <p role="status" className="py-6 text-sm text-muted-foreground">
               {t("loading")}
             </p>
           ) : items.length === 0 && !error ? (
-            <p className="py-6 text-sm text-muted-foreground">{t("empty")}</p>
+            <Empty className="py-6">
+              <EmptyHeader>
+                <EmptyDescription>{t("empty")}</EmptyDescription>
+              </EmptyHeader>
+            </Empty>
           ) : (
             <ul className="flex flex-col divide-y">
               {items.map((item) => {

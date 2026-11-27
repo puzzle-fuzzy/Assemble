@@ -4,6 +4,7 @@ import {
   browserImageLoader,
   createBrowserMediaClient,
   createBrowserMediaCollectionsClient,
+  createPublicMediaClient,
   MediaError,
 } from "./browser-client";
 
@@ -19,6 +20,41 @@ function fake(value: unknown, status = 200) {
   return { calls, fetcher };
 }
 describe("浏览器影视传输边界", () => {
+  test("人物作品分页参数和取消信号原样进入同源目录请求", async () => {
+    const source = fake(samples.actorCredits);
+    const stop = new AbortController();
+    await createPublicMediaClient({ fetch: source.fetcher }).actor(
+      { provider: "tmdb", externalId: "7" },
+      "tv",
+      { page: 2, pageSize: 24 },
+      stop.signal,
+    );
+    const call = source.calls[0];
+    if (!call) throw new Error("MISSING_ACTOR_REQUEST");
+    const url = new URL(call.path, "https://assemble.example");
+    expect(url.pathname).toBe("/v1/media/catalog/actors/tmdb/7");
+    expect(url.searchParams.get("page")).toBe("2");
+    expect(url.searchParams.get("pageSize")).toBe("24");
+    expect(url.searchParams.get("mediaType")).toBe("tv");
+    expect(call.init?.signal).toBe(stop.signal);
+  });
+  test("全站和个人主页使用公开投影，管理端使用独立管理读取", async () => {
+    const source = fake(samples.listing);
+    await createPublicMediaClient({ fetch: source.fetcher }).list({
+      ownerId: "owner-1",
+      page: 2,
+      status: "completed",
+    });
+    expect(source.calls[0]?.path).toBe(
+      "/v1/media/public/entries?ownerId=owner-1&page=2&status=completed",
+    );
+    await createBrowserMediaClient("shared", {
+      fetch: source.fetcher,
+      readMode: "admin",
+    }).list({ scope: "private" });
+    expect(source.calls[1]?.path).toBe("/v1/admin/media/entries?scope=private");
+    expect(source.calls[1]?.init?.credentials).toBe("same-origin");
+  });
   test("匿名共享查询固定同源路径，并对所有筛选编码", async () => {
     const source = fake(samples.listing);
     const client = createBrowserMediaClient("shared", {
@@ -43,6 +79,7 @@ describe("浏览器影视传输边界", () => {
     const source = fake({ item: samples.entries[0] });
     const entry = samples.entries[0];
     const content = {
+      published: false,
       mediaType: "movie" as const,
       title: entry.title,
       originalTitle: "",

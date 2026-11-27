@@ -156,14 +156,36 @@
   overflow-wrap: anywhere;
 }
 
-.detail-copy-feedback {
-  min-block-size: 1.5rem;
-  margin-block-start: 0.5rem;
-  color: var(--muted-foreground);
-  font-size: 0.875rem;
+.detail-magnet {
+  position: relative;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--muted);
 }
 
-.detail-copy-feedback[role="alert"] {
+.detail-magnet-uri {
+  display: block;
+  padding: 0.875rem 1rem;
+  padding-inline-end: 3.5rem;
+  font-size: 0.8125rem;
+  line-height: 1.8;
+  white-space: pre-wrap;
+  word-break: break-all;
+  overflow-wrap: anywhere;
+  user-select: text;
+}
+
+.detail-magnet-copy {
+  position: absolute;
+  inset-block-start: 0.5rem;
+  inset-inline-end: 0.5rem;
+  min-inline-size: 2rem;
+  min-block-size: 2rem;
+}
+
+.detail-copy-feedback {
+  margin-block-start: 0.5rem;
+  font-size: 0.875rem;
   color: var(--destructive);
 }
 

@@ -30,9 +30,9 @@ import {
   InputGroupButton,
   InputGroupInput,
 } from "@assemble/ui/input-group";
+import { PageBreadcrumbs } from "@assemble/ui/page-breadcrumbs";
 
 import {
-  ArrowLeftIcon,
   CircleCheckIcon,
   CircleDashedIcon,
   ImageIcon,
@@ -44,7 +44,14 @@ import {
   TrashIcon,
   XIcon,
 } from "lucide-react";
-import { type ReactNode, useEffect, useId, useRef, useState } from "react";
+import {
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useId,
+  useRef,
+  useState,
+} from "react";
 import type { MediaClient } from "../client";
 import { type MediaAccessFailure, useMediaTask } from "../hooks/use-media-task";
 import { useMediaTranslation } from "../i18n";
@@ -56,9 +63,15 @@ import type {
   MediaList,
   MediaPersonIdentity,
   MediaQuery,
+  MediaType,
 } from "../model";
 import { MediaEditor } from "./editor";
-import { MediaEmpty, MediaError, MediaLoading } from "./feedback";
+import {
+  MediaEmpty,
+  MediaError,
+  MediaLoading,
+  MediaPagination,
+} from "./feedback";
 import { MediaGalleryEditor } from "./gallery";
 import { MediaImport } from "./import";
 import { MediaDetails } from "./media-details";
@@ -66,6 +79,13 @@ import { MediaImage } from "./media-image";
 import { MediaRecordedTime } from "./recorded-time";
 
 const EMPTY_ENTRIES: MediaEntry[] = [];
+
+export interface MediaPageLocation {
+  accountKey: string;
+  id: string;
+  title: string;
+  showList: () => void;
+}
 
 export interface MediaWorkspaceProps {
   presentation?: "default" | "management";
@@ -77,6 +97,7 @@ export interface MediaWorkspaceProps {
   onAccessFailure?: (failure: MediaAccessFailure) => void;
   onCopyMagnet?: (entry: MediaEntry) => Promise<void>;
   onSignIn?: () => void;
+  onLocationChange?: (location: MediaPageLocation | null) => void;
 }
 export function MediaWorkspace(props: MediaWorkspaceProps) {
   return (
@@ -92,16 +113,19 @@ function WorkspaceContent({
   client,
   imageLoader,
   canEdit,
+  accountKey,
   onAccessFailure,
   onCopyMagnet,
   onSignIn,
+  onLocationChange,
 }: MediaWorkspaceProps) {
   const { t } = useMediaTranslation();
   const prefix = useId();
   const searchInput = useRef<HTMLInputElement>(null);
+  const defaultPageSize = presentation === "management" ? 20 : 10;
   const [query, setQuery] = useState<MediaQuery>({
     page: 1,
-    pageSize: 10,
+    pageSize: defaultPageSize,
     sort: "updated",
   });
   const [q, setQ] = useState("");
@@ -119,6 +143,7 @@ function WorkspaceContent({
   const [actor, setActor] = useState<{
     identity: MediaPersonIdentity;
     name: string;
+    mediaType: MediaType;
   } | null>(null);
   const [credits, setCredits] = useState<MediaActorCredits | null>(null);
   const [revision, setRevision] = useState(0);
@@ -126,6 +151,24 @@ function WorkspaceContent({
   const detailTask = useMediaTask(onAccessFailure);
   const actorTask = useMediaTask(onAccessFailure);
   const mutation = useMediaTask(onAccessFailure);
+  const showList = useCallback(() => {
+    detailTask.cancel();
+    setDetailsOpen(false);
+    setSelected(null);
+  }, [detailTask.cancel]);
+  useEffect(() => {
+    if (presentation === "management" || !selected) {
+      onLocationChange?.(null);
+      return;
+    }
+    onLocationChange?.({
+      accountKey,
+      id: selected.id,
+      title: selected.title,
+      showList,
+    });
+    return () => onLocationChange?.(null);
+  }, [accountKey, presentation, selected, showList, onLocationChange]);
   useEffect(() => {
     detailTask.cancel();
     setSelected(null);
@@ -184,12 +227,22 @@ function WorkspaceContent({
       },
     );
   }
-  function showActor(identity: MediaPersonIdentity, name: string) {
-    setActor({ identity, name });
+  function showActor(
+    identity: MediaPersonIdentity,
+    name: string,
+    page = 1,
+    mediaType = selected?.mediaType ?? "movie",
+  ) {
+    setActor({ identity, name, mediaType });
     setCredits(null);
     void actorTask.run(
       (signal) =>
-        client.actor(identity, selected?.mediaType ?? "movie", signal),
+        client.actor(
+          identity,
+          mediaType,
+          { page, pageSize: presentation === "management" ? 20 : 24 },
+          signal,
+        ),
       setCredits,
     );
   }
@@ -307,6 +360,56 @@ function WorkspaceContent({
     ...(presentation === "management"
       ? [
           {
+            id: "owner",
+            label: t("publication.owner"),
+            header: (
+              <DataTableColumnFilter
+                label={t("publication.owner")}
+                value={query.scope ?? "all"}
+                options={[
+                  { value: "all", label: t("publication.allLibraries") },
+                  { value: "shared", label: t("scope.shared") },
+                  { value: "private", label: t("publication.userLibraries") },
+                ]}
+                onValueChange={(value) => {
+                  if (
+                    value === "all" ||
+                    value === "shared" ||
+                    value === "private"
+                  )
+                    setQuery((previous) => ({
+                      ...previous,
+                      page: 1,
+                      scope: value === "all" ? undefined : value,
+                    }));
+                }}
+              />
+            ),
+            cell: (entry: MediaEntry) => (
+              <div className="flex flex-col gap-1">
+                <span>{entry.owner?.displayName ?? t("scope.shared")}</span>
+                {entry.owner && (
+                  <span className="break-all text-xs text-muted-foreground">
+                    {entry.owner.id}
+                  </span>
+                )}
+              </div>
+            ),
+          },
+          {
+            id: "publication",
+            label: t("publication.visibility"),
+            cell: (entry: MediaEntry) => (
+              <Badge variant="outline">
+                {t(
+                  entry.scope === "shared" || entry.published
+                    ? "publication.public"
+                    : "publication.private",
+                )}
+              </Badge>
+            ),
+          },
+          {
             id: "updatedAt",
             label: t("common.updatedAt"),
             cell: (entry: MediaEntry) => (
@@ -323,15 +426,20 @@ function WorkspaceContent({
         <Card>
           <CardHeader>
             <div className="flex flex-wrap justify-between gap-2">
-              <Button
-                variant="ghost"
-                size="default"
-                onClick={() => setSelected(null)}
-              >
-                <ArrowLeftIcon data-icon="inline-start" />
-                {t("common.back")}
-              </Button>
-              <div className="flex max-w-full flex-wrap gap-2">
+              {!onLocationChange && (
+                <PageBreadcrumbs
+                  ancestors={[
+                    {
+                      id: "library",
+                      label: t(`scope.${client.scope}`),
+                      href: "#media",
+                      onNavigate: showList,
+                    },
+                  ]}
+                  current={selected.title}
+                />
+              )}
+              <div className="ml-auto flex max-w-full flex-wrap gap-2">
                 <Button
                   variant="outline"
                   size="default"
@@ -401,7 +509,7 @@ function WorkspaceContent({
           getRowLabel={(entry) => entry.title}
           pagination={{
             page: list?.page ?? query.page ?? 1,
-            pageSize: list?.pageSize ?? query.pageSize ?? 10,
+            pageSize: list?.pageSize ?? query.pageSize ?? defaultPageSize,
             total: list?.total ?? 0,
             pending: listTask.pending || detailTask.pending,
             onChange: (page, pageSize) =>
@@ -440,7 +548,11 @@ function WorkspaceContent({
                           id={`${prefix}-q`}
                           type="search"
                           name="q"
-                          placeholder={t("list.placeholder")}
+                          placeholder={t(
+                            presentation === "management"
+                              ? "publication.search"
+                              : "list.placeholder",
+                          )}
                           value={q}
                           maxLength={300}
                           autoCorrect="off"
@@ -461,7 +573,8 @@ function WorkspaceContent({
                                 setSelected(null);
                                 setQuery((previous) => ({
                                   page: 1,
-                                  pageSize: previous.pageSize ?? 10,
+                                  pageSize:
+                                    previous.pageSize ?? defaultPageSize,
                                   sort: "updated",
                                 }));
                                 searchInput.current?.focus();
@@ -656,6 +769,7 @@ function WorkspaceContent({
       {editor && allowed && (
         <MediaEditor
           client={client}
+          viewerAccountId={accountKey}
           entry={editor === "new" ? undefined : editor}
           onClose={() => setEditor(null)}
           onSaved={saved}
@@ -767,6 +881,17 @@ function WorkspaceContent({
                 </li>
               ))}
             </ul>
+          )}
+          {credits && actor && (
+            <MediaPagination
+              page={credits.page}
+              pageSize={credits.pageSize}
+              total={credits.total}
+              pending={actorTask.pending}
+              onPage={(page) =>
+                showActor(actor.identity, actor.name, page, actor.mediaType)
+              }
+            />
           )}
         </DialogContent>
       </Dialog>

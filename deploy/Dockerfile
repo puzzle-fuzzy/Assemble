@@ -12,22 +12,25 @@ COPY apps/desktop/package.json apps/desktop/package.json
 COPY apps/admin/package.json apps/admin/package.json
 COPY apps/browser-extension/package.json apps/browser-extension/package.json
 COPY apps/media-web/package.json apps/media-web/package.json
+COPY apps/releases-web/package.json apps/releases-web/package.json
 COPY packages/media/package.json packages/media/package.json
 COPY packages/ui/package.json packages/ui/package.json
 COPY packages/display/package.json packages/display/package.json
 RUN bun install --frozen-lockfile
 COPY apps/admin/ apps/admin/
 COPY apps/media-web/ apps/media-web/
+COPY apps/releases-web/ apps/releases-web/
 COPY packages/media/ packages/media/
 COPY packages/ui/ packages/ui/
 COPY packages/display/ packages/display/
-RUN bun run admin:build && bun run media:build
+RUN bun run admin:build && bun run media:build && bun run releases:build
 
 # ---- 构建：官方 Rust 镜像自带编译 C 代码要用的工具链 ----
 # 版本与仓库根目录的 rust-toolchain.toml 一致（官方镜像不用 rustup，那个文件在这里不生效）。升级时两处一起改。
 FROM rust:1.100.0-bookworm AS build
 WORKDIR /src
 COPY Cargo.toml Cargo.lock ./
+COPY deploy/updater.pubkey deploy/updater.pubkey
 COPY crates/ crates/
 COPY apps/server/ apps/server/
 # 根目录的清单把桌面端和给助手用的入口（assemble-mcp）也列为工作区成员，cargo 解析工作区时
@@ -55,6 +58,7 @@ RUN apt-get update \
 COPY --from=build /out/assemble-server /usr/local/bin/assemble-server
 COPY --from=admin /src/apps/admin/dist/ /usr/share/assemble/admin/
 COPY --from=admin /src/apps/media-web/dist/ /usr/share/assemble/movies/
+COPY --from=admin /src/apps/releases-web/dist/ /usr/share/assemble/download/
 # 从这里起以专用账户运行；少了这一行，容器会以 root 跑。
 USER assemble:assemble
 
@@ -62,7 +66,8 @@ USER assemble:assemble
 ENV ASSEMBLE_DATA_DIR=/var/lib/assemble \
     ASSEMBLE_ADDR=0.0.0.0:8787 \
     ASSEMBLE_ADMIN_ASSETS_DIR=/usr/share/assemble/admin \
-    ASSEMBLE_MEDIA_WEB_ASSETS_DIR=/usr/share/assemble/movies
+    ASSEMBLE_MEDIA_WEB_ASSETS_DIR=/usr/share/assemble/movies \
+    ASSEMBLE_RELEASES_WEB_ASSETS_DIR=/usr/share/assemble/download
 EXPOSE 8787
 VOLUME /var/lib/assemble
 

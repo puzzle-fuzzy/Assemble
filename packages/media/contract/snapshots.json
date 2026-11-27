@@ -28,7 +28,9 @@
       "magnetUri": null,
       "magnetAvailable": true,
       "createdAt": "2026-11-25T01:00:00.000Z",
-      "updatedAt": "2026-11-25T01:00:00.000Z"
+      "updatedAt": "2026-11-25T01:00:00.000Z",
+      "published": true,
+      "owner": null
     },
     {
       "id": "entry-private",
@@ -58,7 +60,13 @@
       "magnetUri": "magnet:?xt=urn:btih:0123456789012345678901234567890123456789",
       "magnetAvailable": true,
       "createdAt": "2026-11-25T01:00:00.000Z",
-      "updatedAt": "2026-11-25T01:00:00.000Z"
+      "updatedAt": "2026-11-25T01:00:00.000Z",
+      "published": false,
+      "owner": {
+        "id": "sample-owner",
+        "displayName": "预览账户",
+        "avatarUrl": null
+      }
     },
     {
       "id": "entry-completed",
@@ -88,7 +96,9 @@
       "magnetUri": null,
       "magnetAvailable": true,
       "createdAt": "2026-11-25T01:00:00.000Z",
-      "updatedAt": "2026-11-25T01:00:00.000Z"
+      "updatedAt": "2026-11-25T01:00:00.000Z",
+      "published": true,
+      "owner": null
     }
   ],
   "listing": {
@@ -121,7 +131,9 @@
         "magnetUri": null,
         "magnetAvailable": true,
         "createdAt": "2026-11-25T01:00:00.000Z",
-        "updatedAt": "2026-11-25T01:00:00.000Z"
+        "updatedAt": "2026-11-25T01:00:00.000Z",
+        "published": true,
+        "owner": null
       }
     ],
     "total": 1,
@@ -204,7 +216,9 @@
         "magnetUri": null,
         "magnetAvailable": true,
         "createdAt": "2026-11-25T01:00:00.000Z",
-        "updatedAt": "2026-11-25T01:00:00.000Z"
+        "updatedAt": "2026-11-25T01:00:00.000Z",
+        "published": true,
+        "owner": null
       }
     ],
     "createdAt": "2026-11-25T01:00:00.000Z",
@@ -230,5 +244,16 @@
       }
     ],
     "byMonth": []
+  },
+  "actorCredits": {
+    "actor": {
+      "identity": { "provider": "tmdb", "externalId": "7" },
+      "name": "演员",
+      "photo": null
+    },
+    "items": [],
+    "total": 0,
+    "page": 1,
+    "pageSize": 24
   }
 }

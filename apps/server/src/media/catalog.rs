@@ -6,6 +6,7 @@ use assemble_protocol::media::{
     MediaActorCredits, MediaCandidate, MediaIdentity, MediaPersonIdentity, MediaType,
 };
 use axum::http::{HeaderMap, StatusCode};
+use futures_util::{StreamExt, stream};
 use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::sync::Arc;
 use tokio::sync::{Mutex, OwnedSemaphorePermit, Semaphore};
@@ -23,12 +24,23 @@ enum PureCatalog {
     Actor(MediaActorCredits),
 }
 impl PureCatalog {
-    fn image_id(&self) -> Option<&str> {
-        match self {
-            Self::Candidate(v) => v.poster.as_ref(),
-            Self::Actor(v) => v.actor.photo.as_ref(),
-        }
-        .map(|i| i.asset_id.as_str())
+    fn image_ids(&self) -> Vec<&str> {
+        let images = match self {
+            Self::Candidate(v) => v.poster.iter().collect::<Vec<_>>(),
+            Self::Actor(v) => v
+                .actor
+                .photo
+                .iter()
+                .chain(v.items.iter().filter_map(|item| item.poster.as_ref()))
+                .collect(),
+        };
+        let mut ids: Vec<_> = images
+            .into_iter()
+            .map(|image| image.asset_id.as_str())
+            .collect();
+        ids.sort_unstable();
+        ids.dedup();
+        ids
     }
     fn size(&self) -> Result<usize, ApiError> {
         match self {
@@ -95,7 +107,7 @@ impl Catalog {
             .filter(|(expires, _, _)| *expires > super::now())
             .map(|(_, _, value)| value.clone());
         if let Some(cached) = cached {
-            if let Some(asset) = cached.image_id() {
+            for asset in cached.image_ids() {
                 let valid:bool=sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM media_catalog_assets WHERE asset_id = ? AND expires_at > ?)").bind(asset).bind(super::now()).fetch_one(&state.pool).await?;
                 if !valid {
                     return Ok(None);
@@ -159,10 +171,15 @@ impl Catalog {
         headers: &HeaderMap,
         identity: &MediaPersonIdentity,
         kind: MediaType,
+        page: u32,
+        page_size: u32,
     ) -> Result<MediaActorCredits, ApiError> {
         super::providers::validate_external_id(&identity.external_id)?;
+        if page == 0 || page > 100_000 || !(1..=48).contains(&page_size) {
+            return Err(ApiError::invalid("invalid actor pagination"));
+        }
         let key = format!(
-            "actor:{}:{}",
+            "actor:{}:{}:{page}:{page_size}",
             super::encode(identity)?,
             super::spelling(&kind)
         );
@@ -172,14 +189,62 @@ impl Catalog {
         let source = Source::read(headers, state.config.client_ip_header.as_ref());
         let _permit = self.begin(&source).await?;
         let (mut actor, photo, items) = state.media.providers.actor(identity, kind).await?;
+        let total =
+            u64::try_from(items.len()).map_err(|_| ApiError::internal("actor size overflow"))?;
+        let last_page = u32::try_from(total.div_ceil(u64::from(page_size)).max(1))
+            .map_err(|_| ApiError::internal("actor page overflow"))?;
+        let page = page.min(last_page);
+        let start = usize::try_from((page - 1) * page_size)
+            .map_err(|_| ApiError::invalid("invalid actor pagination"))?;
+        let mut cacheable = true;
         if let Some(photo) = photo {
-            let bytes = state.media.providers.image(&photo).await?;
-            actor.photo = Some(super::assets::store(&state.pool, "catalog", bytes, true).await?);
+            match store_source_image(state, &photo).await {
+                Ok(image) => actor.photo = Some(image),
+                Err(_) => cacheable = false,
+            }
         }
-        let item = MediaActorCredits { actor, items };
-        self.remember(key, PureCatalog::Actor(item.clone())).await?;
+        // 只准备当前页，限制网络和解码并发；一张坏图不能让整页作品消失。
+        let prepared: Vec<_> = stream::iter(items.into_iter().skip(start).take(page_size as usize))
+            .map(|mut credit| async move {
+                let mut complete = true;
+                if let Some(source) = credit.poster {
+                    match store_source_image(state, &source).await {
+                        Ok(image) => credit.candidate.poster = Some(image),
+                        Err(_) => complete = false,
+                    }
+                }
+                (credit.candidate, complete)
+            })
+            .buffered(4)
+            .collect()
+            .await;
+        let items = prepared
+            .into_iter()
+            .map(|(item, complete)| {
+                cacheable &= complete;
+                item
+            })
+            .collect();
+        let item = MediaActorCredits {
+            actor,
+            items,
+            total,
+            page,
+            page_size,
+        };
+        // 图片失败不记成十五分钟的“无海报”，重试仍有机会恢复。
+        if cacheable {
+            self.remember(key, PureCatalog::Actor(item.clone())).await?;
+        }
         Ok(item)
     }
+}
+async fn store_source_image(
+    state: &Shared,
+    source: &super::providers::SourceImage,
+) -> Result<assemble_protocol::media::MediaImage, ApiError> {
+    let bytes = state.media.providers.image(source).await?;
+    super::assets::store(&state.pool, "catalog", bytes, true).await
 }
 fn limited() -> ApiError {
     ApiError::new(

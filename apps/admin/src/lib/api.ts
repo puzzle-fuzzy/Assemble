@@ -157,6 +157,10 @@ export async function request<T>(
   return response.json() as Promise<T>;
 }
 
+export function adminDriveDownloadPath(id: string) {
+  return `/v1/admin/drive/files/${encodeURIComponent(id)}/content`;
+}
+
 export function listPath(
   name: "users" | "devices" | "logins" | "drive/files",
   query: string,

@@ -239,7 +239,13 @@ pub async fn sign_out(state: &AppState) -> Result<(), SessionError> {
     {
         return Err(error);
     }
-    state.set_notice(None);
+    // 只有用户明确退出且撤销已获确认才删历史；普通令牌失效仍保留原账户的记录。
+    if state.clear_transfer_history().is_err() {
+        tracing::warn!("signed out, but local transfer history could not be cleared");
+        state.set_notice(Some(Notice::error("已退出登录，但无法清除本机传输记录。")));
+    } else {
+        state.set_notice(None);
+    }
     state.set_session(SessionView::SignedOut);
     Ok(())
 }

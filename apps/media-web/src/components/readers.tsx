@@ -12,7 +12,7 @@ import {
   CardTitle,
 } from "@assemble/ui/card";
 import { ToggleGroup, ToggleGroupItem } from "@assemble/ui/toggle-group";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef } from "react";
 import { useSiteTranslation } from "../lib/i18n";
 import {
   actorPath,
@@ -20,6 +20,7 @@ import {
   navigate,
   readerBackPath,
   type SiteRoute,
+  userLibraryPath,
 } from "../lib/navigation";
 import { useResource } from "../lib/use-resource";
 import {
@@ -61,6 +62,11 @@ export function EntryReader({
         <RequestError status={resource.status} retry={retry} />
       ) : (
         <>
+          {resource.value.owner && (
+            <SiteLink href={userLibraryPath(resource.value.owner.id)}>
+              {resource.value.owner.displayName}
+            </SiteLink>
+          )}
           <DetailViewer
             key={`${client.scope}:${resource.value.id}`}
             client={client}
@@ -165,11 +171,18 @@ export function ActorReader({
   imageLoader,
 }: ReaderProps & { route: Extract<SiteRoute, { kind: "actor" }> }) {
   const { t } = useSiteTranslation();
-  const { resource, retry } = useResource(JSON.stringify(route), (signal) =>
-    client.actor(route.identity, route.mediaType, signal),
-  );
-  const [page, setPage] = useState(1);
+  const page = route.page;
   const pageSize = 24;
+  const { resource, retry } = useResource(JSON.stringify(route), (signal) =>
+    client.actor(route.identity, route.mediaType, { page, pageSize }, signal),
+  );
+  useEffect(() => {
+    if (resource.phase === "ready" && resource.value.page !== page)
+      navigate(
+        actorPath(route.identity, route.mediaType, resource.value.page),
+        true,
+      );
+  }, [resource, route.identity, route.mediaType, page]);
   return (
     <section className="flex flex-col gap-6">
       <BackLink />
@@ -199,22 +212,22 @@ export function ActorReader({
             <EmptyContentView title={t("noCredits")} />
           ) : (
             <div className="poster-grid">
-              {resource.value.items
-                .slice((page - 1) * pageSize, page * pageSize)
-                .map((candidate) => (
-                  <PosterCard
-                    key={`${candidate.identity.provider}:${candidate.identity.mediaType}:${candidate.identity.externalId}`}
-                    item={candidate}
-                    imageLoader={imageLoader}
-                  />
-                ))}
+              {resource.value.items.map((candidate) => (
+                <PosterCard
+                  key={`${candidate.identity.provider}:${candidate.identity.mediaType}:${candidate.identity.externalId}`}
+                  item={candidate}
+                  imageLoader={imageLoader}
+                />
+              ))}
             </div>
           )}
           <Pagination
-            page={page}
-            total={resource.value.items.length}
-            pageSize={pageSize}
-            onPage={setPage}
+            page={resource.value.page}
+            total={resource.value.total}
+            pageSize={resource.value.pageSize}
+            onPage={(next) =>
+              navigate(actorPath(route.identity, route.mediaType, next))
+            }
           />
           <Title
             title={`${resource.value.actor.name} · ${t("actors")} · ${t("brand")}`}

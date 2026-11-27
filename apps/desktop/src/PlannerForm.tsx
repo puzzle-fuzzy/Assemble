@@ -4,11 +4,24 @@
 // 这边先把最常见的几种填错说清楚，省得等一个来回。
 // 时间在输入框里是本地时间，交出去之前换成 UTC。
 
-import { FieldGroup, FieldLabel, Field as FormField } from "@assemble/ui/field";
+import { DatePicker } from "@assemble/ui/date-picker";
+import {
+  FieldError,
+  FieldGroup,
+  FieldLabel,
+  Field as FormField,
+} from "@assemble/ui/field";
 import { type ReactNode, useId, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Select } from "@/components/ui/select";
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { uiText, useDesktopTranslation } from "@/lib/i18n";
 import {
@@ -144,12 +157,17 @@ export function PlannerForm({
               form.kind === "schedule" ? uiText("startTime") : uiText("dueTime")
             }
             control={(id) => (
-              <Input
+              <DatePicker
                 id={id}
-                type="datetime-local"
+                label={
+                  form.kind === "schedule"
+                    ? uiText("startTime")
+                    : uiText("dueTime")
+                }
+                withTime
                 value={at}
                 disabled={pending}
-                onChange={(event) => setAt(event.target.value)}
+                onChange={setAt}
               />
             )}
           />
@@ -157,12 +175,13 @@ export function PlannerForm({
             <Field
               label={uiText("endTime")}
               control={(id) => (
-                <Input
+                <DatePicker
                   id={id}
-                  type="datetime-local"
+                  label={uiText("endTime")}
+                  withTime
                   value={end}
                   disabled={pending}
-                  onChange={(event) => setEnd(event.target.value)}
+                  onChange={setEnd}
                 />
               )}
             />
@@ -175,18 +194,22 @@ export function PlannerForm({
                 label={uiText("repeat")}
                 control={(id) => (
                   <Select
-                    id={id}
                     value={repeat}
                     disabled={pending}
-                    onChange={(event) =>
-                      setRepeat(event.target.value as Repeat)
-                    }
+                    onValueChange={(value) => setRepeat(value as Repeat)}
                   >
-                    {REPEATS.map((option) => (
-                      <option key={option} value={option}>
-                        {repeatLabel(option)}
-                      </option>
-                    ))}
+                    <SelectTrigger id={id} className="w-full">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectGroup>
+                        {REPEATS.map((option) => (
+                          <SelectItem key={option} value={option}>
+                            {repeatLabel(option)}
+                          </SelectItem>
+                        ))}
+                      </SelectGroup>
+                    </SelectContent>
                   </Select>
                 )}
               />
@@ -194,19 +217,29 @@ export function PlannerForm({
                 label={uiText("notification")}
                 control={(id) => (
                   <Select
-                    id={id}
-                    value={lead}
+                    value={lead || "at-time"}
                     disabled={pending}
-                    onChange={(event) => setLead(event.target.value)}
+                    onValueChange={(value) =>
+                      setLead(value === "at-time" ? "" : value)
+                    }
                   >
-                    {leads.map(([minutes, text]) => (
-                      <option
-                        key={text}
-                        value={minutes === null ? "" : String(minutes)}
-                      >
-                        {text}
-                      </option>
-                    ))}
+                    <SelectTrigger id={id} className="w-full">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectGroup>
+                        {leads.map(([minutes, text]) => (
+                          <SelectItem
+                            key={text}
+                            value={
+                              minutes === null ? "at-time" : String(minutes)
+                            }
+                          >
+                            {text}
+                          </SelectItem>
+                        ))}
+                      </SelectGroup>
+                    </SelectContent>
                   </Select>
                 )}
               />
@@ -238,11 +271,7 @@ export function PlannerForm({
           )}
         />
       </FieldGroup>
-      {problem ? (
-        <p role="alert" className="text-xs text-destructive">
-          {problem}
-        </p>
-      ) : null}
+      {problem ? <FieldError>{problem}</FieldError> : null}
       <div className="flex flex-wrap gap-2">
         <Button type="submit" disabled={pending}>
           {uiText("save")}
