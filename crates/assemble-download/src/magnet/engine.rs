@@ -124,9 +124,7 @@ pub(super) async fn connection_options(
     if cancel.is_cancelled() {
         return Err(DownloadError::Cancelled);
     }
-    peers.sort_unstable();
-    peers.dedup();
-    peers.truncate(128);
+    let peers = trackers::bounded_peers(peers);
     udp.sort();
     udp.dedup();
     Ok((udp, peers))

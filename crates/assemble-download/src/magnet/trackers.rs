@@ -258,10 +258,32 @@ pub(super) async fn bootstrap(
         .buffer_unordered(8)
         .collect::<Vec<_>>()
         .await;
-    let mut peers: Vec<_> = groups.into_iter().flatten().collect();
+    bounded_peers(groups.into_iter().flatten().collect())
+}
+
+/// 地址排序把 IPv4 放在前面；截断前交替两族，避免热门资源挤掉全部 IPv6 节点。
+pub(super) fn bounded_peers(mut peers: Vec<SocketAddr>) -> Vec<SocketAddr> {
     peers.sort_unstable();
     peers.dedup();
-    peers.truncate(128);
+    let (v4, v6): (Vec<_>, Vec<_>) = peers.into_iter().partition(SocketAddr::is_ipv4);
+    let mut v4 = v4.into_iter();
+    let mut v6 = v6.into_iter();
+    let mut peers = Vec::with_capacity(128);
+    while peers.len() < 128 {
+        match (v4.next(), v6.next()) {
+            (None, None) => break,
+            (a, b) => {
+                if let Some(peer) = a {
+                    peers.push(peer);
+                }
+                if peers.len() < 128
+                    && let Some(peer) = b
+                {
+                    peers.push(peer);
+                }
+            }
+        }
+    }
     peers
 }
 
@@ -318,8 +340,7 @@ fn decode_peers(bytes: &[u8], local_test: bool) -> Result<Vec<SocketAddr>> {
     peers.retain(|peer| {
         peer.port() != 0 && (public_ip(peer.ip()) || (local_test && peer.ip().is_loopback()))
     });
-    peers.truncate(128);
-    Ok(peers)
+    Ok(bounded_peers(peers))
 }
 
 #[cfg(test)]
@@ -357,6 +378,24 @@ mod tests {
             decode_peers(&bytes, false).unwrap(),
             vec!["[2606:4700:4700::1111]:6881".parse().unwrap()]
         );
+    }
+    #[test]
+    fn peer_budget_retains_both_families_and_fills_unused_slots() {
+        let v4: Vec<SocketAddr> = (1000..1200)
+            .map(|port| SocketAddr::new("8.8.8.8".parse().unwrap(), port))
+            .collect();
+        let v6: Vec<SocketAddr> = (1000..1200)
+            .map(|port| SocketAddr::new("2606:4700:4700::1111".parse().unwrap(), port))
+            .collect();
+        let both = bounded_peers(v4.iter().chain(&v6).copied().collect());
+        assert_eq!(both.len(), 128);
+        assert_eq!(both.iter().filter(|p| p.is_ipv4()).count(), 64);
+        assert_eq!(both.iter().filter(|p| p.is_ipv6()).count(), 64);
+        let few = bounded_peers(v4.iter().chain(v6.iter().take(2)).copied().collect());
+        assert_eq!(few.len(), 128);
+        assert_eq!(few.iter().filter(|p| p.is_ipv6()).count(), 2);
+        assert_eq!(bounded_peers(v6).len(), 128);
+        assert_eq!(bounded_peers(vec![v4[0], v4[0]]), vec![v4[0]]);
     }
     #[tokio::test]
     async fn http_discovery_pins_connection_preserves_host_and_stops_on_cancel() {

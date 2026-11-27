@@ -1545,6 +1545,8 @@ async fn a_drive_file_fetched_here_lands_in_the_inbox_like_any_other_delivery() 
             && view_of(&f, &second).saved_as.as_deref() == Some("合同 (2).pdf")
     })
     .await;
+    // 发布完成与恢复检查点清理由不同的队列步骤确认；先等清理，避免和后台删除竞跑。
+    until_inbox_holds(&f, &["合同 (2).pdf", "合同.pdf"]).await;
     assert_eq!(entries(&f.inbox()), ["合同 (2).pdf", "合同.pdf"]);
     assert_eq!(
         f.state()

@@ -543,7 +543,7 @@ impl MagnetManager {
         .await?;
         let (trackers, initial) = engine::connection_options(&source, &options, cancel).await?;
         peers.extend(initial);
-        peers.truncate(128);
+        let peers = trackers::bounded_peers(peers);
         let engine = engine::session(data.clone(), cancel.child_token(), &options).await?;
         let outcome=async {
             self.update(id,DownloadPhase::Verifying,record.view.received_bytes,0);

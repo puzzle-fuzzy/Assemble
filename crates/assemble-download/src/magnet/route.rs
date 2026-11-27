@@ -36,8 +36,8 @@ async fn physical_default() -> Result<String> {
     )
 }
 #[cfg(not(target_os = "macos"))]
-async fn physical_default() -> Result<String> {
-    Err(DownloadError::NetworkRouteUnavailable)
+fn physical_default() -> std::future::Ready<Result<String>> {
+    std::future::ready(Err(DownloadError::NetworkRouteUnavailable))
 }
 #[cfg(any(target_os = "macos", test))]
 fn interface(output: &str) -> Result<String> {
