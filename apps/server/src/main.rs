@@ -30,6 +30,12 @@ enum Command {
         #[arg(long)]
         apply: bool,
     },
+    /// 发布桌面端的更新：核对发布目录里的清单、更新包和签名；只有显式 apply 才发布。
+    PublishUpdate {
+        directory: std::path::PathBuf,
+        #[arg(long)]
+        apply: bool,
+    },
     /// 查看持久化的 DHT 状态与聚合计数，不返回节点、Peer 或凭据。
     DhtStatus,
     /// 请求采集、排空或停止；复用网页的配置约束与事务审计。
@@ -289,6 +295,38 @@ fn main() -> ExitCode {
                 },
                 Err(code) => {
                     eprintln!("MEDIA_ARCHIVE_IMPORT_FAILED: {code}");
+                    ExitCode::FAILURE
+                }
+            }
+        }
+        Command::PublishUpdate { directory, apply } => {
+            let result = runtime.block_on(async {
+                let (config, pool) = assemble_server::load()
+                    .await
+                    .map_err(|error| ("UPDATE_TARGET_UNAVAILABLE".to_owned(), error.to_string()))?;
+                let outcome = assemble_server::updates::publish(
+                    &config.data_dir,
+                    &config.public_origin,
+                    &directory,
+                    assemble_server::updates::PUBLIC_KEY,
+                    apply,
+                )
+                .await
+                .map_err(|error| (error.code().to_owned(), error.to_string()));
+                pool.close().await;
+                outcome
+            });
+            match result {
+                Ok(report) => match serde_json::to_string(&report) {
+                    Ok(report) => {
+                        println!("{report}");
+                        ExitCode::SUCCESS
+                    }
+                    Err(_) => ExitCode::FAILURE,
+                },
+                Err((code, reason)) => {
+                    tracing::error!(%code, %reason, "the desktop update was not published");
+                    eprintln!("UPDATE_PUBLISH_FAILED: {code}: {reason}");
                     ExitCode::FAILURE
                 }
             }

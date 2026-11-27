@@ -35,11 +35,14 @@ fs4.workspace = true
 getrandom.workspace = true
 image.workspace = true
 email_address = "0.2.10"
+# 桌面端更新包的签名核对：和 Tauri 更新插件用的是同一个实现。
+minisign-verify.workspace = true
 lettre = { version = "0.11.24", default-features = false, features = ["builder", "smtp-transport", "tokio1-rustls-tls"] }
 # 手机扫码登录的二维码。只有编码算法，没有别的依赖；画成 SVG 由服务端自己做，
 # 这样二维码是页面里的一段内联标记，不用放宽页面的内容安全策略。
 qrcodegen = "1.8.0"
 reqwest = { workspace = true, features = ["form"] }
+semver.workspace = true
 rpassword.workspace = true
 serde.workspace = true
 serde_json.workspace = true
@@ -57,7 +60,9 @@ tracing.workspace = true
 tracing-subscriber.workspace = true
 url.workspace = true
 
+# 测试里要用另一把钥匙给更新包签名，看服务端认不认。
 [dev-dependencies]
+minisign = "0.10.0"
 assemble-client.workspace = true
 # 只有示例 `fake_device` 用到：替身收文件时走与桌面端相同的落盘规则。
 assemble-device.workspace = true

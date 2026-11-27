@@ -48,6 +48,8 @@ pub struct AppState {
     pub dht: Arc<crate::dht::runtime::Runtime>,
     /// 手机扫码配对的现场：还没被认领的票据和限速记录，都只在内存里。
     pub pairings: crate::pairing::Pairings,
+    /// 桌面端更新那两个读接口的限速记录。更新包本身在数据目录里，不在这里。
+    pub updates: crate::updates::Updates,
 }
 
 impl AppState {
@@ -57,6 +59,7 @@ impl AppState {
             storage_monitor: crate::storage::Monitor::default(),
             dht: Arc::new(crate::dht::runtime::Runtime::default()),
             pairings: crate::pairing::Pairings::default(),
+            updates: crate::updates::Updates::default(),
             mailer: Arc::new(crate::mail::SmtpMailer(config.smtp.clone())),
             github_flows: crate::github::Flows::default(),
             github_provider: Arc::new(crate::github::GithubProvider(config.github.clone())),
@@ -107,6 +110,8 @@ pub fn router(state: Shared) -> Router {
         .merge(crate::admin::routes())
         .merge(crate::media::routes())
         .merge(crate::memos::routes())
+        // 桌面端自动更新：清单和更新包，谁都能读
+        .merge(crate::updates::routes())
         .merge(crate::admin_assets::routes(&state.config.admin_assets_dir))
         .merge(crate::media_web_assets::routes(
             &state.config.media_web_assets_dir,

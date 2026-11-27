@@ -173,6 +173,50 @@ SCRIPT
 
 备份和换版本可以连着做，只停一次：停服务、打包、换标记、`docker compose up -d`（不必在打包之后先 `start` 再停第二回）。2026-11-25 的第三次升级就是这样做的，停机 1 秒。
 
+### 发布桌面端的更新
+
+桌面应用的更新包由这台服务端托管。`GET /updates/latest.json` 是清单，`GET /updates/<平台>/<版本>/<文件>` 是更新包；两个都是谁都能读、按来源限速的接口（清单每个来源每小时 120 次，更新包 30 次）。为什么这样做见[决策 0015](../decisions/0015-desktop-auto-update.md)。
+
+发布用子命令，不开写的接口。把一个发布目录放进数据目录（属主得是 10001），先只校验，再发布：
+
+```sh
+docker compose exec -T assemble assemble-server publish-update /var/lib/assemble/<发布目录>            # 只校验
+docker compose exec -T assemble assemble-server publish-update /var/lib/assemble/<发布目录> --apply    # 发布
+```
+
+发布目录里有一份 `manifest.json`，和清单里列出的每个更新包连同它的 `.sig` 文件，不能有别的文件：
+
+```json
+{
+  "version": "0.1.431",
+  "notes": "修了什么",
+  "pubDate": "2026-11-27T01:30:00Z",
+  "platforms": [
+    { "platform": "windows-x86_64", "file": "Assemble_0.1.431_x64-setup.exe" },
+    {
+      "platform": "darwin-aarch64",
+      "file": "Assemble_0.1.431_aarch64.app.tar.gz"
+    }
+  ]
+}
+```
+
+核对不过时退出码不是 0，标准错误上一行 `UPDATE_PUBLISH_FAILED: <错误码>: <原因>`。常见的几种：
+
+| 错误码                           | 意思                                                                                     |
+| -------------------------------- | ---------------------------------------------------------------------------------------- |
+| `UPDATE_SIGNATURE_INVALID`       | 包不是那把钥匙签的，或者签完之后被改过                                                   |
+| `UPDATE_SIGNED_VERSION_MISMATCH` | 签名不是为清单上的版本签的：签名时要带上版本（`tauri signer sign --app-version <版本>`） |
+| `UPDATE_VERSION_NOT_NEWER`       | 不比已经发布的新                                                                         |
+| `UPDATE_PLATFORM_MISSING`        | 已经发布过的平台，这一版里没有它                                                         |
+| `UPDATE_UNEXPECTED_FILE`         | 目录里有多余的文件                                                                       |
+
+核对通过时标准输出是一份 JSON 报告，`applied` 说明这一回有没有真的发布。先校验再发布，中间不要换目录里的东西。
+
+发布之后：更新包在数据目录的 `updates/<平台>/<版本>/` 下，清单是 `updates/latest.json`；每个平台只留最新的一版，旧版本的目录被删掉。它们不在 `blobs/` 里，不计入云盘预算，备份时随数据目录一起打包；恢复演练目前只核对 `blobs/`，这一部分还没有演练过。
+
+公钥是仓库里的 `deploy/updater.pubkey`，编进服务端和桌面应用。私钥只在发布用的那台 Mac 上（`~/.assemble/updater.key`），不进仓库；丢了就再也发不出更新，装出去的应用只能重装。
+
 ### 备份与恢复
 
 SQLite 开着写的时候直接拷文件可能不一致，所以备份时停几十秒：

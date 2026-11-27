@@ -41,6 +41,7 @@ pub mod source;
 pub mod storage;
 pub mod system_notifications;
 pub mod templates;
+pub mod updates;
 pub mod web;
 mod web_ui;
 

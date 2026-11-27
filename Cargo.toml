@@ -49,6 +49,8 @@ hmac = "0.13.0"
 mime_guess = "2.0.5"
 m3u8-rs = "6.0.1"
 md-5 = "0.11.0"
+# 桌面端更新包的签名核对（服务端发布时用；桌面应用自己那一遍在更新插件里）。
+minisign-verify = "0.3.0"
 # system-proxy：公司网络里常有系统级代理设置，桌面端应当遵从它。
 rpassword = "7.5.5"
 # 问一块磁盘还剩多少地方（statvfs / GetDiskFreeSpaceEx）。下载开始之前要看一眼余量，
@@ -71,6 +73,7 @@ reqwest = { version = "0.13.5", default-features = false, features = [
   "stream",
   "system-proxy",
 ] }
+semver = "1.0"
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.154"
 sha2 = "0.11.1"

@@ -120,6 +120,7 @@
 | 日程       | `POST /v1/schedules`、`PUT /v1/schedules/{id}`、`DELETE /v1/schedules/{id}`、`POST /v1/schedules/{id}/complete`、`…/cancel`、`…/reopen`        | 新建可以带 `Idempotency-Key`，同一个键重试拿回原来那一条。修改、删除、改状态都带版本号，对不上返回 409 `VERSION_CONFLICT`                                                                                  |
 | 提醒       | `POST /v1/reminders`、`PUT /v1/reminders/{id}`、`DELETE /v1/reminders/{id}`、`POST /v1/reminders/{id}/dismiss`、`…/cancel`                     | 幂等键与版本号同日程。已经到点的不能再改，返回 409 `INVALID_STATE`                                                                                                                                         |
 | 通知       | `POST /v1/notifications/read`、`POST /v1/notifications/read-all`                                                                               | 只标成已读，不删除                                                                                                                                                                                         |
+| 桌面更新   | `GET /updates/latest.json`、`GET /updates/{platform}/{version}/{file}`                                                                         | 桌面端自动更新的清单与更新包，谁都能读、按来源限速；发布走命令行 `publish-update`，不开写的接口。见[决策 0015](decisions/0015-desktop-auto-update.md)                                                      |
 
 ### 几条规则怎么落地
 
