@@ -2,7 +2,9 @@
 
 正式服务在 2026-11-24 第一次部署上线：<https://as.yxswy.com>。下面"第一次部署"写的就是照着做过的步骤；哪些真的验过、哪些还没有，分别在最后两节里如实列出。用的是 Docker Compose 加 nginx。
 
-最新发布（2026-11-27 02:48）：手机第一期里设备的平台值从 `iphone` 改成 `ios`（按操作系统命名），已部署为 `ghcr.io/puzzle-fuzzy/assemble-server:8986d0a232a6`。[macOS 与 Windows 验证](https://github.com/puzzle-fuzzy/Assemble/actions/runs/45876060043)与[镜像构建](https://github.com/puzzle-fuzzy/Assemble/actions/runs/45876059828)全部成功。镜像经 `deploy/push-image.sh` 传入。升级前核对：库里迁移 1～11 的校验和与仓库逐个一致，本次没有新迁移；设备的平台只有 macos 2 台、windows 1 台，没有存过 `iphone`。备份在 `/var/backups/assemble/20261127-024813-ios-platform-8986d0a232a6/`（`data-before.tgz` 563,058,907 字节、`config-before.tgz`、`env-before`、`counts-before.txt`；目录 0700、文件 0600），旧镜像保留。只改了 `.env` 的镜像引用，三个 Compose 文件、密钥目录和共用 nginx 都没有碰。从停服务到新容器健康共 28 秒；新容器健康、以专用账户运行、密钥只读挂载，启动日志干净，`check-config` 通过（按来源的限额、全站总量上限、SMTP 与 GitHub 配置都在）。升级前后每一张表的行数逐项一致。正式 HTTPS：健康与就绪 200、登录页 200、配对页 303 到登录页、影视页 200、设备接口 401；两个配对接口对空请求回 400（在，不是 404）。手机应用当时还没有装到任何一台真机上，平台值的改名不涉及已有数据。
+最新发布（2026-11-27 09:51）：管理端影视详情、封面预览与失败占位同步已部署为 `ghcr.io/puzzle-fuzzy/assemble-server:28c9551fc6bf`。完整本机隔离验证、macOS CI 和镜像启动通过；发布提交的 Windows 在界面测试、构建和静态检查通过后因后续推送取消，未将其记作全套成功。迁移 1～11 校验一致、无新迁移，升级前后所核对的业务表计数一致；完整数据备份位于 `/var/backups/assemble/20261127-095117-media-28c9551fc6bf/`，目录 0700、归档 0600。服务健康，HTTPS 管理端样式资源已更新。公开影视页 Lighthouse 移动三次 98、桌面三次 100，其他三项均 100，CLS/TBT 均为 0。证据及登录验收范围见[同步记录](../reports/2026-11-27-admin-media-style.md)。
+
+上一次发布（2026-11-27 02:48）：手机第一期里设备的平台值从 `iphone` 改成 `ios`（按操作系统命名），已部署为 `ghcr.io/puzzle-fuzzy/assemble-server:8986d0a232a6`。[macOS 与 Windows 验证](https://github.com/puzzle-fuzzy/Assemble/actions/runs/45876060043)与[镜像构建](https://github.com/puzzle-fuzzy/Assemble/actions/runs/45876059828)全部成功。镜像经 `deploy/push-image.sh` 传入。升级前核对：库里迁移 1～11 的校验和与仓库逐个一致，本次没有新迁移；设备的平台只有 macos 2 台、windows 1 台，没有存过 `iphone`。备份在 `/var/backups/assemble/20261127-024813-ios-platform-8986d0a232a6/`（`data-before.tgz` 563,058,907 字节、`config-before.tgz`、`env-before`、`counts-before.txt`；目录 0700、文件 0600），旧镜像保留。只改了 `.env` 的镜像引用，三个 Compose 文件、密钥目录和共用 nginx 都没有碰。从停服务到新容器健康共 28 秒；新容器健康、以专用账户运行、密钥只读挂载，启动日志干净，`check-config` 通过（按来源的限额、全站总量上限、SMTP 与 GitHub 配置都在）。升级前后每一张表的行数逐项一致。正式 HTTPS：健康与就绪 200、登录页 200、配对页 303 到登录页、影视页 200、设备接口 401；两个配对接口对空请求回 400（在，不是 404）。手机应用当时还没有装到任何一台真机上，平台值的改名不涉及已有数据。
 
 上一次发布（2026-11-27 01:32）：影视翻页、详情预览与性能调整已部署为 `ghcr.io/puzzle-fuzzy/assemble-server:c79edf032e08`，双平台验证、镜像构建和隔离容器运行通过。备份位于 `/var/backups/assemble/20261127-013204-media-c79edf032e08/`，旧迁移校验一致，启动新增迁移 11，原账户和业务计数不变；共用 nginx 与密钥配置保持原样。正式 Lighthouse 移动三次 98、桌面三次 100，其他三类均 100，CLS 为 0。完整发布、备份权限和证据边界见[本轮记录](../reports/2026-11-27-media-web-performance.md#正式发布与-https-复测)。
 
@@ -18,6 +20,8 @@
 | `.env.example`         | 配置模板：镜像、数据位置、对外地址必填，其余都可以不填                                                                  |
 | `nginx.conf.example`   | 反向代理：TLS、上传的上限、事件流的长连接。与正式服务器上的那一份只差域名                                               |
 | `push-image.sh`        | 把持续集成构建的镜像经 SSH 送到服务器上。服务器直接拉 GitHub 的镜像仓库会握手超时，所以要它                             |
+| `push-update.sh`       | 把发布用的那台 Mac 上做好的桌面更新目录经 SSH 送到服务器上，交给 `publish-update` 校验或发布，然后删掉临时目录          |
+| `updater.pubkey`       | 给桌面更新包验签的公钥，编进服务端和桌面应用。私钥只在发布用的那台 Mac 上                                               |
 
 服务端在 Linux 上只依赖 C 库：SQLite 是静态编进去的，钥匙串的依赖只在 macOS 与 Windows 上进入构建。镜像约 120 MB。
 
@@ -177,7 +181,16 @@ SCRIPT
 
 桌面应用的更新包由这台服务端托管。`GET /updates/latest.json` 是清单，`GET /updates/<平台>/<版本>/<文件>` 是更新包；两个都是谁都能读、按来源限速的接口（清单每个来源每小时 120 次，更新包 30 次）。为什么这样做见[决策 0015](../decisions/0015-desktop-auto-update.md)。
 
-发布用子命令，不开写的接口。把一个发布目录放进数据目录（属主得是 10001），先只校验，再发布：
+平时只在发布用的那台 Mac 上跑一条命令，它把下面这几步连起来做完（`scripts/release/publish.ts`，为什么这样做见决策 0015）：
+
+```sh
+bun run release:publish             # 取 Windows 安装包、构建并签名 Mac 应用、给两个包签名、送到服务器上只校验
+bun run release:publish --apply     # 同上，服务器上校验通过就发布
+```
+
+它要求：工作树是干净的（发出去的是提交）；"安装包"流程已经为当前这个提交成功地跑过——Windows 的安装包只由它出，所以先在 GitHub 上手动运行那个流程，或者推一个 `v<版本>` 的标签；钥匙串里有本地证书（[运行手册](verify-macos-launch.md)的"本地签名"）。版本是 `0.1.<提交数>`。最后一步是 `deploy/push-update.sh <发布目录> [--apply]`：把发布目录传进数据目录下的一个临时目录，交给下面这两条命令，然后删掉临时目录。
+
+也可以手工做。发布用子命令，不开写的接口。把一个发布目录放进数据目录（属主得是 10001），先只校验，再发布：
 
 ```sh
 docker compose exec -T assemble assemble-server publish-update /var/lib/assemble/<发布目录>            # 只校验
@@ -188,14 +201,14 @@ docker compose exec -T assemble assemble-server publish-update /var/lib/assemble
 
 ```json
 {
-  "version": "0.1.431",
-  "notes": "修了什么",
-  "pubDate": "2026-11-27T01:30:00Z",
+  "version": "0.1.116",
+  "notes": "Assemble 0.1.116",
+  "pubDate": "2026-11-27T10:30:00.000Z",
   "platforms": [
-    { "platform": "windows-x86_64", "file": "Assemble_0.1.431_x64-setup.exe" },
+    { "platform": "windows-x86_64", "file": "Assemble_0.1.116_x64-setup.exe" },
     {
       "platform": "darwin-aarch64",
-      "file": "Assemble_0.1.431_aarch64.app.tar.gz"
+      "file": "Assemble_0.1.116_aarch64.app.tar.gz"
     }
   ]
 }
@@ -215,7 +228,9 @@ docker compose exec -T assemble assemble-server publish-update /var/lib/assemble
 
 发布之后：更新包在数据目录的 `updates/<平台>/<版本>/` 下，清单是 `updates/latest.json`；每个平台只留最新的一版，旧版本的目录被删掉。它们不在 `blobs/` 里，不计入云盘预算，备份时随数据目录一起打包；恢复演练目前只核对 `blobs/`，这一部分还没有演练过。
 
-公钥是仓库里的 `deploy/updater.pubkey`，编进服务端和桌面应用。私钥只在发布用的那台 Mac 上（`~/.assemble/updater.key`），不进仓库；丢了就再也发不出更新，装出去的应用只能重装。
+公钥是仓库里的 `deploy/updater.pubkey`，编进服务端和桌面应用。私钥只在发布用的那台 Mac 上（`~/.assemble/updater.key`，没有口令），不进仓库、日志、界面和持续集成；脚本只把它的路径交给 `tauri signer sign`。丢了就再也发不出更新，装出去的应用只能重装，所以请另留一份只有你自己能读的备份。重做一对钥匙要同时换掉编进两边的公钥，并且先手动给所有人装一次带着新公钥的版本——所以它救不了已经装出去的应用。
+
+发布目录由 `scripts/release/stage.ts` 做（`publish.ts` 会调它）：Mac 的应用包打成 `Assemble_<版本>_aarch64.app.tar.gz`，顶层就是 `Assemble.app`，这是 Tauri 更新插件要的样子；两个包各用 `--app-version <版本>` 签一次；只打应用包本身，不带 macOS 的元数据文件。发布用的 Mac 应用包必须是本地那张证书签的，脚本会认一遍：换了证书，更新之后系统就不认得它，会再问一次钥匙串。
 
 ### 备份与恢复
 
@@ -364,6 +379,7 @@ docker ps -a | grep restore-drill; ls -d /var/backups/assemble/restore-drill-*
 - **公开注册与邮箱变更的真人完整流程。** 账户是本人 2026-11-25 用 GitHub 注册的，GitHub 真人授权实际发生过；用邮箱收信验证注册、改密码、找回密码、给账户绑定 GitHub 这些，真人还没有逐项走过。入口、SMTP 真发送与防线已核对。
 - **在途上传时停止服务的表现**：第四次升级已量出停旧服务到新服务就绪为 0.85 秒，但没有用真实上传压停止等待。
 - **续期钩子**没有真的触发过（证书 2027-02 到期）。
+- **桌面端的更新还没有在正式服务上发布过**（2026-11-27）。本机端到端和各项自动化测试见[决策 0015](../decisions/0015-desktop-auto-update.md)；`deploy/push-update.sh` 往正式服务器上传的那一步也还没有真的跑过。
 
 ## 2026-11-25：影视三端正式升级
 

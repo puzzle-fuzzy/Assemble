@@ -28,6 +28,7 @@ import {
   signedIn,
   snapshot,
   transfer,
+  UPDATE,
 } from "@/test-support/fakes";
 import { openAccountMenu, renderApp } from "@/test-support/render-app";
 
@@ -412,6 +413,114 @@ describe("提示", () => {
       source.push(snapshot({ notice: null }));
     });
     expect(text(view.host)).not.toContain("登录已失效，请重新登录。");
+  });
+});
+
+/** "关于"在左下角的账户菜单里。 */
+async function openAbout(host: HTMLElement) {
+  await openAccountMenu(host);
+  const item = [
+    ...document.body.querySelectorAll<HTMLElement>('[role="menuitem"]'),
+  ].find((candidate) => candidate.textContent === "关于");
+  await click(item);
+}
+
+/** 关于页上"更新"那一行的说法。 */
+function updateLine(host: HTMLElement) {
+  return host.querySelector('[data-testid="update-status"]')?.textContent;
+}
+
+describe("自动更新", () => {
+  test("关于页写明走到哪一步；还没查过的时候可以查", async () => {
+    const source = new FakeBridge(snapshot());
+    const view = await renderApp(source);
+    await openAbout(view.host);
+
+    expect(updateLine(view.host)).toBe("还没有查过有没有新版本。");
+    expect(button(view.host, "立即更新并重新打开")).toBeUndefined();
+    await click(button(view.host, "检查更新"));
+    expect(source.calls).toEqual(["updateCheck"]);
+  });
+
+  test("新版下载好之后可以立刻换上", async () => {
+    const source = new FakeBridge(
+      snapshot({
+        update: { ...UPDATE, state: "ready", version: "0.1.432" },
+      }),
+    );
+    const view = await renderApp(source);
+    await openAbout(view.host);
+
+    expect(updateLine(view.host)).toBe(
+      "新版本 0.1.432 已经准备好：空闲时自动换上，也可以现在就换。",
+    );
+    expect(button(view.host, "检查更新")).toBeUndefined();
+    await click(button(view.host, "立即更新并重新打开"));
+    expect(source.calls).toEqual(["updateRestart"]);
+  });
+
+  test("不自动更新的构建没有按钮", async () => {
+    const source = new FakeBridge(
+      snapshot({ update: { ...UPDATE, state: "unsupported" } }),
+    );
+    const view = await renderApp(source);
+    await openAbout(view.host);
+
+    expect(updateLine(view.host)).toBe("这个构建不自动更新。");
+    expect(button(view.host, "检查更新")).toBeUndefined();
+    expect(button(view.host, "立即更新并重新打开")).toBeUndefined();
+  });
+
+  test("下载进度写成大小；没成的时候写明错误码", async () => {
+    const downloading = new FakeBridge(
+      snapshot({
+        update: {
+          ...UPDATE,
+          state: "downloading",
+          version: "0.1.432",
+          received: 524288,
+          total: 8388608,
+        },
+      }),
+    );
+    const first = await renderApp(downloading);
+    await openAbout(first.host);
+    expect(updateLine(first.host)).toBe(
+      "正在下载新版本 0.1.432：512 KB / 8.0 MB",
+    );
+    // 正在下载的时候不去打断它。
+    expect(button(first.host, "检查更新")?.disabled).toBe(false);
+    await cleanup();
+
+    const failed = new FakeBridge(
+      snapshot({
+        update: {
+          ...UPDATE,
+          state: "failed",
+          error: "UPDATE_UNREACHABLE",
+        },
+      }),
+    );
+    const second = await renderApp(failed);
+    await openAbout(second.host);
+    expect(updateLine(second.host)).toBe(
+      "更新没有成（UPDATE_UNREACHABLE），稍后会再试。",
+    );
+  });
+
+  test("换新版没成时显示提示，不显示内部诊断", async () => {
+    const source = new FakeBridge(
+      snapshot({
+        update: { ...UPDATE, state: "ready", version: "0.1.432" },
+      }),
+    );
+    source.failWith = new BridgeError("UPDATE_INSTALL_FAILED", "os error 5");
+    const view = await renderApp(source);
+    await openAbout(view.host);
+
+    await click(button(view.host, "立即更新并重新打开"));
+    expect(text(view.host)).toContain("新版本没能装上，稍后会再试一次。");
+    expect(text(view.host)).not.toContain("os error");
   });
 });
 

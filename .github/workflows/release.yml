@@ -7,6 +7,10 @@
 # 产出没有签名、没有公证，是给人验收用的，不是对外分发：macOS 上第一次打开要在
 # "隐私与安全性"里点"仍要打开"；用浏览器下载的 Windows 安装包会有 SmartScreen 的提醒。
 #
+# 自动更新的更新包不在这里出：签名用的私钥只在发布用的那台 Mac 上，持续集成不持有它。
+# 那边取这里的 Windows 安装包，自己构建 Mac 应用，签名后发布（scripts/release/publish.ts）。
+# 版本是 0.1.<提交数>，所以检出要取完整的历史，否则提交数算出来是 1。
+#
 # 服务端的可执行文件不在这里出：它跟着部署用的镜像一起构建（deploy/）。
 
 name: 安装包
@@ -43,7 +47,8 @@ jobs:
             artifact: windows-x64
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
       # 工具链由仓库根目录的 rust-toolchain.toml 决定，第一次调用 cargo 时自动装好。
       - uses: Swatinem/rust-cache@v2
       - uses: oven-sh/setup-bun@v2
@@ -56,9 +61,18 @@ jobs:
             exit 1
           fi
           echo "桌面端将连接 $ASSEMBLE_SERVER_ORIGIN"
+      - name: 标签与版本对得上
+        if: github.ref_type == 'tag'
+        shell: bash
+        run: |
+          version="$(bun scripts/release/build-desktop.ts --version)"
+          if [ "v$version" != "$GITHUB_REF_NAME" ]; then
+            echo "::error::标签是 $GITHUB_REF_NAME，这个提交的版本是 $version。标签要写成 v<版本>。"
+            exit 1
+          fi
+      # 从仓库根目录经构建脚本打包：版本号是它算出来的（0.1.<提交数>），界面和应用是同一个号。
       - name: 构建
-        working-directory: apps/desktop
-        run: bun x tauri build
+        run: bun run build
       - name: 留下安装包
         uses: actions/upload-artifact@v7
         with:

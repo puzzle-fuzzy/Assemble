@@ -263,6 +263,36 @@ export interface Snapshot {
   planner: PlannerView | null;
   /** 这台电脑到点时不弹提醒。 */
   plannerMuted: boolean;
+  /** 自动更新走到了哪一步。更新只从 Rust 那边驱动，界面不碰更新插件。 */
+  update: UpdateView;
+}
+
+/** 自动更新走到了哪一步。 */
+export type UpdateState =
+  /** 这个构建不自动更新：连的不是正式服务。 */
+  | "unsupported"
+  /** 还没查过。 */
+  | "idle"
+  | "checking"
+  /** 已经是最新，或者服务端还没有发布给这台电脑的更新。 */
+  | "upToDate"
+  | "downloading"
+  /** 新版已经在手（macOS 上应用包已经换掉），下一次启动就是它。 */
+  | "ready"
+  /** 上一步没成；原因在 error 里。 */
+  | "failed";
+
+export interface UpdateView {
+  state: UpdateState;
+  /** 新版本的版本号；还没查到新版时为 null。 */
+  version: string | null;
+  /** 已经下载了多少字节、总共多少；没在下载时为 null。 */
+  received: number | null;
+  total: number | null;
+  /** 上一次查完的时刻（纪元毫秒）；还没查过时为 null。 */
+  checkedAt: number | null;
+  /** 失败时的稳定错误码。 */
+  error: string | null;
 }
 
 /** Windows 右键菜单"用 Assemble 发送"在这台电脑上的状态。 */

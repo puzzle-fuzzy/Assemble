@@ -128,6 +128,8 @@
     "VERSION_CONFLICT": "这一条在别的设备上被改过。已经换成最新的，请再看一眼。",
     "INVALID_STATE": "这一条现在的状态不能这样改。已经换成最新的，请再看一眼。",
     "PLANNER_INPUT": "有内容不合规则，没有保存。请检查标题（最多 200 个字）、时间和重复的截止日。",
+    "UPDATE_NOT_READY": "新版本还没有下载好，稍后再试。",
+    "UPDATE_INSTALL_FAILED": "新版本没能装上，稍后会再试一次。",
     "GENERIC": "操作没有完成，请稍后重试。"
   },
   "notice": {
@@ -147,12 +149,23 @@
       "signInToSend": "请先登录，再发送文件。",
       "signInToUpload": "请先登录，再往云盘里存文件。",
       "receiveFolderFallback": "原来设置的接收文件夹不可用，这个文件已存到默认位置。",
-      "launchAtLoginFailed": "暂时无法完成开机启动的设置，请稍后重试。"
+      "launchAtLoginFailed": "暂时无法完成开机启动的设置，请稍后重试。",
+      "updateApplyFailed": "新版本没能装上，下一次启动时会再试一次。"
     },
     "fileTooLarge": "「{{name}}」超过 100 MB，发不出去。",
     "fileUnreadable": "「{{name}}」读不出来，可能已被移走或没有权限。",
     "unknownInfo": "有新的提示，请检查当前状态。",
     "unknownError": "操作没有完成，请稍后重试。"
+  },
+  "update": {
+    "unsupported": "这个构建不自动更新。",
+    "idle": "还没有查过有没有新版本。",
+    "checking": "正在查有没有新版本…",
+    "upToDate": "已是最新版本。",
+    "downloading": "正在下载新版本 {{version}}：{{received}} / {{total}}",
+    "downloadingUnknownTotal": "正在下载新版本 {{version}}：{{received}}",
+    "ready": "新版本 {{version}} 已经准备好：空闲时自动换上，也可以现在就换。",
+    "failed": "更新没有成（{{code}}），稍后会再试。"
   },
   "build": {
     "channels": {

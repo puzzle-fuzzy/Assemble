@@ -29,5 +29,14 @@
     "macOS": {
       "minimumSystemVersion": "13.0"
     }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEZBRTU4MEJDQjhCRDlCMDEKUldRQm03MjR2SURsK2c4R2duT2l6TnlxUXVNWXQraExMS2tIWGVybzhvRTgrQ1pRb0x3VEFFM3kK",
+      "requireSignedVersion": true,
+      "windows": {
+        "installMode": "quiet"
+      }
+    }
   }
 }

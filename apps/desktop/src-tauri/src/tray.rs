@@ -8,16 +8,20 @@ use tauri::{
 
 use crate::commands;
 use crate::send_panel;
-use crate::state::{self, AppState, LaunchState};
+use crate::state::{self, AppState, LaunchState, UpdateState};
+use crate::update;
 
 pub const OPEN_ID: &str = "open";
 pub const SEND_ID: &str = "send-files";
 pub const REMINDER_ID: &str = "new-reminder";
 pub const LAUNCH_ID: &str = "launch-at-login";
+/// 平时是"检查更新"；新版下载好之后变成"重新打开以更新到某版本"。
+pub const UPDATE_ID: &str = "update";
 pub const QUIT_ID: &str = "quit";
 
 pub struct TrayMenu {
     launch: Option<CheckMenuItem<Wry>>,
+    update: MenuItem<Wry>,
 }
 
 /// 创建托盘图标与菜单。
@@ -25,6 +29,13 @@ pub fn build(app: &AppHandle) -> tauri::Result<()> {
     let open = MenuItem::with_id(app, OPEN_ID, "打开 Assemble", true, None::<&str>)?;
     let send = MenuItem::with_id(app, SEND_ID, "发送文件", true, None::<&str>)?;
     let reminder = MenuItem::with_id(app, REMINDER_ID, "新建提醒", true, None::<&str>)?;
+    let update = MenuItem::with_id(
+        app,
+        UPDATE_ID,
+        update_label(&state::update_view(app)),
+        true,
+        None::<&str>,
+    )?;
     let quit = MenuItem::with_id(app, QUIT_ID, "退出 Assemble", true, None::<&str>)?;
 
     // 开机启动只在打包后的运行里提供；开发运行不写系统登录项。
@@ -32,8 +43,8 @@ pub fn build(app: &AppHandle) -> tauri::Result<()> {
         .then(|| CheckMenuItem::with_id(app, LAUNCH_ID, "开机启动", true, false, None::<&str>))
         .transpose()?;
     let menu = match &launch {
-        Some(launch) => Menu::with_items(app, &[&open, &send, &reminder, launch, &quit])?,
-        None => Menu::with_items(app, &[&open, &send, &reminder, &quit])?,
+        Some(launch) => Menu::with_items(app, &[&open, &send, &reminder, launch, &update, &quit])?,
+        None => Menu::with_items(app, &[&open, &send, &reminder, &update, &quit])?,
     };
 
     // 不给 builder 标 mut：只有 macOS 上会再赋一次值，别的平台上那个标记用不到，
@@ -60,7 +71,23 @@ pub fn build(app: &AppHandle) -> tauri::Result<()> {
             REMINDER_ID => crate::planner::compose(app, crate::planner::Compose::Reminder),
             // 托盘里的开关只能由用户点击改变，这里直接切换。
             LAUNCH_ID => toggle_launch(app),
-            QUIT_ID => app.exit(0),
+            UPDATE_ID => {
+                if state::update_view(app).state == UpdateState::Ready {
+                    // 立刻换上并重新打开窗口：Windows 上安装器起来进程就结束，macOS 上提出重启的请求。
+                    if let Err(error) = update::apply(app, false) {
+                        report_update_failure(app, &error);
+                    }
+                } else {
+                    // 查一次；查完把主窗口叫到前面，结果写在"关于"页上。
+                    let handle = app.clone();
+                    tauri::async_runtime::spawn(async move {
+                        update::cycle(&handle).await;
+                        state::show_main(&handle);
+                    });
+                }
+            }
+            // 有下载好的更新就趁退出时装上。
+            QUIT_ID => update::quit(app),
             _ => {}
         })
         .on_tray_icon_event(|tray, event| {
@@ -80,16 +107,30 @@ pub fn build(app: &AppHandle) -> tauri::Result<()> {
     let builder = builder.icon_as_template(true);
     builder.build(app)?;
 
-    app.manage(TrayMenu { launch });
+    app.manage(TrayMenu { launch, update });
     refresh(app);
     Ok(())
 }
 
-/// 让"开机启动"的勾选状态与系统里的实际状态一致。
+fn update_label(view: &crate::state::UpdateView) -> String {
+    match view.state {
+        UpdateState::Ready => match &view.version {
+            Some(version) => format!("重新打开以更新到 {version}"),
+            None => "重新打开以更新".to_owned(),
+        },
+        _ => "检查更新".to_owned(),
+    }
+}
+
+/// 让"开机启动"的勾选状态与系统里的实际状态一致，"更新"那一项的文字与下载进度一致。
 pub fn refresh(app: &AppHandle) {
     let Some(menu) = app.try_state::<TrayMenu>() else {
         return;
     };
+    let view = state::update_view(app);
+    if let Err(error) = menu.update.set_text(update_label(&view)) {
+        tracing::debug!(%error, "the update menu item could not be updated");
+    }
     let Some(launch) = &menu.launch else {
         return;
     };
@@ -97,6 +138,16 @@ pub fn refresh(app: &AppHandle) {
     if let Err(error) = launch.set_checked(checked) {
         tracing::debug!(%error, "the launch-at-login menu item could not be updated");
     }
+}
+
+/// 换上新版没成：把情况告诉用户，而不是让托盘那一项点了没有反应。
+fn report_update_failure(app: &AppHandle, error: &commands::CommandError) {
+    let state = app.state::<AppState>();
+    state.set_notice(Some(state::Notice::error(
+        "新版本没能装上，下一次启动时会再试一次。",
+    )));
+    tracing::warn!(code = error.code, message = %error.message, "the update could not be applied");
+    state::show_main(app);
 }
 
 fn toggle_launch(app: &AppHandle) {

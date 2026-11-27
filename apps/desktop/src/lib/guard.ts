@@ -27,6 +27,8 @@ import type {
   TransferPhase,
   TransferTarget,
   TransferView,
+  UpdateState,
+  UpdateView,
 } from "@/lib/types";
 
 export function isRecord(value: unknown): value is Record<string, unknown> {
@@ -92,6 +94,26 @@ export function isLaunchState(value: unknown): value is LaunchState {
     value === "disabled" ||
     value === "unsupported" ||
     value === "unknown"
+  );
+}
+
+export function isUpdateView(value: unknown): value is UpdateView {
+  if (!isRecord(value)) return false;
+  return (
+    [
+      "unsupported",
+      "idle",
+      "checking",
+      "upToDate",
+      "downloading",
+      "ready",
+      "failed",
+    ].includes(value.state as UpdateState) &&
+    (value.version === null || typeof value.version === "string") &&
+    (value.received === null || typeof value.received === "number") &&
+    (value.total === null || typeof value.total === "number") &&
+    (value.checkedAt === null || typeof value.checkedAt === "number") &&
+    (value.error === null || typeof value.error === "string")
   );
 }
 
@@ -315,6 +337,7 @@ export function isSnapshot(value: unknown): value is Snapshot {
     isLaunchState(value.launchAtLogin) &&
     (value.notice === null || isNotice(value.notice)) &&
     (value.planner === null || isPlannerView(value.planner)) &&
-    typeof value.plannerMuted === "boolean"
+    typeof value.plannerMuted === "boolean" &&
+    isUpdateView(value.update)
   );
 }

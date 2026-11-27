@@ -105,6 +105,7 @@ tauri-plugin-clipboard-manager = "=2.5.0"
 tauri-plugin-notification = "2.8.1"
 tauri-plugin-opener = "2.7.3"
 tauri-plugin-single-instance = "2.5.5"
+tauri-plugin-updater = "2.14.1"
 tempfile = "3.27.0"
 thiserror = "2.0.21"
 # cookie 的 Max-Age 用的是这个库的时长类型。

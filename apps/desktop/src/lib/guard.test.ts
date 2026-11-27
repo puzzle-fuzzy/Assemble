@@ -73,6 +73,14 @@ const VALID: Snapshot = {
   notice: null,
   planner: null,
   plannerMuted: false,
+  update: {
+    state: "idle",
+    version: null,
+    received: null,
+    total: null,
+    checkedAt: null,
+    error: null,
+  },
 };
 
 /** 一份日程名单：一条日程、一条提醒、一条没读的通知，定位在其中一条上。 */
@@ -287,6 +295,10 @@ describe("状态守卫", () => {
       { ...VALID, sendMenu: null },
       { ...VALID, notice: { kind: "warning", message: "x" } },
       { ...VALID, notice: { kind: "error" } },
+      { ...VALID, update: undefined },
+      { ...VALID, update: { state: "paused" } },
+      { ...VALID, update: { state: "ready", version: 3 } },
+      { ...VALID, update: { state: "failed", error: 7 } },
     ];
     for (const value of invalid) {
       expect(isSnapshot(value)).toBe(false);

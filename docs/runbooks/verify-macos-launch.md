@@ -138,7 +138,7 @@ cargo run -p assemble-mcp --example browser_check http://127.0.0.1:8787
 
 ### 本地签名
 
-目的只有一个：让钥匙串认得每一次构建出来的程序（见第 0 节）。它不是分发用的签名：持续集成打出来的安装包、公证、自动更新都不在这件事里。
+目的只有一个：让钥匙串认得每一次构建出来的程序（见第 0 节）。它不是对外的分发签名：持续集成打出来的安装包、公证都不在这件事里。自动更新发出去的 Mac 应用包倒是用它签的——换了签名身份，更新之后系统就不认得这个应用，会再问一次钥匙串——发布脚本会认一遍（见[部署手册](deploy.md)的"发布桌面端的更新"）。
 
 证书在登录钥匙串里，名字是 `Assemble Local Signing`，2026-11-26 做的，有效到 2036-11-23。私钥只在钥匙串里，访问名单里只有 `/usr/bin/codesign`；系统不信任这张证书（自签的都这样），本机构建的包没有隔离标记，所以不影响打开。
 
@@ -175,6 +175,49 @@ unset PW; rm -rf "$work"                      # 私钥和带密码的文件不�
 ```
 
 做完当场试一次（`bun run sign:mac`），把那个框点掉。框上写的是 `codesign 想要访问你的钥匙串中的密钥 "identity"`：导入进来的私钥，系统在框里就这么叫，不是名字做错了（2026-11-26 换了两种导法都一样）；框可能不在主屏上，两块屏幕都看一眼。清理别交给 `trap … EXIT`：2026-11-26 zsh 在 `set -e` 下从函数里出错退出时没有跑清理，临时目录留在了那里，事后才发现并删掉。
+
+### 自动更新的本机端到端
+
+自动更新（[决策 0015](../decisions/0015-desktop-auto-update.md)）能不能真的换上新版，在这台 Mac 上对着一个一次性的本机服务端走过一遍（2026-11-27）。**它会惊动人，做之前先说一声**，原因和收拾的办法写在后面。
+
+```sh
+work="$(mktemp -d)"
+export ASSEMBLE_SERVER_ORIGIN=http://127.0.0.1:8787
+test_config='{"identifier":"com.puzzlefuzzy.assemble.updatertest"}'
+# 一、一次性的本机服务端，数据目录是空的。
+ASSEMBLE_DATA_DIR="$work/data" ASSEMBLE_PUBLIC_ORIGIN="$ASSEMBLE_SERVER_ORIGIN" \
+  ./target/debug/assemble-server serve &
+# 二、旧的那一版 0.1.1000，拷两份：一份留着做对照，一份拿去跑。
+ASSEMBLE_BUILD_VERSION=0.1.1000 bun run build -- --debug --bundles app --config "$test_config"
+mkdir -p "$work/run"
+ditto target/debug/bundle/macos/Assemble.app "$work/pristine.app"
+ditto target/debug/bundle/macos/Assemble.app "$work/run/Assemble.app"
+# 三、新的那一版 0.1.1001：做成发布目录（用发布用的那把真钥匙签名），发布。
+ASSEMBLE_BUILD_VERSION=0.1.1001 bun run build -- --debug --bundles app --config "$test_config"
+bun scripts/release/stage.ts --bundle "$PWD/target/debug/bundle/macos/Assemble.app" --out "$work/release-1001"
+ASSEMBLE_DATA_DIR="$work/data" ASSEMBLE_PUBLIC_ORIGIN="$ASSEMBLE_SERVER_ORIGIN" \
+  ./target/debug/assemble-server publish-update "$work/release-1001" --apply
+# 四、只在托盘里启动旧的那一版，看它的日志。
+open -n "$work/run/Assemble.app" --args --background
+tail -f ~/Library/Logs/com.puzzlefuzzy.assemble.updatertest/desktop.log
+```
+
+2026-11-27 看到的是这样（那次的构建启动行记的还是 cargo 包的版本 `0.1.0`，之后记的是应用自己的版本）：
+
+```text
+02:25:13  Assemble desktop is starting
+02:25:28  a new version was published; downloading it version=0.1.1001
+02:25:29  the update package was downloaded and verified version=0.1.1001 bytes=25745123
+02:28:43  restarting into the new version version=0.1.1001
+02:28:45  Assemble desktop is starting
+02:29:00  no newer version has been published
+```
+
+第二行和第三行之间，`$work/run/Assemble.app/Contents/Info.plist` 里已经是 0.1.1001，而进程还是原来那一个（`ps -o lstart= -p <进程号>` 的启动时间没变）：应用包原地换掉了，运行中的进程没受影响。第四行是空闲满三分钟之后自己提的重启；第五行之后进程号和启动时间都换了，命令行里带着 `--background`，没有窗口。用完 `kill` 掉它，再删掉 `$work`、`~/Library/Logs/com.puzzlefuzzy.assemble.updatertest` 和 `~/Library/Application Support/com.puzzlefuzzy.assemble.updatertest`。
+
+**它为什么会惊动人。** 应用一启动就访问"下载"文件夹，并把浏览器桥接的临时凭据写进登录钥匙串（`assemble.browser.bridge.v1`，账号位是应用标识）。新的应用标识对系统来说是一个没见过的程序，所以有隐私询问；临时签名的构建每换一次二进制，在钥匙串眼里又是一个新的程序：2026-11-27 第二次启动那个测试应用时，屏幕上弹了钥匙串的确认框（要人输登录钥匙串的密码），应用停在启动上（`sample` 里一个工作线程停在 `find_generic_password`），本机日志只有第一行。把应用停掉，两个框也不会自己消失。不碰鼠标键盘的收拾办法：钥匙串的框 `pkill -9 -x SecurityAgent`（它可能重起一次，再收一次）；隐私询问 `kill UserNotificationCenter`（它按需重起）；是哪个进程的框，用 `CGWindowListCopyWindowInfo` 按进程查；测试应用留在钥匙串里的条目 `security delete-generic-password -s assemble.browser.bridge.v1 -a <应用标识>`，删除不弹框。装在"应用程序"里的那一个不受这条影响：它的签名身份是稳定的。
+
+不碰窗口就能验的那部分不必这么做：`cargo test -p assemble-desktop update::against_server` 让带着这个应用真正配置的模拟应用对着进程内真实运行的服务端走一遍——签名正确的新版查得到、下载得下来、过得了验签；改坏一个字节被拒；清单上的版本和签名里的对不上被拒；版本更低或者一样不算更新。改过 `update.rs` 之后跑它。
 
 ## 3. 脚本不覆盖、要手工试的
 
@@ -323,6 +366,8 @@ gh run download <运行编号> -n assemble-windows-x64
 ```
 
 - 桌面端连哪个服务在构建时定下：流程读仓库变量 `ASSEMBLE_SERVER_ORIGIN`；手动触发时可以填一个别的地址，临时打一个指向测试服务的包。仓库里还没设这个变量时，打标签的构建直接失败并说明原因，不去猜。
+- 版本是 `0.1.<提交数>`，安装包的名字里带着它（`bun scripts/release/build-desktop.ts --version` 打印这个提交的版本号）。打标签的话，标签要写成 `v<版本号>`，对不上的那一步直接失败。流程检出的是完整的历史，否则提交数算出来是 1。
+- 持续集成不出自动更新用的包（签名用的私钥不在那里）。要发一版让装出去的应用自己更新，在那台 Mac 上跑 `bun run release:publish`，见[部署手册](deploy.md)的"发布桌面端的更新"。
 - 产出没有签名、没有公证。macOS 上第一次打开要在"系统设置 → 隐私与安全性"里点"仍要打开"；用浏览器下载的 Windows 安装包会有 SmartScreen 的提醒（`gh run download` 下来的没有这个标记）。
 - 手边就有一台开发机时也可以本地打：`bun run build`，产物在 `target/release/bundle/`。在 macOS 上打出的是 macOS 的安装包，在 Windows 上打出的是 Windows 的。macOS 上构建完会用本地证书签名（钥匙串里有那张证书才签，见"本地签名"）。
 
@@ -343,7 +388,12 @@ Windows 上没法在这台 Mac 上自动验证。下面每一条都对应一段�
 7. **开机启动。** "本机"卡片里打开开关，重启电脑确认应用随系统启动、不弹窗口只在托盘里。
 8. **日程与提醒。** 登录后"日程"卡片里点"新建提醒…"，填一个两分钟后的时间并保存；到点时弹出系统通知，点它，主窗口打开并定位到那一条。日期与时间的选择框、下拉框在 Windows 的 WebView2 里是什么样子，只有真机看得到。
 9. **退出。** 托盘图标 →"退出 Assemble"：进程消失；另一台设备的列表里这台电脑变成离线。
-10. **助手入口。** 构建它（`bun run mcp`；这条脚本在 Windows 上还没有跑过，不行就在 PowerShell 里 `$env:ASSEMBLE_SERVER_ORIGIN='https://as.yxswy.com'; cargo build --release -p assemble-mcp`），然后 `target\release\assemble-mcp.exe login --name "Windows 上的助手"`：系统默认浏览器打开授权页。在 Windows 上打开浏览器的那一段只有类型检查，从来没有运行过。确认之后 `status` 说已登录；`print-config codex` 打印的路径是 Windows 的写法。
+10. **自动更新**（[决策 0015](../decisions/0015-desktop-auto-update.md)）。这一版是带更新器的第一版，只能手动装；之后的才会自己更新。装好之后，等正式服务上发布下一版（[部署手册](deploy.md)的"发布桌面端的更新"），逐条看：
+    - 启动十几秒后，"关于"页（左下角账户菜单 →"关于"）的"更新"一行从"正在查"走到"正在下载新版本 …"，再走到"新版本 … 已经准备好"；不要管理员的框，不要钥匙串的框。
+    - 托盘菜单里那一项从"检查更新"变成"重新打开以更新到 …"。
+    - 主窗口开着、或者有文件在传的时候，它等着不重启。把主窗口关掉（收进托盘）、等三分钟：托盘图标消失又出现，进程的启动时间换了，没有弹窗口；再打开主窗口，"关于"页里的版本号是新的。装在当前用户的目录下时，这一步不需要管理员权限——装在"Program Files"里的话系统会要管理员密码。
+    - 另一版发布后，趁它已经下载好、还没换上时从托盘退出：安装器先静默装上，应用不重新打开。
+11. **助手入口。** 构建它（`bun run mcp`；这条脚本在 Windows 上还没有跑过，不行就在 PowerShell 里 `$env:ASSEMBLE_SERVER_ORIGIN='https://as.yxswy.com'; cargo build --release -p assemble-mcp`），然后 `target\release\assemble-mcp.exe login --name "Windows 上的助手"`：系统默认浏览器打开授权页。在 Windows 上打开浏览器的那一段只有类型检查，从来没有运行过。确认之后 `status` 说已登录；`print-config codex` 打印的路径是 Windows 的写法。
 
 哪一条不对，把现象、`reg query` 的输出和应用的本机日志（`%LOCALAPPDATA%\com.puzzlefuzzy.assemble\logs\desktop.log`）一起发来，现象描述得越具体越好（点了什么、看到了什么、隔了多久）。
 
@@ -384,6 +434,8 @@ Windows 上没法在这台 Mac 上自动验证。下面每一条都对应一段�
 - **换应用时屏幕是锁着的，读钥匙串那一步就停在那里。** 应用起来了，主线程停在正常的事件循环里，一个工作线程卡在 `SecKeychainFindGenericPassword`；本机日志停在"checking the service, then the stored session in the system keychain"，和正式服务没有连接。锁屏时登录钥匙串也是锁着的，系统的框要等人回来解锁。签名的要求和以前一模一样（`identifier … and certificate leaf = H"8ef68f08…"`），所以这次不是签名的问题。**换应用之前要先看锁屏**（`ioreg -n Root -d1 | grep -o '"CGSSessionScreenIsLocked"=[A-Za-z]*'`），锁着就等人在的时候再换；这次是换了之后才看的。锁屏时 `SecurityAgent` 本来就在（它管锁屏界面），不能拿它当"弹了钥匙串的框"的证据。
 - **目录改名之后又跑了三遍。** 用户纠正目录该按操作系统叫，`apps/iphone` 改成 `apps/ios`，命令跟着叫 `bun run ios:test`、`ios:simulate`。改名后的第一遍（`.artifacts/ios/2026-11-26T17-56-37-515Z`）撞上了第 10 条；修掉之后两遍都过（`…18-02-35-364Z`、`…18-05-23-370Z`），应用层的单元测试这时是 14 条。
 - **"正在做改动"的标记是同一类毛病**（登录失效之后不放回去，重新登录之后所有按钮都不响），顺手一起改了。
+- **自动更新在这台 Mac 上真的换上了一次。** 你说想要桌面端能自己更新，定了整包更新、自己的服务器下发、空闲时换上（[决策 0015](../decisions/0015-desktop-auto-update.md)）。服务端那一半（清单和更新包两个只读接口、`publish-update` 子命令）对着真实运行的服务端测过；桌面端这一半在本机走了一遍端到端（做法见第 2 节"自动更新的本机端到端"）：调试构建 0.1.1000 启动 16 秒后自己发现 0.1.1001，1 秒内下载并验签，应用包原地换掉；空闲满 3 分 14 秒后静默重启，新进程带着 `--background` 起来，15 秒后查到已是最新。前后修掉四处：开发运行会更新自己（`bun run dev` 连正式地址时，版本号一直是 0.1.0）；从托盘菜单重启时 Tauri 不发退出事件，显式的退出清理会被跳过（改成 `request_restart`）；本来就带着后台参数启动时，静默启动的记号没有被读掉；启动日志记的是 cargo 包的版本。两条反面（改坏一个字节、版本更低）最初也想真跑，改成四条不碰窗口的测试（模拟应用对着进程内的真实服务端）。**测试应用在用户屏幕上留了两个系统框，约十分钟**：换应用标识的构建会得到隐私询问，第二次启动又弹了钥匙串的确认框；收掉的办法写在那一段里。
+- **还没有做过的**：正式服务上发布一版（服务端要先升到带这两个接口的版本）；Windows 真机上的静默安装与自动重启；换新版之后钥匙串不再问；托盘菜单和"关于"页的两个入口没有真人点过。
 - **还没有做过的**：真机上的一切；正式服务的升级；两台电脑上应用的更新；NFC；"系统提供的网页登录会话"。清单在上面"iOS 真机验收清单"。
 
 ## 2026-11-26 做过的
@@ -468,6 +520,7 @@ Windows 上没法在这台 Mac 上自动验证。下面每一条都对应一段�
 - 系统钥匙串的读写里还没有亲眼见过的：`assemble-mcp` 读登录时的确认框（桌面端的 2026-11-26 见过）；`bun run acceptance` 现场构建的那个应用读登录。
 - 签过名的 `assemble-mcp` 经 ZCode 启动之后第一次读登录。2026-11-26 22:08 在终端里跑它的 `status` 时没有弹框，那不算：ZCode 启动它的那一次还没有发生。
 - 托盘菜单的逐项操作、开机启动开关。
+- **自动更新**（[决策 0015](../decisions/0015-desktop-auto-update.md)）：macOS 上从发现、下载、原地替换到空闲时静默重启走过一遍；还没有做过的是正式服务上的第一次发布、Windows 真机上的静默安装与自动重启、换新版之后钥匙串不再问（要用"应用程序"里那一个的第一次自动更新来看）、托盘菜单和"关于"页的两个入口。
 
 ### 2026-11-25 邮箱账户与头像
 

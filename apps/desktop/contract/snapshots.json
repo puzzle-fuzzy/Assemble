@@ -51,6 +51,14 @@
     "systemNotifications": {
       "items": [],
       "available": true
+    },
+    "update": {
+      "state": "idle",
+      "version": null,
+      "received": null,
+      "total": null,
+      "checkedAt": null,
+      "error": null
     }
   },
   {
@@ -85,6 +93,14 @@
     "systemNotifications": {
       "items": [],
       "available": true
+    },
+    "update": {
+      "state": "checking",
+      "version": null,
+      "received": null,
+      "total": null,
+      "checkedAt": null,
+      "error": null
     }
   },
   {
@@ -251,6 +267,14 @@
     "systemNotifications": {
       "items": [],
       "available": true
+    },
+    "update": {
+      "state": "idle",
+      "version": null,
+      "received": null,
+      "total": null,
+      "checkedAt": null,
+      "error": null
     }
   },
   {
@@ -288,6 +312,14 @@
     "systemNotifications": {
       "items": [],
       "available": true
+    },
+    "update": {
+      "state": "unsupported",
+      "version": null,
+      "received": null,
+      "total": null,
+      "checkedAt": null,
+      "error": null
     }
   },
   {
@@ -325,6 +357,14 @@
     "systemNotifications": {
       "items": [],
       "available": true
+    },
+    "update": {
+      "state": "idle",
+      "version": null,
+      "received": null,
+      "total": null,
+      "checkedAt": null,
+      "error": null
     }
   },
   {
@@ -391,6 +431,14 @@
     "systemNotifications": {
       "items": [],
       "available": true
+    },
+    "update": {
+      "state": "upToDate",
+      "version": null,
+      "received": null,
+      "total": null,
+      "checkedAt": 1795000000000,
+      "error": null
     }
   },
   {
@@ -543,6 +591,14 @@
     "systemNotifications": {
       "items": [],
       "available": true
+    },
+    "update": {
+      "state": "idle",
+      "version": null,
+      "received": null,
+      "total": null,
+      "checkedAt": null,
+      "error": null
     }
   },
   {
@@ -774,6 +830,14 @@
     "systemNotifications": {
       "items": [],
       "available": true
+    },
+    "update": {
+      "state": "downloading",
+      "version": "0.1.432",
+      "received": 524288,
+      "total": 8388608,
+      "checkedAt": null,
+      "error": null
     }
   },
   {
@@ -854,6 +918,14 @@
     "systemNotifications": {
       "items": [],
       "available": true
+    },
+    "update": {
+      "state": "ready",
+      "version": "0.1.432",
+      "received": null,
+      "total": null,
+      "checkedAt": null,
+      "error": null
     }
   },
   {
@@ -952,6 +1024,14 @@
     "systemNotifications": {
       "items": [],
       "available": true
+    },
+    "update": {
+      "state": "failed",
+      "version": null,
+      "received": null,
+      "total": null,
+      "checkedAt": 1795000060000,
+      "error": "UPDATE_UNREACHABLE"
     }
   },
   {
@@ -1186,6 +1266,14 @@
     "systemNotifications": {
       "items": [],
       "available": true
+    },
+    "update": {
+      "state": "idle",
+      "version": null,
+      "received": null,
+      "total": null,
+      "checkedAt": null,
+      "error": null
     }
   },
   {
@@ -1430,6 +1518,14 @@
     "systemNotifications": {
       "items": [],
       "available": true
+    },
+    "update": {
+      "state": "idle",
+      "version": null,
+      "received": null,
+      "total": null,
+      "checkedAt": null,
+      "error": null
     }
   },
   {
@@ -1678,6 +1774,14 @@
     "systemNotifications": {
       "items": [],
       "available": true
+    },
+    "update": {
+      "state": "idle",
+      "version": null,
+      "received": null,
+      "total": null,
+      "checkedAt": null,
+      "error": null
     }
   },
   {
@@ -1712,6 +1816,14 @@
     "systemNotifications": {
       "items": [],
       "available": true
+    },
+    "update": {
+      "state": "unsupported",
+      "version": null,
+      "received": null,
+      "total": null,
+      "checkedAt": null,
+      "error": null
     }
   },
   {
@@ -1746,6 +1858,14 @@
     "systemNotifications": {
       "items": [],
       "available": true
+    },
+    "update": {
+      "state": "idle",
+      "version": null,
+      "received": null,
+      "total": null,
+      "checkedAt": null,
+      "error": null
     }
   },
   {
@@ -1926,6 +2046,14 @@
         }
       ],
       "available": true
+    },
+    "update": {
+      "state": "upToDate",
+      "version": null,
+      "received": null,
+      "total": null,
+      "checkedAt": 1795000120000,
+      "error": null
     }
   }
 ]

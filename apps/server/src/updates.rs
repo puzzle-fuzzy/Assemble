@@ -40,20 +40,10 @@ use crate::http::{Shared, file_response};
 use crate::source::Source;
 use crate::web::retry_after;
 
-/// 编进桌面应用的公钥，和这个文件是同一份内容：服务端发布时用它核对，桌面应用下载后用它验签。
-pub const PUBLIC_KEY: &str = include_str!("../../../deploy/updater.pubkey");
-
-/// 清单的路径。桌面应用构建时把 `plugins.updater.endpoints` 指到 `<服务地址>` 加上它。
-pub const MANIFEST_PATH: &str = "/updates/latest.json";
-
-/// 更新包的路径前缀：`/updates/<平台>/<版本>/<文件>`。
-pub const ARTIFACTS_PREFIX: &str = "/updates";
-
-/// 第一期支持的两个平台，也是清单里的键。
-pub const PLATFORMS: [&str; 2] = ["windows-x86_64", "darwin-aarch64"];
-
-/// 单个更新包的上限。安装包在十兆上下；留足余量，又不至于把内存吃光。
-pub const MAX_ARTIFACT_BYTES: usize = 64 * 1024 * 1024;
+// 路径、平台名、上限和公钥和桌面端共用一份定义，放在协议里。
+pub use assemble_protocol::updates::{
+    ARTIFACTS_PREFIX, MANIFEST_PATH, MAX_ARTIFACT_BYTES, PLATFORMS, PUBLIC_KEY,
+};
 
 /// 签名文件很小，但它是从磁盘读进来的：给个上限。
 const MAX_SIGNATURE_BYTES: u64 = 16 * 1024;

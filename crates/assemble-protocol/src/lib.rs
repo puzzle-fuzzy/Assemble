@@ -35,3 +35,4 @@ pub mod releases;
 pub mod schedule;
 pub mod sends;
 pub mod system_notifications;
+pub mod updates;

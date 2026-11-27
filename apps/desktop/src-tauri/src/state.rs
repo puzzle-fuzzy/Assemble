@@ -258,6 +258,57 @@ fn receive_path_text(path: &std::path::Path) -> String {
     text.into_owned()
 }
 
+/// 自动更新走到了哪一步。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum UpdateState {
+    /// 这个构建不自动更新：连的不是正式服务。
+    Unsupported,
+    /// 还没查过。
+    Idle,
+    Checking,
+    /// 已经是最新，或者服务端还没有发布给这个平台的更新。
+    UpToDate,
+    Downloading,
+    /// 新版已经在手（macOS 上应用包已经换掉），下一次启动就是它。
+    Ready,
+    /// 上一步没成；原因在 [`UpdateView::error`] 里。
+    Failed,
+}
+
+/// 自动更新在界面上看得到的状态。更新只从 Rust 这边驱动，界面不碰更新插件。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateView {
+    pub state: UpdateState,
+    /// 新版本的版本号；还没查到新版时为 `None`。
+    pub version: Option<String>,
+    /// 已经下载了多少字节、总共多少；没在下载时为 `None`。
+    pub received: Option<u64>,
+    pub total: Option<u64>,
+    /// 上一次查完的时刻（纪元毫秒）；还没查过时为 `None`。
+    pub checked_at: Option<i64>,
+    /// 失败时的稳定错误码。
+    pub error: Option<String>,
+}
+
+impl UpdateView {
+    fn initial(supported: bool) -> Self {
+        Self {
+            state: if supported {
+                UpdateState::Idle
+            } else {
+                UpdateState::Unsupported
+            },
+            version: None,
+            received: None,
+            total: None,
+            checked_at: None,
+            error: None,
+        }
+    }
+}
+
 /// 界面在任一时刻能看到的全部状态。
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -284,6 +335,7 @@ pub struct Snapshot {
     pub planner: Option<PlannerView>,
     /// 这台电脑到点时不弹提醒。
     pub planner_muted: bool,
+    pub update: UpdateView,
 }
 
 /// 云盘里的一个文件在界面上的样子。摘要不给界面：用不上。
@@ -415,6 +467,8 @@ pub struct View {
     planner_muted: bool,
     /// 现在要摆出哪张新建表单（托盘的"新建提醒…"用过的记号）。表单交上去或收起时清掉。
     planner_compose: Option<Compose>,
+    /// 自动更新的状态。改它经过 [`AppState::set_update`]，顺便让托盘跟上。
+    update: UpdateView,
 }
 
 impl View {
@@ -457,6 +511,7 @@ impl View {
                 crate::planner::view(planner, self.planner_focus.as_deref(), self.planner_compose)
             }),
             planner_muted: self.planner_muted,
+            update: self.update.clone(),
         }
     }
 
@@ -483,6 +538,7 @@ impl View {
             planner_handles: Vec::new(),
             planner_muted: false,
             planner_compose: None,
+            update: UpdateView::initial(crate::update::enabled(origin)),
         }
     }
 }
@@ -718,6 +774,21 @@ impl<R: tauri::Runtime> AppState<R> {
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .clear()
+    }
+
+    /// 自动更新现在的样子。
+    pub fn update_view(&self) -> UpdateView {
+        self.view
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .update
+            .clone()
+    }
+
+    /// 改自动更新的状态。托盘上那一项的文字在状态换步的时候由更新那一路刷新，
+    /// 不在这里刷：下载进度一秒能来很多次。
+    pub fn set_update(&self, change: impl FnOnce(&mut UpdateView)) {
+        self.update(|view| change(&mut view.update));
     }
 
     /// 换上账户里当前的设备列表。
@@ -1302,6 +1373,11 @@ fn revise<T>(
 }
 
 /// 开机启动在系统里的实际状态。
+/// 自动更新现在的样子。
+pub fn update_view<R: tauri::Runtime>(app: &AppHandle<R>) -> UpdateView {
+    app.state::<AppState<R>>().update_view()
+}
+
 pub fn launch_state<R: tauri::Runtime>(app: &AppHandle<R>) -> LaunchState {
     if !launch_at_login_supported() {
         return LaunchState::Unsupported;

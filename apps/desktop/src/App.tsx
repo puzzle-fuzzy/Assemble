@@ -81,6 +81,7 @@ import type {
   Snapshot,
   TransferView,
 } from "@/lib/types";
+import { updateStatus } from "@/lib/update-text";
 import { cn } from "@/lib/utils";
 
 const MemosPage = lazy(() =>
@@ -505,7 +506,11 @@ export function App({
                 aria-label={uiText("about")}
                 hidden={section !== "about"}
               >
-                <AboutCard />
+                <AboutCard
+                  source={source}
+                  snapshot={snapshot}
+                  onError={setActionError}
+                />
               </section>
             </div>
           </ScrollArea>
@@ -515,8 +520,22 @@ export function App({
   );
 }
 
-/** 版本与官网只在关于页展示，避免每个页面重复占用内容空间。 */
-function AboutCard() {
+/** 版本、更新与官网只在关于页展示，避免每个页面重复占用内容空间。 */
+function AboutCard({ source, snapshot, onError }: CardProps) {
+  const [busy, setBusy] = useState(false);
+  const update = snapshot?.update;
+  // 读回的结果由 Rust 经状态推送回来，界面不自行改状态。
+  const run = async (action: () => Promise<unknown>) => {
+    setBusy(true);
+    onError(null);
+    try {
+      await action();
+    } catch (error) {
+      onError(toBridgeError(error).code);
+    } finally {
+      setBusy(false);
+    }
+  };
   return (
     <Card>
       <CardHeader className="sr-only">
@@ -536,6 +555,32 @@ function AboutCard() {
               {__ASSEMBLE_BUILD__.website}
             </dd>
           </div>
+          {update ? (
+            <div className="flex flex-col gap-1">
+              <dt className="text-muted-foreground">{uiText("update")}</dt>
+              <dd className="flex flex-wrap items-center justify-between gap-3">
+                <span data-testid="update-status">{updateStatus(update)}</span>
+                {update.state === "ready" ? (
+                  <Button
+                    size="sm"
+                    disabled={busy}
+                    onClick={() => void run(() => source.updateRestart())}
+                  >
+                    {uiText("updateRestart")}
+                  </Button>
+                ) : update.state === "unsupported" ? null : (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={busy || update.state === "checking"}
+                    onClick={() => void run(() => source.updateCheck())}
+                  >
+                    {uiText("updateCheck")}
+                  </Button>
+                )}
+              </dd>
+            </div>
+          ) : null}
         </dl>
       </CardContent>
     </Card>

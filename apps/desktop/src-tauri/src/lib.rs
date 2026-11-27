@@ -25,6 +25,7 @@ mod system_notifications;
 mod transfer_history;
 mod transfers;
 mod tray;
+mod update;
 
 use std::io::{self, Write};
 use std::sync::{Arc, Mutex, PoisonError};
@@ -77,6 +78,8 @@ pub fn run() -> Result<(), StartupError> {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_notification::init())
+        // 自动更新也一样只从 Rust 这边用：界面读状态、调两条具名命令，拿不到更新插件。
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .invoke_handler(handlers())
         .setup(move |app| start(app, client, background, handed_over, sink))
         .on_window_event(|window, event| {
@@ -99,7 +102,7 @@ pub fn run() -> Result<(), StartupError> {
                 }
             }
         })
-        .build(tauri::generate_context!())
+        .build(context())
         .map_err(StartupError::from)?
         .run(|app, event| {
             if let RunEvent::Exit = event {
@@ -107,6 +110,13 @@ pub fn run() -> Result<(), StartupError> {
             }
         });
     Ok(())
+}
+
+/// 这个应用自己的配置：`tauri.conf.json` 加上编进去的界面资源。
+/// 测试里带着更新插件的模拟应用也用它：那个插件要读到配置里 `plugins.updater` 那一段才肯初始化。
+/// 宏只能展开一次（它定义的符号不能重复），所以两处共用这一个函数。
+fn context<R: tauri::Runtime>() -> tauri::Context<R> {
+    tauri::generate_context!()
 }
 
 /// 先停入口，再等待下载和原生宿主连接收尾，最后删除本实例的临时桥接凭据。
@@ -188,6 +198,8 @@ fn handlers() -> impl Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool + Send + Sync +
         commands::open_main,
         commands::open_public_media,
         commands::dismiss_notice,
+        commands::update_check,
+        commands::update_restart,
         commands::system_notifications_refresh,
         commands::system_notifications_read,
         commands::planner_refresh,
@@ -230,8 +242,9 @@ fn start(
             .map_err(|error| io::Error::other(error.to_string()))
             .and_then(|directory| LogFile::open(&directory, "desktop.log")),
     );
+    // 记的是应用自己的版本（自动更新拿它比先后），不是 cargo 包的那个 0.1.0。
     tracing::info!(
-        version = env!("CARGO_PKG_VERSION"),
+        version = %app.package_info().version,
         "Assemble desktop is starting; the local log file is attached unless a warning says otherwise"
     );
 
@@ -240,6 +253,10 @@ fn start(
     let settings = transfers::load_settings(&handle);
     let notifier = Arc::new(notify::SystemNotifier::new(handle.clone()));
     let browser_secrets = secrets.clone();
+    // 上次是为了换新版才重启的话，这一次照样不弹窗口。记号每次启动都要读掉，本来就是后台启动时
+    // 也一样：不读它会留在那里，两分钟内的下一次启动就被当成"这一回也不弹窗口"。
+    let relaunching = update::relaunch_queued(&handle);
+    let background = background || relaunching;
     handle.manage(AppState::new(
         handle.clone(),
         client,
@@ -297,6 +314,7 @@ fn start(
     handle.manage(browser);
 
     runtime::start(&handle);
+    update::start(&handle);
     // 让 Windows 的右键菜单指向这个可执行文件（别的运行方式下什么都不做）。
     send_menu::sync(&handle.state::<AppState>().settings());
 

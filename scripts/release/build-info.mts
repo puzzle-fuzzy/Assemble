@@ -7,7 +7,8 @@ import type { BuildInfo } from "../../apps/desktop/src/lib/build-identity.ts";
 type Environment = Record<string, string | undefined>;
 
 const LOCAL_ORIGIN = "http://127.0.0.1:8787";
-const PRODUCTION_ORIGIN = "https://as.yxswy.com";
+/** 正式服务的地址。发布时构建必须连它：见 scripts/release/publish.ts。 */
+export const PRODUCTION_ORIGIN = "https://as.yxswy.com";
 
 function websiteOrigin(value: string): URL {
   let url: URL;
@@ -91,6 +92,12 @@ export function readBuildInfo(
   if (typeof config.version !== "string" || config.version.length === 0) {
     throw new Error("tauri.conf.json must define the application version");
   }
+  // 打包时版本由 scripts/release/build-desktop.ts 算出来传进来，配置文件里那一个只是起点
+  // （自动更新按版本认先后，每个提交一个号）；直接起开发服务时才用配置里的。
+  const version = environment.ASSEMBLE_BUILD_VERSION?.trim() || config.version;
+  if (!/^\d+\.\d+\.\d+$/.test(version)) {
+    throw new Error("The build version must look like 0.1.431");
+  }
   let commit = environment.ASSEMBLE_BUILD_COMMIT?.trim();
   if (!commit) {
     try {
@@ -107,5 +114,5 @@ export function readBuildInfo(
       );
     }
   }
-  return resolveBuildInfo(config.version, commit, environment);
+  return resolveBuildInfo(version, commit, environment);
 }
