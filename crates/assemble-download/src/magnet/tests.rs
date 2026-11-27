@@ -113,7 +113,38 @@ async fn selects_files_pauses_and_recovers_after_restart() {
     seeder.wait_until_initialized().await.unwrap();
     assert!(seeder.stats().finished);
     let port = seed.listen_addr().unwrap().port();
-    let source = format!("magnet:?xt=urn:btih:{hash}&x.pe=127.0.0.1:{port}&dn=credential-marker");
+    // 只让 Tracker 返回种子地址；不提供 x.pe 且禁用 DHT，元数据必须真正经过 tr 找节点。
+    let tracker = tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap();
+    let tracker_addr = tracker.local_addr().unwrap();
+    let announces = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let calls = Arc::clone(&announces);
+    let tracker_task = tokio::spawn(async move {
+        let mut request = [0_u8; 2048];
+        while let Ok((size, remote)) = tracker.recv_from(&mut request).await {
+            if size < 16 {
+                continue;
+            }
+            let action = u32::from_be_bytes(request[8..12].try_into().unwrap());
+            let mut response = Vec::new();
+            response.extend_from_slice(&action.to_be_bytes());
+            response.extend_from_slice(&request[12..16]);
+            if action == 0 {
+                response.extend_from_slice(&42_u64.to_be_bytes());
+            } else if action == 1 {
+                calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                response.extend_from_slice(&60_u32.to_be_bytes());
+                response.extend_from_slice(&0_u32.to_be_bytes());
+                response.extend_from_slice(&1_u32.to_be_bytes());
+                response.extend_from_slice(&[127, 0, 0, 1]);
+                response.extend_from_slice(&port.to_be_bytes());
+            } else {
+                continue;
+            }
+            tracker.send_to(&response, remote).await.unwrap();
+        }
+    });
+    let source =
+        format!("magnet:?xt=urn:btih:{hash}&tr=udp://{tracker_addr}/announce&dn=credential-marker");
     let store = Arc::new(MemorySecretStore::default());
     let history = state_dir.path().join("magnet.json");
     let open = || {
@@ -122,12 +153,16 @@ async fn selects_files_pauses_and_recovers_after_restart() {
             Arc::new(Semaphore::new(2)),
             Arc::new(|_| {}),
             Some(store.clone()),
-            engine::Options { local_test: true },
+            engine::Options {
+                local_test: true,
+                ..engine::Options::default()
+            },
         )
         .unwrap()
     };
     let manager = open();
     let preview = manager.prepare(&source, None).await.unwrap();
+    assert!(announces.load(std::sync::atomic::Ordering::SeqCst) > 0);
     assert_eq!(preview.files.len(), 3);
     let ids: Vec<_> = preview
         .files
@@ -212,6 +247,8 @@ async fn selects_files_pauses_and_recovers_after_restart() {
     tokio::time::sleep(Duration::from_millis(1200)).await;
     assert_eq!(seeder.stats().uploaded_bytes, uploaded);
     seed.stop().await;
+    tracker_task.abort();
+    let _ = tracker_task.await;
 }
 
 #[test]
@@ -245,7 +282,10 @@ async fn cancelling_metadata_and_shutdown_wait_for_engine_cleanup() {
         Arc::new(Semaphore::new(2)),
         Arc::new(|_| {}),
         Some(Arc::new(MemorySecretStore::default())),
-        engine::Options { local_test: true },
+        engine::Options {
+            local_test: true,
+            ..engine::Options::default()
+        },
     )
     .unwrap();
     let worker = Arc::clone(&manager);
@@ -373,7 +413,10 @@ async fn active_history_restores_paused_and_cancel_discards_only_owned_cache() {
         Arc::new(Semaphore::new(2)),
         Arc::new(|_| {}),
         Some(store.clone()),
-        engine::Options { local_test: true },
+        engine::Options {
+            local_test: true,
+            ..engine::Options::default()
+        },
     )
     .unwrap();
     let task = manager.tasks().remove(0);
@@ -400,4 +443,101 @@ fn keychain_chunks_keep_unicode_and_remove_every_part() {
     credentials::delete(&store, "task").unwrap();
     assert!(credentials::get(&store, "task").is_err());
     assert!(store.get(&key("task.0")).unwrap().is_none());
+}
+
+/// 仅手工对合法公开资源测速；来源从文件读入，打印数值，不碰真实钥匙串与任务历史。
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "requires an explicitly supplied public magnet and network access"]
+async fn public_tracker_download_benchmark() {
+    let input = std::env::var("ASSEMBLE_PUBLIC_MAGNET_FILE").expect("public magnet file");
+    let source = std::fs::read_to_string(input).unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let manager = MagnetManager::open_with(
+        dir.path().join("history.json"),
+        Arc::new(Semaphore::new(2)),
+        Arc::new(|_| {}),
+        Some(Arc::new(MemorySecretStore::default())),
+        engine::Options {
+            pool: Some(tracker_pool::Pool::open(dir.path().join("trackers.json"))),
+            ..engine::Options::default()
+        },
+    )
+    .unwrap();
+    let started = Instant::now();
+    let preview = manager.prepare(source.trim(), None).await;
+    let metadata_ms = started.elapsed().as_millis();
+    let Ok(preview) = preview else {
+        manager.shutdown().await;
+        println!(
+            "BENCHMARK {{\"metadataMs\":{metadata_ms},\"error\":\"{}\",\"receivedBytes\":0}}",
+            preview.err().unwrap().code()
+        );
+        return;
+    };
+    println!(
+        "BENCHMARK_METADATA {{\"metadataMs\":{metadata_ms},\"files\":{}}}",
+        preview.files.len()
+    );
+    let ids: Vec<_> = preview.files.iter().map(|f| f.id).collect();
+    let id = manager
+        .start(&preview.id, &ids, dir.path().to_owned(), None)
+        .await
+        .unwrap();
+    let download = Instant::now();
+    let mut first_byte_ms = None;
+    let mut peak_bps = 0;
+    loop {
+        let task = manager.record(&id).unwrap().view;
+        if task.received_bytes > 0 && first_byte_ms.is_none() {
+            first_byte_ms = Some(download.elapsed().as_millis());
+        }
+        peak_bps = peak_bps.max(task.bytes_per_second);
+        if !task.phase.active()
+            || download.elapsed() >= Duration::from_secs(90)
+            || task.received_bytes >= 128 * 1024 * 1024
+        {
+            let elapsed_ms = download.elapsed().as_millis().max(1);
+            let first = first_byte_ms.map_or_else(|| "null".into(), |v| v.to_string());
+            println!(
+                "BENCHMARK {{\"metadataMs\":{metadata_ms},\"firstByteMs\":{first},\"downloadMs\":{elapsed_ms},\"receivedBytes\":{},\"averageBps\":{},\"peakBps\":{peak_bps},\"completed\":{}}}",
+                task.received_bytes,
+                u128::from(task.received_bytes) * 1000 / elapsed_ms,
+                task.phase == DownloadPhase::Completed
+            );
+            if task.phase.active() {
+                manager.cancel(&id).await.unwrap();
+            }
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(250)).await;
+    }
+    manager.shutdown().await;
+}
+
+#[tokio::test]
+#[ignore = "requires an explicitly supplied public magnet and network access"]
+async fn public_tracker_connection_diagnostics() {
+    let input = std::env::var("ASSEMBLE_PUBLIC_MAGNET_FILE").expect("public magnet file");
+    let value = std::fs::read_to_string(input).unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let pool = tracker_pool::Pool::open(dir.path().join("trackers.json"));
+    let options = engine::Options {
+        pool: Some(Arc::clone(&pool)),
+        ..engine::Options::default()
+    };
+    let result = engine::connection_options(
+        &engine::source(value.trim()).unwrap(),
+        &options,
+        &CancellationToken::new(),
+    )
+    .await;
+    match result {
+        Ok((trackers, peers)) => println!(
+            "DISCOVERY {{\"udpTrackers\":{},\"httpAndExplicitPeers\":{}}}",
+            trackers.len(),
+            peers.len()
+        ),
+        Err(error) => println!("DISCOVERY {{\"error\":\"{}\"}}", error.code()),
+    }
+    pool.shutdown().await;
 }

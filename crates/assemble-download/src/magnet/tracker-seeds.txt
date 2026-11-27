@@ -1,0 +1,12 @@
+udp://120.78.150.131:6969/announce
+udp://193.34.92.5:80/announce
+udp://74.81.245.60:2010/announce
+udp://85.159.231.214:1212/announce
+udp://hidden.torrentonline.cc:42069/announce
+udp://obey.torrentonline.cc:42069/announce
+udp://tracker-udp.anirena.com:80/announce
+udp://tracker3.itzmx.com:6961/announce
+https://tracker.vectahosting.eu/announce
+https://tr-rh-zhuqiy.dgj055.icu/announce
+https://torrent.ubuntu.com/announce
+https://tracker.augrains.com/announce

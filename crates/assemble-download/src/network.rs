@@ -63,6 +63,50 @@ pub(crate) fn public_ip(ip: IpAddr) -> bool {
     }
 }
 
+pub(crate) fn fake_ip(ip: IpAddr) -> bool {
+    match ip {
+        IpAddr::V4(ip) => ip.octets()[0] == 198 && matches!(ip.octets()[1], 18 | 19),
+        IpAddr::V6(ip) => ip.segments()[..3] == [0x2001, 2, 0],
+    }
+}
+
+fn needs_real_dns(host: &str, addresses: &[SocketAddr]) -> bool {
+    host.parse::<IpAddr>().is_err()
+        && !addresses.is_empty()
+        && addresses.iter().all(|a| fake_ip(a.ip()))
+}
+
+fn dns_answers(body: &[u8]) -> Result<Vec<IpAddr>> {
+    let value: serde_json::Value =
+        serde_json::from_slice(body).map_err(|_| DownloadError::Network)?;
+    if value.get("Status").and_then(serde_json::Value::as_u64) != Some(0) {
+        return Err(DownloadError::Network);
+    }
+    let mut addresses = Vec::new();
+    for answer in value
+        .get("Answer")
+        .and_then(serde_json::Value::as_array)
+        .into_iter()
+        .flatten()
+    {
+        if matches!(
+            answer.get("type").and_then(serde_json::Value::as_u64),
+            Some(1 | 28)
+        ) {
+            let ip = answer
+                .get("data")
+                .and_then(serde_json::Value::as_str)
+                .and_then(|v| v.parse().ok())
+                .ok_or(DownloadError::Network)?;
+            if !public_ip(ip) {
+                return Err(DownloadError::InvalidSource);
+            }
+            addresses.push(ip);
+        }
+    }
+    Ok(addresses)
+}
+
 impl Network {
     #[cfg(test)]
     pub(crate) fn test(origin: String) -> Self {
@@ -91,46 +135,36 @@ impl Network {
             .timeout(Duration::from_secs(10))
             .build()
             .map_err(|_| DownloadError::Network)?;
-        let mut url = Url::parse("https://cloudflare-dns.com/dns-query")
-            .map_err(|_| DownloadError::Network)?;
-        url.query_pairs_mut()
-            .append_pair("name", host)
-            .append_pair("type", "A");
-        let mut response = client
-            .get(url)
-            .header("accept", "application/dns-json")
-            .send()
-            .await
-            .map_err(|_| DownloadError::Network)?;
-        if !response.status().is_success() {
-            return Err(DownloadError::Network);
-        }
-        let mut body = Vec::new();
-        while let Some(chunk) = response.chunk().await.map_err(|_| DownloadError::Network)? {
-            if body.len() + chunk.len() > 65_536 {
-                return Err(DownloadError::Limit);
+        let mut addresses = Vec::new();
+        for record in ["A", "AAAA"] {
+            let mut url = Url::parse("https://cloudflare-dns.com/dns-query")
+                .map_err(|_| DownloadError::Network)?;
+            url.query_pairs_mut()
+                .append_pair("name", host)
+                .append_pair("type", record);
+            let mut response = client
+                .get(url)
+                .header("accept", "application/dns-json")
+                .send()
+                .await
+                .map_err(|_| DownloadError::Network)?;
+            if !response.status().is_success() {
+                return Err(DownloadError::Network);
             }
-            body.extend_from_slice(&chunk);
+            let mut body = Vec::new();
+            while let Some(chunk) = response.chunk().await.map_err(|_| DownloadError::Network)? {
+                if body.len() + chunk.len() > 65_536 {
+                    return Err(DownloadError::Limit);
+                }
+                body.extend_from_slice(&chunk);
+            }
+            addresses = dns_answers(&body)?;
+            if !addresses.is_empty() {
+                break;
+            }
         }
-        let value: serde_json::Value =
-            serde_json::from_slice(&body).map_err(|_| DownloadError::Network)?;
-        if value.get("Status").and_then(serde_json::Value::as_u64) != Some(0) {
+        if addresses.is_empty() {
             return Err(DownloadError::Network);
-        }
-        let addresses: Vec<IpAddr> = value
-            .get("Answer")
-            .and_then(serde_json::Value::as_array)
-            .into_iter()
-            .flatten()
-            .filter(|v| v.get("type").and_then(serde_json::Value::as_u64) == Some(1))
-            .filter_map(|v| {
-                v.get("data")
-                    .and_then(serde_json::Value::as_str)
-                    .and_then(|v| v.parse().ok())
-            })
-            .collect();
-        if addresses.is_empty() || addresses.iter().any(|ip| !public_ip(*ip)) {
-            return Err(DownloadError::InvalidSource);
         }
         let mut cache = self
             .resolved
@@ -140,6 +174,41 @@ impl Network {
             cache.clear();
         }
         cache.insert(host.to_owned(), (Instant::now(), addresses.clone()));
+        Ok(addresses)
+    }
+
+    pub(crate) async fn addresses(
+        &self,
+        host: &str,
+        port: u16,
+        local_test: bool,
+    ) -> Result<Vec<SocketAddr>> {
+        let mut addresses: Vec<_> = tokio::time::timeout(
+            Duration::from_secs(3),
+            tokio::net::lookup_host((host, port)),
+        )
+        .await
+        .map_err(|_| DownloadError::Network)?
+        .map_err(|_| DownloadError::Network)?
+        .collect();
+        // 混合的 v4/v6 Fake-IP 仍只触发真实公网解析，绝不作为可连接地址直接放行。
+        if !local_test && needs_real_dns(host, &addresses) {
+            addresses = tokio::time::timeout(Duration::from_secs(4), self.real_addresses(host))
+                .await
+                .map_err(|_| DownloadError::Network)??
+                .into_iter()
+                .map(|ip| SocketAddr::new(ip, port))
+                .collect();
+        }
+        if addresses.is_empty()
+            || addresses
+                .iter()
+                .any(|a| !(public_ip(a.ip()) || (local_test && a.ip().is_loopback())))
+        {
+            return Err(DownloadError::InvalidSource);
+        }
+        addresses.sort_unstable();
+        addresses.dedup();
         Ok(addresses)
     }
 
@@ -166,20 +235,7 @@ impl Network {
         if !local_test && !matches!((url.scheme(), port), ("http", 80) | ("https", 443)) {
             return Err(DownloadError::InvalidSource);
         }
-        let mut addresses: Vec<SocketAddr> = tokio::net::lookup_host((host, port))
-            .await
-            .map_err(|_| DownloadError::Network)?
-            .collect();
-        if !local_test && host.parse::<IpAddr>().is_err() && !addresses.is_empty() && addresses.iter().all(|a|matches!(a.ip(),IpAddr::V4(ip) if ip.octets()[0]==198 && matches!(ip.octets()[1],18|19))) {
-            addresses=self.real_addresses(host).await?.into_iter().map(|ip|SocketAddr::new(ip,port)).collect();
-        }
-        if addresses.is_empty()
-            || addresses.iter().any(|address| {
-                !(public_ip(address.ip()) || (local_test && address.ip().is_loopback()))
-            })
-        {
-            return Err(DownloadError::InvalidSource);
-        }
+        let addresses = self.addresses(host, port, local_test).await?;
         reqwest::Client::builder()
             .redirect(reqwest::redirect::Policy::none())
             // 代理会代替本机解析目标，破坏连接固定保证；此独立下载客户端不继承环境代理。
@@ -376,6 +432,40 @@ pub(crate) fn headers(page: Option<&str>) -> Result<HeaderMap> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn mixed_fake_ip_requires_real_resolution_but_private_or_mixed_public_does_not() {
+        let mixed = vec![
+            "198.18.5.1:443".parse().unwrap(),
+            "[2001:2::b5]:443".parse().unwrap(),
+        ];
+        assert!(needs_real_dns("tracker.example", &mixed));
+        assert!(!needs_real_dns("198.18.5.1", &mixed));
+        assert!(!needs_real_dns(
+            "tracker.example",
+            &["127.0.0.1:443".parse().unwrap()]
+        ));
+        assert!(!needs_real_dns(
+            "tracker.example",
+            &[mixed[0], "8.8.8.8:443".parse().unwrap()]
+        ));
+        assert!(mixed.iter().all(|a| !public_ip(a.ip())));
+        assert_eq!(
+            dns_answers(br#"{"Status":0,"Answer":[{"type":28,"data":"2606:4700:4700::1111"}]}"#)
+                .unwrap(),
+            vec!["2606:4700:4700::1111".parse::<IpAddr>().unwrap()]
+        );
+        assert!(dns_answers(br#"{"Status":0,"Answer":[{"type":1,"data":"127.0.0.1"}]}"#).is_err());
+    }
+    #[tokio::test]
+    async fn actual_connection_addresses_reject_private_targets() {
+        let network = Network::default();
+        assert!(network.addresses("127.0.0.1", 8080, false).await.is_err());
+        assert!(network.addresses("198.18.1.1", 80, false).await.is_err());
+        assert_eq!(
+            network.addresses("127.0.0.1", 8080, true).await.unwrap(),
+            vec!["127.0.0.1:8080".parse().unwrap()]
+        );
+    }
     #[test]
     fn source_and_address_boundaries() {
         for value in [

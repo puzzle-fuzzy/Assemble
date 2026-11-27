@@ -17,6 +17,7 @@ getrandom.workspace = true
 hmac.workspace = true
 m3u8-rs.workspace = true
 librqbit.workspace = true
+librqbit-bencode.workspace = true
 md-5.workspace = true
 reqwest.workspace = true
 serde.workspace = true

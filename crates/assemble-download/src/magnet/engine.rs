@@ -1,5 +1,6 @@
 //! BT 引擎只拿 Rust 内部来源；关闭它自己的历史和局域网发现，恢复资料由本模块管理。
 use super::files::relative_path;
+use super::{tracker_pool, trackers};
 use crate::{DownloadError, MAX_METADATA, Result};
 use assemble_protocol::downloads::DownloadFile;
 use assemble_store::secret::SecretString;
@@ -19,6 +20,8 @@ pub(super) const UPLOAD_BPS: u32 = 256 * 1024;
 #[derive(Clone, Default)]
 pub(super) struct Options {
     pub local_test: bool,
+    pub network: crate::network::Network,
+    pub pool: Option<Arc<tracker_pool::Pool>>,
 }
 #[derive(Clone)]
 pub(super) struct Prepared {
@@ -47,29 +50,18 @@ pub(super) fn source(value: &str) -> Result<SecretString> {
 pub(super) async fn connection_options(
     source: &SecretString,
     options: &Options,
+    cancel: &CancellationToken,
 ) -> Result<(Vec<String>, Vec<SocketAddr>)> {
     let url = Url::parse(source.expose()).map_err(|_| DownloadError::InvalidSource)?;
-    let mut trackers = Vec::new();
+    let mut candidates = Vec::new();
     let mut peers = Vec::new();
     for (key, value) in url.query_pairs() {
         match key.as_ref() {
             "tr" => {
-                if trackers.len() >= 16 {
+                if candidates.len() >= 16 {
                     return Err(DownloadError::Limit);
                 }
-                let tracker = Url::parse(&value).map_err(|_| DownloadError::InvalidSource)?;
-                if !matches!(tracker.scheme(), "http" | "https" | "udp")
-                    || !tracker.username().is_empty()
-                    || tracker.password().is_some()
-                    || tracker.fragment().is_some()
-                {
-                    return Err(DownloadError::InvalidSource);
-                }
-                tracker.host_str().ok_or(DownloadError::InvalidSource)?;
-                tracker
-                    .port_or_known_default()
-                    .ok_or(DownloadError::InvalidSource)?;
-                trackers.push(tracker);
+                candidates.push((trackers::parse(&value, false)?, true));
             }
             "x.pe" => {
                 if peers.len() >= 32 {
@@ -89,45 +81,66 @@ pub(super) async fn connection_options(
             _ => {}
         }
     }
-    // 坏掉的 Tracker 不应让仍可通过 DHT 找到的资源整体失败；同时限制 DNS 等待总时长。
-    let trackers = futures_util::stream::iter(trackers)
-        .map(|tracker| async move {
-            let host = tracker.host_str().ok_or(DownloadError::InvalidSource)?.trim_matches(['[',']']);
-            let port = tracker
-                .port_or_known_default()
-                .ok_or(DownloadError::InvalidSource)?;
-            let addresses = match tokio::time::timeout(
-                std::time::Duration::from_secs(3),
-                tokio::net::lookup_host((host, port)),
-            )
-            .await
-            {
-                Ok(Ok(addresses)) => addresses.collect::<Vec<_>>(),
-                _ => return Ok(None),
-            };
-            // 引擎不能固定 HTTP Tracker 的 DNS；Fake-IP 来源跳过该 Tracker，继续用 DHT，不能当作公网放行。
-            if host.parse::<std::net::IpAddr>().is_err() && !addresses.is_empty() && addresses.iter().all(|a|matches!(a.ip(),std::net::IpAddr::V4(ip) if ip.octets()[0]==198 && matches!(ip.octets()[1],18|19))) { return Ok(None); }
-            if addresses
-                .iter()
-                .any(|a| !options.local_test && !crate::network::public_ip(a.ip()))
-            {
-                return Err(DownloadError::InvalidSource);
+    if let Some(pool) = &options.pool {
+        candidates.extend(
+            pool.get()
+                .into_iter()
+                .filter_map(|v| trackers::parse(&v, true).ok())
+                .map(|url| (url, false)),
+        );
+    }
+    let mut seen = std::collections::HashSet::new();
+    candidates.retain(|(url, _)| seen.insert(url.to_string()));
+    let resolving = futures_util::stream::iter(candidates)
+        .map(|(url, explicit)| async move {
+            match trackers::Endpoint::resolve(url, &options.network, options.local_test).await {
+                Ok(endpoint) => Ok(Some(endpoint)),
+                Err(DownloadError::InvalidSource) if explicit => Err(DownloadError::InvalidSource),
+                // 单个失效候选不阻断 DHT 和其余 Tracker；明确指向私网的用户输入仍拒绝。
+                _ => Ok(None),
             }
-            Ok((!addresses.is_empty()).then(|| tracker.to_string()))
         })
-        .buffered(8)
-        .try_collect::<Vec<_>>()
-        .await?
-        .into_iter()
-        .flatten()
-        .collect();
-    Ok((trackers, peers))
+        .buffer_unordered(8)
+        .try_collect::<Vec<_>>();
+    let endpoints = tokio::select! { ()=cancel.cancelled()=>return Err(DownloadError::Cancelled), result=resolving=>result? };
+    let mut udp = Vec::new();
+    let mut http = Vec::new();
+    for endpoint in endpoints.into_iter().flatten() {
+        if endpoint.url.scheme() == "udp" {
+            udp.push(endpoint.udp_url()?);
+        } else {
+            http.push(endpoint);
+        }
+    }
+    let hash = librqbit::Magnet::parse(source.expose())
+        .map_err(|_| DownloadError::InvalidSource)?
+        .as_id20()
+        .ok_or(DownloadError::Unsupported)?;
+    // HTTPS 通过固定地址的客户端短时找节点；引擎持续使用固定公网 IP 的 UDP Tracker。
+    peers.extend(trackers::bootstrap(http, &hash.0, cancel).await);
+    if cancel.is_cancelled() {
+        return Err(DownloadError::Cancelled);
+    }
+    peers.sort_unstable();
+    peers.dedup();
+    peers.truncate(128);
+    udp.sort();
+    udp.dedup();
+    Ok((udp, peers))
 }
 pub(super) async fn session(
     folder: PathBuf,
     cancel: CancellationToken,
     options: &Options,
 ) -> Result<Arc<Session>> {
+    let bootstrap = if options.local_test {
+        Vec::new()
+    } else {
+        tokio::select! {
+            ()=cancel.cancelled()=>return Err(DownloadError::Cancelled),
+            addresses=async { tokio::join!(options.network.addresses("dht.transmissionbt.com",6881,false),options.network.addresses("dht.libtorrent.org",25401,false)) }=>[addresses.0.unwrap_or_default(),addresses.1.unwrap_or_default()].into_iter().flatten().map(|a|a.to_string()).collect(),
+        }
+    };
     Session::new_with_opts(
         folder,
         SessionOptions {
@@ -136,6 +149,7 @@ pub(super) async fn session(
             } else {
                 Some(DhtSessionConfig {
                     persistence: None,
+                    bootstrap_addrs: Some(bootstrap),
                     ..DhtSessionConfig::default()
                 })
             },
@@ -217,7 +231,10 @@ pub(super) async fn prepare(
 ) -> Result<Prepared> {
     let source = source(value)?;
     let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(90);
-    let (trackers, peers) = tokio::select! { ()=cancel.cancelled()=>return Err(DownloadError::Cancelled), result=tokio::time::timeout_at(deadline, connection_options(&source,options))=>result.map_err(|_|DownloadError::MetadataUnavailable)?? };
+    let (trackers, peers) =
+        tokio::time::timeout_at(deadline, connection_options(&source, options, cancel))
+            .await
+            .map_err(|_| DownloadError::MetadataUnavailable)??;
     let parsed =
         librqbit::Magnet::parse(source.expose()).map_err(|_| DownloadError::InvalidSource)?;
     let magnet = format!(
@@ -227,11 +244,16 @@ pub(super) async fn prepare(
             .ok_or(DownloadError::Unsupported)?
             .as_string()
     );
+    let mut magnet = Url::parse(&magnet).map_err(|_| DownloadError::InvalidSource)?;
+    // librqbit 的磁力分支只读 URI 内的 tr，不读取 AddTorrentOptions.trackers。
+    for tracker in &trackers {
+        magnet.query_pairs_mut().append_pair("tr", tracker);
+    }
     let temp = tempfile::tempdir().map_err(|_| DownloadError::Storage)?;
     let engine = session(temp.path().to_path_buf(), cancel.child_token(), options).await?;
     let result = tokio::select! {
         ()=cancel.cancelled()=>Err(DownloadError::Cancelled),
-        result=tokio::time::timeout_at(deadline,engine.add_torrent(AddTorrent::from_url(&magnet),Some(AddTorrentOptions { list_only:true,trackers:Some(trackers),initial_peers:Some(peers),..AddTorrentOptions::default() }))) => match result {
+        result=tokio::time::timeout_at(deadline,engine.add_torrent(AddTorrent::from_url(magnet.as_str()),Some(AddTorrentOptions { list_only:true,trackers:Some(trackers),initial_peers:Some(peers),..AddTorrentOptions::default() }))) => match result {
             Ok(Ok(AddTorrentResponse::ListOnly(value))) => describe(&value.torrent_bytes).map(|(metadata,files,title)|Prepared { source,metadata,files,title,peers:value.seen_peers }),
             _=>Err(DownloadError::MetadataUnavailable),
         }

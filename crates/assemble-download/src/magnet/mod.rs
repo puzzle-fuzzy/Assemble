@@ -4,6 +4,8 @@ mod engine;
 mod files;
 #[cfg(test)]
 mod tests;
+mod tracker_pool;
+mod trackers;
 
 use crate::{DownloadError, Result, random_id};
 use assemble_protocol::downloads::{
@@ -102,12 +104,16 @@ impl MagnetManager {
         slots: Arc<Semaphore>,
         changed: Arc<dyn Fn(Vec<DownloadTask>) + Send + Sync>,
     ) -> Result<Arc<Self>> {
+        let pool = tracker_pool::Pool::open(history.with_extension("trackers.json"));
         Self::open_with(
             history,
             slots,
             changed,
             system_store(),
-            engine::Options::default(),
+            engine::Options {
+                pool: Some(pool),
+                ..engine::Options::default()
+            },
         )
     }
     fn open_with(
@@ -523,7 +529,8 @@ impl MagnetManager {
                 .saturating_sub(record.view.received_bytes)
                 .saturating_add(record.view.total_bytes.unwrap_or(0)),
         )?;
-        let (trackers, initial) = tokio::select! { ()=cancel.cancelled()=>return Err(DownloadError::Cancelled), result=engine::connection_options(&source, &self.options)=>result? };
+        let (trackers, initial) =
+            engine::connection_options(&source, &self.options, cancel).await?;
         peers.extend(initial);
         peers.truncate(128);
         let engine = engine::session(data.clone(), cancel.child_token(), &self.options).await?;
@@ -704,6 +711,9 @@ impl MagnetManager {
     pub(crate) async fn shutdown(&self) {
         self.lifetime.cancel();
         self.cancel_preparation();
+        if let Some(pool) = &self.options.pool {
+            pool.shutdown().await;
+        }
         let _operations = self.operations.lock().await;
         loop {
             let changed = self.prepared_changed.notified();
