@@ -783,6 +783,43 @@ pub async fn drive_rename(
     Ok(state.snapshot())
 }
 
+/// 预览只对登录的主窗口开放；界面不接触读取凭据或本机路径。
+#[tauri::command]
+pub async fn drive_preview_open(
+    app: AppHandle,
+    window: tauri::WebviewWindow,
+    file_id: String,
+    request_id: String,
+) -> Result<crate::drive_preview::OpenedPreview, CommandError> {
+    let state = app.state::<AppState>();
+    remote_window(&window, &state)?;
+    crate::drive_preview::open(&state, &file_id, &request_id).await
+}
+
+#[tauri::command]
+pub fn drive_preview_close(
+    app: AppHandle,
+    window: tauri::WebviewWindow,
+    request_id: String,
+) -> Result<(), CommandError> {
+    if !assemble_protocol::primitives::is_valid_id(&request_id) {
+        return Err(CommandError::local(
+            "INVALID_INPUT",
+            "invalid preview request identifier",
+        ));
+    }
+    if window.label() != crate::state::MAIN_WINDOW {
+        return Err(CommandError::local(
+            "FORBIDDEN",
+            "preview requires main window",
+        ));
+    }
+    app.state::<AppState>()
+        .file_previews
+        .close_request(&request_id);
+    Ok(())
+}
+
 /// 从云盘里删掉一个文件。
 #[tauri::command]
 pub async fn drive_delete(

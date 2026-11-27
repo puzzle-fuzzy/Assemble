@@ -75,6 +75,16 @@ pub struct MemoIdInput {
     pub id: String,
 }
 
+pub async fn drive_preview(call: &Call<'_>, id: &str) -> Result<String, Failure> {
+    let preview = call
+        .client()
+        .drive_preview(id, &call.options())
+        .await
+        .map_err(|error| explain(&error))?;
+    // 助手只读能力与大小，不回传整份文本、媒体内容或读取地址。
+    serde_json::to_string(&preview.info).map_err(|_| Failure::Other("预览描述无法编码。".into()))
+}
+
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct MemoCreateInput {

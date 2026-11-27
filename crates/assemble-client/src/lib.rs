@@ -20,6 +20,7 @@ pub mod error;
 pub mod events;
 pub mod login;
 pub mod media;
+pub mod preview;
 pub mod remote;
 pub mod remote_host;
 mod remote_secure;

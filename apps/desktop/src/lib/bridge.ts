@@ -13,6 +13,10 @@ import {
   isMediaJob,
   isMediaList,
 } from "@assemble/media/guard";
+import {
+  isFilePreview,
+  type PreviewResource,
+} from "@assemble/ui/lib/file-preview";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 
@@ -103,6 +107,7 @@ export interface Bridge {
   driveUpload(): Promise<Snapshot>;
   /** 把云盘里的一个文件取回到接收位置。 */
   driveDownload(fileId: string): Promise<Snapshot>;
+  drivePreview(fileId: string, signal: AbortSignal): Promise<PreviewResource>;
   /** 给云盘文件改名；名字不是本机路径。 */
   driveRename(fileId: string, name: string): Promise<Snapshot>;
   /** 从云盘里删掉一个文件。 */
@@ -220,6 +225,54 @@ export const bridge: Bridge = {
   driveUpload: () => checked(() => invoke<unknown>("drive_upload")),
   driveDownload: (fileId) =>
     checked(() => invoke<unknown>("drive_download", { fileId })),
+  drivePreview: async (fileId, signal) => {
+    const requestId = crypto.randomUUID();
+    const close = () => {
+      void invoke("drive_preview_close", { requestId }).catch(() => {});
+    };
+    if (signal.aborted) throw new BridgeError("CANCELLED", "preview closed");
+    signal.addEventListener("abort", close, { once: true });
+    try {
+      const value = await invoke<unknown>("drive_preview_open", {
+        fileId,
+        requestId,
+      });
+      const v = value as {
+        preview?: unknown;
+        generation?: unknown;
+        src?: unknown;
+      } | null;
+      if (
+        !v ||
+        !isFilePreview(v.preview) ||
+        typeof v.generation !== "number" ||
+        !Number.isSafeInteger(v.generation) ||
+        v.generation < 1 ||
+        (v.src !== null &&
+          (typeof v.src !== "string" ||
+            ![
+              "http://assemble-preview.localhost",
+              "assemble-preview://localhost",
+            ].some(
+              (origin) => v.src === `${origin}/${v.generation}/${fileId}`,
+            )))
+      )
+        throw new BridgeError("INVALID_RESPONSE", "invalid preview response");
+      if (signal.aborted) throw new BridgeError("CANCELLED", "preview closed");
+      return {
+        preview: v.preview,
+        src: v.src as string | null,
+        dispose: () => {
+          signal.removeEventListener("abort", close);
+          close();
+        },
+      };
+    } catch (error) {
+      signal.removeEventListener("abort", close);
+      close();
+      throw toBridgeError(error);
+    }
+  },
   driveRename: (fileId, name) =>
     checked(() => invoke<unknown>("drive_rename", { fileId, name })),
   driveDelete: (fileId) =>

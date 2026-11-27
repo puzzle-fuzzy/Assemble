@@ -549,6 +549,7 @@ impl View {
 }
 
 pub struct AppState<R: tauri::Runtime = tauri::Wry> {
+    pub file_previews: crate::drive_preview::Previews,
     pub remote_runtime: crate::remote::Runtime,
     transfer_history: Mutex<crate::transfer_history::HistoryStore>,
     system_inbox: Mutex<crate::system_notifications::Inbox>,
@@ -597,6 +598,7 @@ impl<R: tauri::Runtime> AppState<R> {
         );
         Self {
             transfer_history: Mutex::new(crate::transfer_history::HistoryStore::new(&origin)),
+            file_previews: crate::drive_preview::Previews::default(),
             remote_runtime: crate::remote::Runtime::default(),
             system_inbox: Mutex::new(crate::system_notifications::Inbox::default()),
             app,
@@ -911,6 +913,7 @@ impl<R: tauri::Runtime> AppState<R> {
 
     /// 结束登录会话：后台任务停下来，与账户有关的状态清空。
     pub fn end_session(&self) {
+        self.file_previews.close(None);
         self.remote_runtime.cancel_all();
         self.set_remote(assemble_protocol::remote::RemoteView::default());
         self.transfer_history

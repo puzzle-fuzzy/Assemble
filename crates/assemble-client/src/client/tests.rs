@@ -210,6 +210,67 @@ fn options<'a>(cancel: &'a CancellationToken) -> RequestOptions<'a> {
     RequestOptions::new(cancel)
 }
 
+#[tokio::test]
+async fn preview_rejects_wrong_ranges_and_does_not_follow_redirects() {
+    for (status, range, length) in [
+        (StatusCode::OK, "bytes 0-2/10", 3),
+        (StatusCode::PARTIAL_CONTENT, "bytes 1-3/10", 3),
+        (StatusCode::PARTIAL_CONTENT, "bytes 0-2/10", 2),
+        (StatusCode::FOUND, "bytes 0-2/10", 3),
+    ] {
+        let server = Server::start(with(move |_| {
+            (
+                status,
+                [
+                    (header::CONTENT_RANGE, range),
+                    (header::CONTENT_TYPE, "image/png"),
+                    (header::LOCATION, "http://127.0.0.1:1/credential-leak"),
+                ],
+                vec![0_u8; length],
+            )
+                .into_response()
+        }))
+        .await;
+        let client = server.client();
+        client.set_bearer(Some(SecretString::new("test-preview-only")));
+        let cancel = CancellationToken::new();
+        assert!(
+            client
+                .drive_preview_chunk("file-1", 0, 2, 10, &options(&cancel))
+                .await
+                .is_err()
+        );
+        assert_eq!(server.received(), 1);
+        assert_eq!(
+            server.requests(1).await[0].header("range"),
+            Some("bytes=0-2")
+        );
+    }
+}
+
+#[tokio::test]
+async fn closing_preview_cancels_a_pending_read_and_invalid_ranges_do_not_send_requests() {
+    let server = Server::start(delayed(Duration::from_secs(60), Value::Null)).await;
+    let client = server.client();
+    client.set_bearer(Some(SecretString::new("test-preview-only")));
+    let cancel = CancellationToken::new();
+    assert!(matches!(
+        client
+            .drive_preview_chunk("file-1", 2, 1, 10, &options(&cancel))
+            .await,
+        Err(ClientError::InvalidRequest)
+    ));
+    assert_eq!(server.received(), 0);
+    let settings = options(&cancel);
+    let read = client.drive_preview("file-1", &settings);
+    let abort = async {
+        server.requests(1).await;
+        cancel.cancel();
+    };
+    let (result, ()) = tokio::join!(read, abort);
+    assert!(matches!(result, Err(ClientError::Cancelled)));
+}
+
 fn http(status: u16, code: &str) -> ClientError {
     ClientError::Http {
         status,

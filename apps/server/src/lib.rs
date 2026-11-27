@@ -19,6 +19,7 @@ pub mod desktop_login;
 pub mod devices;
 pub mod dht;
 pub mod drive;
+pub mod drive_preview;
 pub mod email_identity;
 pub mod error;
 pub mod events;

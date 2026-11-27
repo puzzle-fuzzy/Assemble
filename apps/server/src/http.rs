@@ -112,6 +112,7 @@ pub fn router(state: Shared) -> Router {
         .merge(crate::admin::routes())
         .merge(crate::media::routes())
         .merge(crate::memos::routes())
+        .merge(crate::drive_preview::routes())
         .merge(crate::planner::locations::routes())
         .merge(crate::remote::routes())
         // 桌面端自动更新：清单和更新包，谁都能读

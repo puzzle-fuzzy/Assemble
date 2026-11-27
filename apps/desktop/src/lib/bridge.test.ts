@@ -82,6 +82,50 @@ const {
 const { messageFor } = await import("@/lib/messages");
 
 describe("桥接", () => {
+  test("预览只接受本次具名入口，关闭与早到取消都释放原请求", async () => {
+    const preview = {
+      kind: "image",
+      mimeType: "image/png",
+      size: 100,
+      text: null,
+      truncated: false,
+    };
+    respondWith = {
+      generation: 7,
+      preview,
+      src: "http://assemble-preview.localhost/7/file-1",
+    };
+    const abort = new AbortController();
+    const result = await bridge.drivePreview("file-1", abort.signal);
+    const opened = calls.at(-1);
+    expect(opened?.command).toBe("drive_preview_open");
+    expect(opened?.args.fileId).toBe("file-1");
+    abort.abort();
+    expect(calls.at(-1)).toEqual({
+      command: "drive_preview_close",
+      args: { requestId: opened?.args.requestId },
+    });
+    result.dispose?.();
+    const cancelled = new AbortController();
+    cancelled.abort();
+    const count = calls.length;
+    await expect(
+      bridge.drivePreview("file-1", cancelled.signal),
+    ).rejects.toMatchObject({ code: "CANCELLED" });
+    expect(calls.length).toBe(count);
+    for (const src of [
+      "https://untrusted.test/a",
+      "file:///secret",
+      "http://assemble-preview.localhost/8/file-1",
+      "http://assemble-preview.localhost/7/file-2",
+      "http://assemble-preview.localhost/7/file-1?token=bad",
+    ]) {
+      respondWith = { generation: 7, preview, src };
+      await expect(
+        bridge.drivePreview("file-1", new AbortController().signal),
+      ).rejects.toMatchObject({ code: "INVALID_RESPONSE" });
+    }
+  });
   test("地点导航只传记录和标签，目标网址由 Rust 重新读取", async () => {
     await bridge.openRecordLocation("schedule", "schedule-1", "上海虹桥站");
     expect(calls.at(-1)).toEqual({

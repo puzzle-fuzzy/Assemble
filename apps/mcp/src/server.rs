@@ -104,6 +104,18 @@ impl<S: SessionSource> Assistant<S> {
 #[tool_router]
 impl<S: SessionSource> Assistant<S> {
     #[tool(
+        name = "assemble_drive_preview",
+        annotations(read_only_hint = true),
+        description = "查询当前账户指定云盘文件的预览格式与大小。只读，不下载、不返回内容、路径、读取地址或凭据；图片、文本与音视频的实际预览在 Assemble 界面中打开。"
+    )]
+    async fn drive_preview(
+        &self,
+        Parameters(input): Parameters<tools::MemoIdInput>,
+    ) -> CallToolResult {
+        attempt!(self, call => tools::drive_preview(&call, &input.id).await)
+    }
+
+    #[tool(
         name = "assemble_remote_devices",
         annotations(read_only_hint = true),
         description = "列出当前账户的 Windows/Mac 电脑及在线状态。用户在 Assemble 桌面端的远程控制页选择电脑，且必须由被控端明确允许；本工具不批准连接、不采集屏幕、不注入键鼠。"

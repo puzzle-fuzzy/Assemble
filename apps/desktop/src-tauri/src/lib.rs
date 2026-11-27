@@ -12,6 +12,7 @@
 )]
 
 mod commands;
+mod drive_preview;
 mod launch;
 mod notify;
 mod planner;
@@ -62,7 +63,7 @@ pub fn run() -> Result<(), StartupError> {
     // 由右键菜单"用 Assemble 发送"启动时带着文件：等会话核对完再打开发送面板。
     let handed_over = launch::files_at_startup(std::env::args_os());
 
-    tauri::Builder::default()
+    drive_preview::register(tauri::Builder::default())
         // 单实例守卫必须最先注册：应用已经在运行时，第二个实例把参数转交给它，然后自己退出。
         // 带着文件来的（右键菜单）就打开发送面板；否则把窗口叫到前面。
         .plugin(tauri_plugin_single_instance::init(
@@ -94,6 +95,11 @@ pub fn run() -> Result<(), StartupError> {
                 match window.label() {
                     // 关窗口只是收起；真正退出走托盘菜单。
                     MAIN_WINDOW => {
+                        window
+                            .app_handle()
+                            .state::<AppState>()
+                            .file_previews
+                            .close(None);
                         api.prevent_close();
                         remote::close_window(window.app_handle());
                         let _ = window.hide();
@@ -202,6 +208,8 @@ fn handlers() -> impl Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool + Send + Sync +
         commands::drive_refresh,
         commands::drive_upload,
         commands::drive_download,
+        commands::drive_preview_open,
+        commands::drive_preview_close,
         commands::drive_rename,
         commands::drive_delete,
         commands::close_send_panel,

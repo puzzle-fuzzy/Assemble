@@ -270,7 +270,11 @@ async fn record_file(
 }
 
 /// 按标识取出这个账户云盘里的一个文件；不是这个账户的，与不存在同样回答。
-async fn load(pool: &sqlx::SqlitePool, account_id: &str, id: &str) -> Result<DriveRow, ApiError> {
+pub(crate) async fn load(
+    pool: &sqlx::SqlitePool,
+    account_id: &str,
+    id: &str,
+) -> Result<DriveRow, ApiError> {
     sqlx::query_as::<_, DriveRow>("SELECT * FROM drive_files WHERE account_id = ? AND id = ?")
         .bind(account_id)
         .bind(id)

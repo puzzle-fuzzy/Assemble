@@ -40,6 +40,7 @@ async fn admin_assets_are_same_origin_and_do_not_fall_back_for_missing_paths() {
             .to_str()
             .unwrap();
         assert!(policy.contains("script-src 'self'"));
+        assert!(policy.contains("media-src 'self'"));
         assert!(policy.contains("frame-ancestors 'none'"));
         assert!(!response.text().await.unwrap().contains("private-test-data"));
     }

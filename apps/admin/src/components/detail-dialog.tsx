@@ -35,7 +35,7 @@ export function DetailDialog({
         }}
       >
         <DialogHeader className="pr-8">
-          <DialogTitle>{title}</DialogTitle>
+          <DialogTitle className="break-all">{title}</DialogTitle>
         </DialogHeader>
         {children}
       </DialogContent>

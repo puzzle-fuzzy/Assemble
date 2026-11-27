@@ -30,6 +30,7 @@ pub mod media;
 pub mod memo;
 pub mod origin;
 pub mod pairing;
+pub mod preview;
 pub mod primitives;
 pub mod releases;
 pub mod remote;

@@ -20,7 +20,8 @@ use tokio_util::sync::CancellationToken;
 
 use support::*;
 
-const TOOLS: [&str; 19] = [
+const TOOLS: [&str; 20] = [
+    "assemble_drive_preview",
     "assemble_remote_devices",
     "assemble_download_preview",
     "assemble_download_start",

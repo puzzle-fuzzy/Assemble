@@ -1,0 +1,37 @@
+[
+  {
+    "kind": "text",
+    "mimeType": "text/plain; charset=utf-8",
+    "size": 20,
+    "text": "中文 <原文> 🌙",
+    "truncated": false
+  },
+  {
+    "kind": "image",
+    "mimeType": "image/png",
+    "size": 123,
+    "text": null,
+    "truncated": false
+  },
+  {
+    "kind": "audio",
+    "mimeType": "audio/wav",
+    "size": 1044,
+    "text": null,
+    "truncated": false
+  },
+  {
+    "kind": "video",
+    "mimeType": "video/mp4",
+    "size": 9999,
+    "text": null,
+    "truncated": false
+  },
+  {
+    "kind": "unsupported",
+    "mimeType": null,
+    "size": 12,
+    "text": null,
+    "truncated": false
+  }
+]

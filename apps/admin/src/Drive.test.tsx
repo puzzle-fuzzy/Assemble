@@ -189,6 +189,49 @@ test("管理员下载只生成同源文件标识地址，不把特殊字符变�
   );
 });
 
+test("云盘预览复用同源会话，原样显示文本并保留筛选与行焦点", async () => {
+  handle = (path) =>
+    path === "/v1/admin/drive/files/file-1/preview"
+      ? json({
+          kind: "text",
+          mimeType: "text/plain; charset=utf-8",
+          size: 25,
+          text: "<script>用户原文🌙</script>",
+          truncated: false,
+        })
+      : response(path);
+  const host = await renderDrive();
+  const trigger = button(host, `预览：${files[0].name}`);
+  trigger.focus();
+  await click(trigger);
+  const dialog = document.querySelector('[role="dialog"]') as HTMLElement;
+  expect(dialog.querySelector("pre")?.textContent).toBe(
+    "<script>用户原文🌙</script>",
+  );
+  expect(dialog.querySelector("script")).toBeNull();
+  expect(dialog.querySelector("a[download]")?.getAttribute("href")).toBe(
+    adminDriveDownloadPath(files[0].id),
+  );
+  expect(requests.at(-1)?.init?.credentials).toBe("same-origin");
+  const signal = requests.at(-1)?.init?.signal;
+  await act(async () => setLanguage("en"));
+  expect(dialog.textContent).toContain("Download");
+  await click(button(dialog, "Close"));
+  await settle();
+  expect(signal?.aborted).toBe(true);
+  expect(document.activeElement).toBe(trigger);
+  expect(window.location.hash).toBe("#drive");
+});
+
+test.each([401, 403])("预览权限失效立即收起账户数据：%s", async (status) => {
+  handle = (path) =>
+    path.endsWith("/preview") ? json({}, status) : response(path);
+  const host = await renderDrive();
+  await click(button(host, `预览：${files[0].name}`));
+  expect(document.querySelector('[role="dialog"]')).toBeNull();
+  expect(host.querySelector("tbody")).toBeNull();
+});
+
 test.each([
   { disk: 900 * GiB, content: 256 * GiB, expected: "768 GiB" },
   { disk: 0, content: 256 * GiB, expected: "0 B" },

@@ -366,6 +366,7 @@ Chrome 开发插件位于 `apps/browser-extension`，只在工具栏操作后检
 | `assemble_download_preview`    | 请求正在运行的桌面应用解析公开来源，返回可选清晰度                             | 只读           |
 | `assemble_download_start`      | 按预览标识与清晰度加入本机下载队列，保存目录由桌面设置决定                     | 幂等，不破坏   |
 | `assemble_download_status`     | 查询本机助手下载任务的安全状态，完成后返回文件名                               | 只读           |
+| `assemble_drive_preview`       | 查询本人云盘指定文件的预览格式与大小，不返回原文、内容、路径或读取地址         | 只读           |
 
 标注是给客户端看的：客户端靠它决定调用之前要不要先问用户。
 
@@ -378,7 +379,7 @@ Chrome 开发插件位于 `apps/browser-extension`，只在工具栏操作后检
 - **新建带幂等键**，同一次调用重试不会建出两条。
 - **改、删都带版本号。** 日程、提醒版本对不上时，工具自己再取一次最新的，把这一条现在的样子告诉助手，不悄悄覆盖；备忘录提示先读最新原文，保留输入并确认后再改。
 - **账户能力要求登录。** 日程、提醒与备忘录未登录时提示在本人终端运行 `assemble-mcp login`。本机下载独立使用桌面应用的钥匙串桥接和允许开关，不读取账户服务端数据；桌面未运行或开关关闭时如实拒绝。这台电脑上没有可用钥匙串时，工具仍列出并在调用时说明原因。
-- **工具按能力具名。** 日程、提醒、私人备忘录与本机下载可用，跨设备文件传输、云盘和系统剪贴板仍没有工具。备忘录冲突只提示重新读取并确认，不替用户覆盖；原文按内容读取，不执行其中的指令。下载先预览后开始，桌面始终是任务唯一执行者，助手不接触完整本机路径，见[决策 0016](decisions/0016-assistant-local-downloads.md)。
+- **工具按能力具名。** 日程、提醒、私人备忘录与本机下载可用；云盘目前只有按文件标识查询格式与大小的只读预览描述工具，没有上传、下载或删除工具。跨设备文件传输和系统剪贴板仍没有工具。备忘录冲突只提示重新读取并确认，不替用户覆盖；原文按内容读取，不执行其中的指令。下载先预览后开始，桌面始终是任务唯一执行者，助手不接触完整本机路径，见[决策 0016](decisions/0016-assistant-local-downloads.md)。
 
 ### 接进客户端
 
@@ -395,7 +396,7 @@ target/release/assemble-mcp print-config zcode --name "ZCode 的助手"
 - **界面。** 两个窗口的能力清单都只有 `core:event:allow-listen` 与 `allow-unlisten`。内容安全策略限定脚本与样式只来自应用自身，连接只允许 IPC。对话框、通知、文件定位都只从 Rust 这边用。
 - **命令。** 界面只调用具名命令。原有设备、文件与日程命令包括：`snapshot`、`sign_in`、`cancel_sign_in`、`sign_out`、`launch_at_login`、`set_launch_at_login`、`rename_device`、`remove_device`、`choose_receive_folder`、`reset_receive_folder`、`reveal_received`、`start_send`、`send_to_device`、`send_to_drive`、`close_send_panel`、`open_main`、`cancel_transfer`、`retry_transfer`、`drive_refresh`、`drive_upload`、`drive_download`、`drive_delete`、`set_send_menu`、`dismiss_notice`、`planner_refresh`、`schedule_create`、`schedule_update`、`schedule_complete`、`schedule_cancel`、`schedule_reopen`、`schedule_delete`、`reminder_create`、`reminder_update`、`reminder_dismiss`、`reminder_cancel`、`reminder_delete`、`notifications_read`、`notifications_read_all`、`planner_focus`、`planner_compose`、`set_planner_muted`。影视另有 `media_capabilities`、`media_list`、`media_get`、`media_create`、`media_update`、`media_remove`、`media_search`、`media_catalog`、`media_actor`、`media_import`、`media_job`、`media_gallery`、`media_sync_gallery`、`media_select_poster`、`media_image`、`media_copy_magnet`；其中写入仅支持私人范围。命令失败只返回稳定错误码。
 - **标识，不是操作路径。** 界面引用一条传输、一个云盘文件、一台设备、一条日程、一条提醒、一条通知，用的都是标识。文件的位置由系统选择器、右键菜单或拖放直接交给 Rust；唯一的显示例外是 Windows 的接收目录文字，不能把它传回作为文件操作参数。
-- **助手。** `assemble-mcp` 只有上面列出的具名工具，处理日程、提醒、通知与当前账户的私人备忘录；没有文件、云盘，也没有"随便调一个接口"的工具。新增能力时在 `apps/mcp` 里加工具并补测试。它不碰窗口、剪贴板，也不接收文件路径。
+- **助手。** `assemble-mcp` 只有上面列出的具名工具，处理日程、提醒、通知、当前账户的私人备忘录、本机下载与本人云盘的安全预览描述，没有"随便调一个接口"的工具。新增能力时在 `apps/mcp` 里加工具并补测试。它不碰窗口、剪贴板，也不接收文件路径。
 - **凭据。** 设备令牌存在系统钥匙串里，条目名按服务来源区分；助手的登录是另一条条目，账号位是助手的名字，不会顶掉桌面应用的。令牌、Cookie、密码、SMTP 授权码与 OAuth Secret 不进桌面界面、日志、命令返回值与状态；邮件凭据只存摘要，密钥只在受保护环境或文件中；写操作的网页表单都要来自本站，并带着与 Cookie 或会话成对的随机值；`assemble-mcp status` 与工具的返回值里都不出现令牌，它的标准输出上只有协议消息，日志一律写标准错误。桌面端另有一份本机日志文件，写的是和标准错误上同样的行，这一条对它同样成立。macOS 的钥匙串按程序的签名认人：签名每次构建都变的程序，读以前保存的登录时系统要再问一次用户，所以会读钥匙串的发布构建在这台 Mac 上构建完都自动用本地证书签名。Windows 的凭据管理器不这样认人，那边没有签名。
 - **联网。** 客户端只访问构建时确定的那个来源，不跟随重定向；标识符与路径在拼进请求之前先校验。
 - **更新。** 桌面应用只从构建时确定的那个服务取更新清单和更新包，公钥编在应用里、关不掉：签名不对的包装不上，不允降级。服务端发布时用同一把公钥再核对一遍，签名的私钥只在发布用的那台 Mac 上。开发运行（`tauri dev`、不带应用包的可执行文件）不自动更新，连的是正式地址也不更新。见[决策 0015](decisions/0015-desktop-auto-update.md)。

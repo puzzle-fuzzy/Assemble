@@ -40,6 +40,8 @@ docker compose exec assemble assemble-server grant-super-admin <已验证邮箱>
 
 ## 停用、恢复与存储监控
 
+云盘行内增加“预览”，与桌面端复用弹窗内容和中英系统文案；关闭后恢复列表焦点、搜索与分页。管理员预览描述 `/v1/admin/drive/files/{id}/preview` 与媒体 `/preview/content` 都逐次检查已验证邮箱、管理员与同源会话；只允许经过内容校验的图片、音视频内联，文本按原文显示，不执行 HTML/SVG，不嵌入 Office/PDF。下载入口继续保留。格式、资源上限和验收见[云盘预览手册](file-preview.md)。
+
 2026-11-26 用户要求独立的管理云盘界面，查看所有存储文件及服务器剩余可存储空间。`GET /v1/admin/drive/files?q=&page=1&pageSize=20` 返回 `AdminPage<AdminDriveFile>`；文件字段为 `id/accountId/accountDisplayName/accountEmail/name/size/mimeType/createdAt`，邮箱只返回已验证值，类型未知时为 null。`GET /v1/admin/storage` 单独返回与概览一致的 `AdminStorage`。两者复用逐次管理员、已验证邮箱和同源检查，设备令牌不能访问，响应禁止缓存，不返回内容摘要、凭据或落盘路径。
 
 `GET /v1/admin/drive/files/{id}/content` 是 2026-11-27 新增的管理员文件内容入口：没有凭据的同源下载链接复用 HttpOnly 网页会话，每次校验管理员权限、已验证邮箱和同源来源；未登录或失效会话返回 401，已登录但权限或来源不符返回 403，文件不存在返回 404。浏览器下载导航可仅带 `Sec-Fetch-Site: same-origin`，跨站、同站其他子域以及缺少来源证明的请求均拒绝。响应沿用原云盘附件的 `Content-Disposition`、UTF-8 文件名和 Range/条件读取，并保留 `no-store`、`nosniff`、`Cross-Origin-Resource-Policy: same-origin`。普通设备下载入口仍仅可读取本账户，不新增前端可读凭据、签名 URL 或管理员写入权限。

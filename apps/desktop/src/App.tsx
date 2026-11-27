@@ -45,6 +45,7 @@ import { SidebarProvider } from "@/components/ui/sidebar";
 import { Toaster } from "@/components/ui/sonner";
 import { Switch } from "@/components/ui/switch";
 import { DownloadsPage } from "@/DownloadsPage";
+import { DrivePreviewAction } from "@/DrivePreview";
 import { DriveRenameAction } from "@/DriveRenameDialog";
 import { useSnapshot } from "@/hooks/use-snapshot";
 import {
@@ -1503,6 +1504,11 @@ function DriveRow({
               {uiText("download")}
             </Button>
             <DriveRenameAction source={source} file={file} disabled={pending} />
+            <DrivePreviewAction
+              source={source}
+              file={file}
+              disabled={pending}
+            />
             <Button
               size="default"
               variant="outline"

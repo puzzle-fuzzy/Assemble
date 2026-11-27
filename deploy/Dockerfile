@@ -51,7 +51,7 @@ RUN --mount=type=cache,target=/target \
 FROM debian:bookworm-slim
 # GitHub HTTPS 与 SMTP TLS 需要系统信任根；不能为了缺证书而关闭验证。
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates \
+    && apt-get install -y --no-install-recommends ca-certificates ffmpeg \
     && rm -rf /var/lib/apt/lists/* \
     && useradd --system --uid 10001 --home-dir /var/lib/assemble --shell /usr/sbin/nologin assemble \
     && mkdir -p /var/lib/assemble \

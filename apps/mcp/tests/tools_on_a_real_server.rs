@@ -84,6 +84,37 @@ async fn remote_device_tool_lists_only_the_current_accounts_desktops() {
     world.server.stop().await;
 }
 
+#[tokio::test]
+async fn file_preview_tool_returns_only_the_description_not_private_content() {
+    let mut world = world().await;
+    let source = tempfile::NamedTempFile::new().unwrap();
+    std::fs::write(source.path(), b"private file content").unwrap();
+    let outgoing = assemble_client::OutgoingFile::open(source.path(), &world.cancel)
+        .await
+        .unwrap();
+    let file = world
+        .signed_in
+        .client
+        .drive_upload(
+            "private.txt",
+            &outgoing,
+            assemble_client::TransferOptions::new(&world.cancel),
+            None,
+        )
+        .await
+        .unwrap();
+    let result = tools::drive_preview(&world.call(), &file.id).await.unwrap();
+    let value: serde_json::Value = serde_json::from_str(&result).unwrap();
+    assert_eq!(value["kind"], "text");
+    assert_eq!(value["size"], 20);
+    assert_eq!(value.as_object().unwrap().len(), 3);
+    assert!(value.get("text").is_none());
+    for private in ["private file content", "token", "src", "path", "sha256"] {
+        assert!(!result.contains(private));
+    }
+    world.server.stop().await;
+}
+
 fn input(value: serde_json::Value) -> ScheduleInput {
     serde_json::from_value(value).unwrap()
 }

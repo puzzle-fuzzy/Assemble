@@ -427,6 +427,22 @@ export class FakeBridge implements Bridge {
   driveDownload(fileId: string) {
     return this.answer(`driveDownload:${fileId}`, this.current);
   }
+  drivePreview(
+    fileId: string,
+    _signal: AbortSignal,
+  ): Promise<import("@assemble/ui/lib/file-preview").PreviewResource> {
+    this.calls.push(`drivePreview:${fileId}`);
+    return Promise.resolve({
+      preview: {
+        kind: "unsupported",
+        mimeType: null,
+        size: 0,
+        text: null,
+        truncated: false,
+      },
+      src: null,
+    });
+  }
 
   driveDelete(fileId: string) {
     return this.answer(`driveDelete:${fileId}`, this.current);

@@ -1,5 +1,6 @@
 import { Button } from "@assemble/ui/button";
 import { DataTable, type DataTableColumn } from "@assemble/ui/data-table";
+import { useUiTranslation } from "@assemble/ui/lib/i18n";
 import { useState } from "react";
 import {
   type AccessFailure,
@@ -13,6 +14,7 @@ import { useAdminTranslation } from "../lib/i18n";
 import { RecordedTime } from "../lib/text";
 import { useResource } from "../lib/use-resource";
 import { DetailDialog, DetailFields } from "./detail-dialog";
+import { DrivePreviewDialog } from "./drive-preview";
 import { LoadingContent, NoResults, RequestError } from "./feedback";
 import { SearchForm, useListQuery } from "./list-controls";
 import { StorageWarnings, storageBytes } from "./storage-overview";
@@ -77,6 +79,8 @@ export function DrivePage({
     onAccessFailure,
   );
   const [selected, setSelected] = useState<AdminDriveFile | null>(null);
+  const [preview, setPreview] = useState<AdminDriveFile | null>(null);
+  const { t: sharedText } = useUiTranslation();
   const page = files.resource.phase === "ready" ? files.resource.value : null;
   const format = (bytes: number) =>
     storageBytes(bytes, i18n.resolvedLanguage || i18n.language);
@@ -167,6 +171,11 @@ export function DrivePage({
         }}
         rowActions={(file) => [
           {
+            id: "preview",
+            label: sharedText("filePreview.open"),
+            onSelect: () => setPreview(file),
+          },
+          {
             id: "details",
             label: t("table.viewDetails"),
             onSelect: () => setSelected(file),
@@ -204,6 +213,13 @@ export function DrivePage({
           )
         }
       />
+      {preview && (
+        <DrivePreviewDialog
+          file={preview}
+          onClose={() => setPreview(null)}
+          onAccessFailure={onAccessFailure}
+        />
+      )}
       {selected && (
         <DetailDialog
           title={t("drive.details")}
