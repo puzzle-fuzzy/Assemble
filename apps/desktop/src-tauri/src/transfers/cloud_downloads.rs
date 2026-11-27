@@ -231,8 +231,60 @@ async fn first_chunk(
     }
     match client.drive_metadata(&file.id, options).await {
         Ok(active) if active.size == 0 && active.sha256 == file.sha256 => Ok(Some(vec![])),
-        Err(ClientError::Http { status: 404, .. }) => Ok(None),
+        Err(ClientError::Http {
+            status: 404 | 405, ..
+        }) => Ok(None),
         Err(error) => Err(error),
         Ok(_) => Err(ClientError::InvalidResponse),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    #[tokio::test]
+    async fn empty_file_probe_accepts_legacy_method_not_allowed_but_never_auth_failure() {
+        for status in [401, 403, 404, 405] {
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let address = listener.local_addr().unwrap();
+            let server = tokio::spawn(async move {
+                let (mut stream, _) = listener.accept().await.unwrap();
+                let mut request = Vec::new();
+                // 测试不能依赖请求头恰好在一次 TCP 读取中到齐。
+                while !request.windows(4).any(|part| part == b"\r\n\r\n") {
+                    let mut bytes = [0; 1024];
+                    let count = stream.read(&mut bytes).await.unwrap();
+                    assert!(count > 0 && request.len() + count <= 4096);
+                    request.extend_from_slice(&bytes[..count]);
+                }
+                let body = r#"{"error":{"code":"TEST","message":"synthetic response"}}"#;
+                let response = format!(
+                    "HTTP/1.1 {status} Test\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                    body.len()
+                );
+                stream.write_all(response.as_bytes()).await.unwrap();
+            });
+            let client = assemble_client::Client::new(
+                assemble_client::ServerOrigin::parse(&format!("http://{address}")).unwrap(),
+            )
+            .unwrap();
+            let file = DriveFile {
+                id: "empty-file".into(),
+                name: "empty.bin".into(),
+                size: 0,
+                sha256: assemble_transfer::hash::digest(b""),
+                mime_type: None,
+                created_at: assemble_protocol::primitives::Timestamp::now(),
+            };
+            let cancel = CancellationToken::new();
+            let result = first_chunk(&client, &file, &RequestOptions::new(&cancel)).await;
+            if matches!(status, 404 | 405) {
+                assert_eq!(result.unwrap(), None);
+            } else {
+                assert_eq!(result.unwrap_err().status(), Some(status));
+            }
+            server.await.unwrap();
+        }
     }
 }
