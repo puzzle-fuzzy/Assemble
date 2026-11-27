@@ -1,5 +1,20 @@
 # 部署 Assemble 服务端
 
+## 当前发布：2026-11-27 云盘预览
+
+服务端与管理端现已部署为 `ghcr.io/puzzle-fuzzy/assemble-server:ef808271dafc`，源码 `ef808271dafce03685582b8b6d28689d0e0e443c` 已先提交并推送 main，镜像标识 `sha256:311875afea73f83d4c5cc9ffcc27d3427e7839c0b1174e4ca6b63e46d0cf6866`。[Windows/macOS 验证](https://github.com/puzzle-fuzzy/Assemble/actions/runs/45965360406)与[服务端镜像](https://github.com/puzzle-fuzzy/Assemble/actions/runs/45965360550)全部成功；本机完整验证为 466 项 TS、688 项 Rust 通过，2 项既有忽略。
+
+这是已提交主干的完整服务镜像，连同既有影视公开、远程控制中继和下载页的服务端能力一起对齐，不再沿用日程补丁的裁剪版本。
+
+- 云盘预览本身没有新迁移；此前正式服务是日程补丁版，账本为 `1…11,13`。本次补上已提交的 `0012_media_publication.sql`，现在为 1～13，旧脚本校验和逐项一致。先在受保护在线备份副本上，用真实迁移器与无网络容器验证了启动和正常退出。
+- 正式停写后逐表核对：除影视新增公开/归属字段外，所有业务表内容指纹和数量一致；私人记录保持未公开。迁移前后账户 1、设备 3、云盘文件 2、日程 5、提醒 5、影视条目 147、合集 16、私人备忘录 13；实体文件的大小与 SHA-256 全部匹配，数据库自检与外键检查通过。
+- 完整备份位于 `/var/backups/assemble/20261127-082539-n1-ef808271dafc/`，外层目录 0700、配置与数据材料 0600。最终一致库为 `final-before.sqlite3`，完整数据归档为未压缩 `data-before.tar`（644,608,000 字节，另存摘要）；`config-before.tgz` 包含原环境、Compose 与受保护密钥。源码归档、迁移前后指纹、演练及部署回执也保存在该目录；不复制真实数据到源码仓库。
+- 配置仅更换镜像引用。其余环境、三份 Compose、密钥与既有签名更新文件逐项核对未变；nginx 未修改，`nginx -t` 通过。容器 healthy、以 uid 10001 运行，HTTP 仍只映射到回环地址，密钥继续只读挂载，镜像内 ffprobe 可用。
+- 正式 HTTPS 的健康、就绪、管理端、影视、登录与下载页均为 200；两个未登录预览入口为 401 并禁止缓存。正式 Chrome 用已有会话核对“预览”、现有安装文件的不支持提示、下载退路及关闭后的原行焦点；没有创建正式测试账户或上传测试文件。支持格式的播放证据仍是本机隔离测试，详见[预览手册](file-preview.md)。
+- 本次有两次停服尝试：第一次把 `compose exec` 的命令写法误用于 `compose run`，程序名重复，自检在迁移前拒绝；保护脚本恢复原库和旧镜像，原服务恢复健康。修正后先用同一 Compose 调用验证了副本挂载。第二次从停止旧容器到新容器 healthy 为 24 秒；首次就绪探测遇到连接重置，监测脚本提前退出，但新版容器已经正常启动。之后只做向前核验，没有在对外重开后恢复旧数据；最终完整复核通过。首次尝试材料以 `attempt1-` 保留，未覆盖。
+
+本次未修改 iOS、APNs 或推送配置，没有发布桌面签名更新或安装客户端。旧签名更新保持不变；桌面 Mac WebView 仍待实际验收。下一步仅规划 [N2 云盘文件夹](../plans/2026-11-27-drive-folders.md)，未提前执行目录迁移。
+
 ## 2026-11-27 停用旧 Jarvis
 
 用户在日程迁移完成后明确要求停止 `movie.yxswy.com` 的跳转、停止服务器上的 Jarvis，只使用 Assemble。已执行：
@@ -13,7 +28,7 @@
 
 ## 2026-11-27 日程迁移补丁
 
-正式服务现为 `assemble-server:planner-prod-20261127`，镜像标识 `sha256:ab68b55f113733889d2ab2b4750d5a94bcbe7a540f49f6222ca77af8947a291b`。它以当时实际线上 `873131d75607` 为基础，只加入日程导入和受控地址读取；没有混入共享工作区里尚在修改的远程控制、影视公开和下载发布页功能。镜像在本机构建后经 SSH 传入，未发布 GHCR。
+日程迁移补丁当时部署为 `assemble-server:planner-prod-20261127`，镜像标识 `sha256:ab68b55f113733889d2ab2b4750d5a94bcbe7a540f49f6222ca77af8947a291b`。它以当时实际线上 `873131d75607` 为基础，只加入日程导入和受控地址读取；没有混入共享工作区里尚在修改的远程控制、影视公开和下载发布页功能。镜像在本机构建后经 SSH 传入，未发布 GHCR。
 
 停服后保存最终一致库，再事务导入并核对后启动。备份与源导出保存在 `/var/backups/assemble/20261127-planner-z9fzt62m/`，目录 0700，备份及环境副本 0600；只读导入挂载属于容器专用 UID，外层受限备份目录仍属 root。包含 `final-before.sqlite3`、`before.sqlite3`、原镜像引用、原环境副本、来源摘要及字段核对报告。源 Jarvis 业务导出在迁移前后摘要一致，源站健康。
 
@@ -23,7 +38,7 @@
 
 正式服务在 2026-11-24 第一次部署上线：<https://as.yxswy.com>。下面"第一次部署"写的就是照着做过的步骤；哪些真的验过、哪些还没有，分别在最后两节里如实列出。用的是 Docker Compose 加 nginx。
 
-最新发布（2026-11-27 11:24）：桌面端自动更新的服务端这一半（清单与更新包两个只读接口、`publish-update` 子命令，[决策 0015](../decisions/0015-desktop-auto-update.md)）已部署为 `ghcr.io/puzzle-fuzzy/assemble-server:873131d75607`。镜像经 `deploy/push-image.sh` 传入。升级前核对：库里迁移 1～11 的校验和与仓库逐个一致，本次没有新迁移。停服务到健康 29 秒，启动日志只有"监听"两行；每张表的行数前后一致；自检通过，容器以 uid 10001 运行；`/movies/`、`/admin/`、`/web/register`、`/healthz` 都是 200，`/updates/latest.json` 是 404 且 `cache-control: no-store`（还没有发布过）。完整数据备份在 `/var/backups/assemble/20261127-112345-updater-873131d75607/`（`data-before.tgz` 566,452,122 字节、`config-before.tgz`、`env-before`、`counts-before.txt` 与 `counts-after.txt`，目录 0700、文件 0600）。**这一次升级停机两次**：第一遍脚本在停服务之后出错（服务器上的 Python 不允许 f-string 里有反斜杠），服务停了约 25 秒后被用旧镜像起回来；改好脚本、先在不停服务的情况下试过那一段之后，第二遍才成功。教训写在下面"升级"一节的末尾。
+此前发布（2026-11-27 11:24）：桌面端自动更新的服务端这一半（清单与更新包两个只读接口、`publish-update` 子命令，[决策 0015](../decisions/0015-desktop-auto-update.md)）已部署为 `ghcr.io/puzzle-fuzzy/assemble-server:873131d75607`。镜像经 `deploy/push-image.sh` 传入。升级前核对：库里迁移 1～11 的校验和与仓库逐个一致，本次没有新迁移。停服务到健康 29 秒，启动日志只有"监听"两行；每张表的行数前后一致；自检通过，容器以 uid 10001 运行；`/movies/`、`/admin/`、`/web/register`、`/healthz` 都是 200，`/updates/latest.json` 是 404 且 `cache-control: no-store`（还没有发布过）。完整数据备份在 `/var/backups/assemble/20261127-112345-updater-873131d75607/`（`data-before.tgz` 566,452,122 字节、`config-before.tgz`、`env-before`、`counts-before.txt` 与 `counts-after.txt`，目录 0700、文件 0600）。**这一次升级停机两次**：第一遍脚本在停服务之后出错（服务器上的 Python 不允许 f-string 里有反斜杠），服务停了约 25 秒后被用旧镜像起回来；改好脚本、先在不停服务的情况下试过那一段之后，第二遍才成功。教训写在下面"升级"一节的末尾。
 
 上一次发布（2026-11-27 09:51）：管理端影视详情、封面预览与失败占位同步已部署为 `ghcr.io/puzzle-fuzzy/assemble-server:28c9551fc6bf`。完整本机隔离验证、macOS CI 和镜像启动通过；发布提交的 Windows 在界面测试、构建和静态检查通过后因后续推送取消，未将其记作全套成功。迁移 1～11 校验一致、无新迁移，升级前后所核对的业务表计数一致；完整数据备份位于 `/var/backups/assemble/20261127-095117-media-28c9551fc6bf/`，目录 0700、归档 0600。服务健康，HTTPS 管理端样式资源已更新。公开影视页 Lighthouse 移动三次 98、桌面三次 100，其他三项均 100，CLS/TBT 均为 0。证据及登录验收范围见[同步记录](../reports/2026-11-27-admin-media-style.md)。
 
@@ -46,7 +61,7 @@
 | `push-update.sh`       | 把发布用的那台 Mac 上做好的桌面更新目录经 SSH 送到服务器上，交给 `publish-update` 校验或发布，然后删掉临时目录          |
 | `updater.pubkey`       | 给桌面更新包验签的公钥，编进服务端和桌面应用。私钥只在发布用的那台 Mac 上                                               |
 
-服务端在 Linux 上只依赖 C 库：SQLite 是静态编进去的，钥匙串的依赖只在 macOS 与 Windows 上进入构建。镜像约 120 MB。
+SQLite 静态编入服务端，钥匙串依赖只在 macOS 与 Windows 上进入构建。运行镜像另带 FFmpeg/ffprobe 做受限媒体探测，体积以实际构建结果为准。
 
 ## 当前账户与邮件配置
 
@@ -203,6 +218,14 @@ SCRIPT
 **把要在服务器上跑的脚本先写成一个文件，停服务之前的每一段都在不停服务的时候先试一遍。** 2026-11-27 升级 `873131d75607` 时，脚本在 `docker compose stop` 之后才出错，服务白白停了约 25 秒，只能先用旧镜像起回来再来一遍。`set -e` 的脚本里任何一步都可能出错，所以"停服务"要排在能出错的步骤之后，行数统计这类能先跑的先跑。
 
 **镜像的构建上下文是白名单（`.dockerignore`），编译时要读的文件得在里面。** 同一天，公钥 `deploy/updater.pubkey` 被编进 `assemble-protocol`（`include_str!`），可它不在白名单里，"服务端镜像"从 `406eab0` 起连着三次都红，当时没有人看：`bun run verify` 不构建镜像，只有那个流程会报。现在 `Dockerfile` 里有 `COPY deploy/updater.pubkey`，`.dockerignore` 里放行了它。推送之后三个流程都要看一眼："验证"的两栏、"服务端镜像"，触发过的"安装包"。
+
+### 升级命令的入口与探测
+
+下列命令名仅说明入口；操作正式服务时沿用正在运行容器的全部 Compose 叠加文件。预演必须将数据卷替换为副本。
+
+`docker compose run --rm assemble check-config` 使用镜像已定义的程序入口，只传子命令；`docker compose exec -T assemble assemble-server check-config` 在现有容器启动程序，必须带可执行文件名。不要混用。`check-config` 会打开并迁移数据库，服务仍在写入时只能挂载副本验证，不能提前对正式库执行新版本迁移。
+
+切换脚本使用的确切 Compose 命令、镜像与挂载也要在副本预演，不能只验证等价的裸 Docker 命令。新容器刚重建时，连接重置、暂时拒绝连接等应在有限期限内重试；必须同时通过就绪探测和容器健康检查。对外接受请求后保全最新数据、向前修复，不因监测脚本报错就恢复旧库。
 
 ### 发布桌面端的更新
 
