@@ -49,6 +49,13 @@ jobs:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
+      # 与验证任务使用相同 SDK，避免系统音频的 Swift 桥接落回旧版默认 Xcode。
+      - name: 选择 Xcode 26.3
+        if: runner.os == 'macOS'
+        run: |
+          sudo xcode-select --switch /Applications/Xcode_26.3.app/Contents/Developer
+          xcodebuild -version
+          xcrun --sdk macosx --show-sdk-version
       # 工具链由仓库根目录的 rust-toolchain.toml 决定，第一次调用 cargo 时自动装好。
       - uses: Swatinem/rust-cache@v2
       - uses: oven-sh/setup-bun@v2

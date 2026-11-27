@@ -34,6 +34,14 @@ jobs:
             os: windows-2025
     steps:
       - uses: actions/checkout@v7
+      # 系统音频依赖的 Swift/Metal 桥接需要 26 SDK；运行器默认仍是 Xcode 16.4。
+      # 固定构建 SDK，不改变桌面应用的 macOS 13 最低运行版本。
+      - name: 选择 Xcode 26.3
+        if: runner.os == 'macOS'
+        run: |
+          sudo xcode-select --switch /Applications/Xcode_26.3.app/Contents/Developer
+          xcodebuild -version
+          xcrun --sdk macosx --show-sdk-version
       # 工具链由仓库根目录的 rust-toolchain.toml 决定：第一次调用 cargo 时 rustup 自动把它装好，
       # 连同 clippy、rustfmt 和 Windows 目标（macOS 上给五个基础库做针对 Windows 的静态检查要用）。
       - uses: Swatinem/rust-cache@v2
