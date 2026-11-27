@@ -23,7 +23,9 @@
 
 正式服务在 2026-11-24 第一次部署上线：<https://as.yxswy.com>。下面"第一次部署"写的就是照着做过的步骤；哪些真的验过、哪些还没有，分别在最后两节里如实列出。用的是 Docker Compose 加 nginx。
 
-最新发布（2026-11-27 09:51）：管理端影视详情、封面预览与失败占位同步已部署为 `ghcr.io/puzzle-fuzzy/assemble-server:28c9551fc6bf`。完整本机隔离验证、macOS CI 和镜像启动通过；发布提交的 Windows 在界面测试、构建和静态检查通过后因后续推送取消，未将其记作全套成功。迁移 1～11 校验一致、无新迁移，升级前后所核对的业务表计数一致；完整数据备份位于 `/var/backups/assemble/20261127-095117-media-28c9551fc6bf/`，目录 0700、归档 0600。服务健康，HTTPS 管理端样式资源已更新。公开影视页 Lighthouse 移动三次 98、桌面三次 100，其他三项均 100，CLS/TBT 均为 0。证据及登录验收范围见[同步记录](../reports/2026-11-27-admin-media-style.md)。
+最新发布（2026-11-27 11:24）：桌面端自动更新的服务端这一半（清单与更新包两个只读接口、`publish-update` 子命令，[决策 0015](../decisions/0015-desktop-auto-update.md)）已部署为 `ghcr.io/puzzle-fuzzy/assemble-server:873131d75607`。镜像经 `deploy/push-image.sh` 传入。升级前核对：库里迁移 1～11 的校验和与仓库逐个一致，本次没有新迁移。停服务到健康 29 秒，启动日志只有"监听"两行；每张表的行数前后一致；自检通过，容器以 uid 10001 运行；`/movies/`、`/admin/`、`/web/register`、`/healthz` 都是 200，`/updates/latest.json` 是 404 且 `cache-control: no-store`（还没有发布过）。完整数据备份在 `/var/backups/assemble/20261127-112345-updater-873131d75607/`（`data-before.tgz` 566,452,122 字节、`config-before.tgz`、`env-before`、`counts-before.txt` 与 `counts-after.txt`，目录 0700、文件 0600）。**这一次升级停机两次**：第一遍脚本在停服务之后出错（服务器上的 Python 不允许 f-string 里有反斜杠），服务停了约 25 秒后被用旧镜像起回来；改好脚本、先在不停服务的情况下试过那一段之后，第二遍才成功。教训写在下面"升级"一节的末尾。
+
+上一次发布（2026-11-27 09:51）：管理端影视详情、封面预览与失败占位同步已部署为 `ghcr.io/puzzle-fuzzy/assemble-server:28c9551fc6bf`。完整本机隔离验证、macOS CI 和镜像启动通过；发布提交的 Windows 在界面测试、构建和静态检查通过后因后续推送取消，未将其记作全套成功。迁移 1～11 校验一致、无新迁移，升级前后所核对的业务表计数一致；完整数据备份位于 `/var/backups/assemble/20261127-095117-media-28c9551fc6bf/`，目录 0700、归档 0600。服务健康，HTTPS 管理端样式资源已更新。公开影视页 Lighthouse 移动三次 98、桌面三次 100，其他三项均 100，CLS/TBT 均为 0。证据及登录验收范围见[同步记录](../reports/2026-11-27-admin-media-style.md)。
 
 上一次发布（2026-11-27 02:48）：手机第一期里设备的平台值从 `iphone` 改成 `ios`（按操作系统命名），已部署为 `ghcr.io/puzzle-fuzzy/assemble-server:8986d0a232a6`。[macOS 与 Windows 验证](https://github.com/puzzle-fuzzy/Assemble/actions/runs/45876060043)与[镜像构建](https://github.com/puzzle-fuzzy/Assemble/actions/runs/45876059828)全部成功。镜像经 `deploy/push-image.sh` 传入。升级前核对：库里迁移 1～11 的校验和与仓库逐个一致，本次没有新迁移；设备的平台只有 macos 2 台、windows 1 台，没有存过 `iphone`。备份在 `/var/backups/assemble/20261127-024813-ios-platform-8986d0a232a6/`（`data-before.tgz` 563,058,907 字节、`config-before.tgz`、`env-before`、`counts-before.txt`；目录 0700、文件 0600），旧镜像保留。只改了 `.env` 的镜像引用，三个 Compose 文件、密钥目录和共用 nginx 都没有碰。从停服务到新容器健康共 28 秒；新容器健康、以专用账户运行、密钥只读挂载，启动日志干净，`check-config` 通过（按来源的限额、全站总量上限、SMTP 与 GitHub 配置都在）。升级前后每一张表的行数逐项一致。正式 HTTPS：健康与就绪 200、登录页 200、配对页 303 到登录页、影视页 200、设备接口 401；两个配对接口对空请求回 400（在，不是 404）。手机应用当时还没有装到任何一台真机上，平台值的改名不涉及已有数据。
 
@@ -198,6 +200,10 @@ SCRIPT
 
 备份和换版本可以连着做，只停一次：停服务、打包、换标记、`docker compose up -d`（不必在打包之后先 `start` 再停第二回）。2026-11-25 的第三次升级就是这样做的，停机 1 秒。
 
+**把要在服务器上跑的脚本先写成一个文件，停服务之前的每一段都在不停服务的时候先试一遍。** 2026-11-27 升级 `873131d75607` 时，脚本在 `docker compose stop` 之后才出错，服务白白停了约 25 秒，只能先用旧镜像起回来再来一遍。`set -e` 的脚本里任何一步都可能出错，所以"停服务"要排在能出错的步骤之后，行数统计这类能先跑的先跑。
+
+**镜像的构建上下文是白名单（`.dockerignore`），编译时要读的文件得在里面。** 同一天，公钥 `deploy/updater.pubkey` 被编进 `assemble-protocol`（`include_str!`），可它不在白名单里，"服务端镜像"从 `406eab0` 起连着三次都红，当时没有人看：`bun run verify` 不构建镜像，只有那个流程会报。现在 `Dockerfile` 里有 `COPY deploy/updater.pubkey`，`.dockerignore` 里放行了它。推送之后三个流程都要看一眼："验证"的两栏、"服务端镜像"，触发过的"安装包"。
+
 ### 发布桌面端的更新
 
 桌面应用的更新包由这台服务端托管。`GET /updates/latest.json` 是清单，`GET /updates/<平台>/<版本>/<文件>` 是更新包；两个都是谁都能读、按来源限速的接口（清单每个来源每小时 120 次，更新包 30 次）。为什么这样做见[决策 0015](../decisions/0015-desktop-auto-update.md)。
@@ -250,6 +256,8 @@ docker compose exec -T assemble assemble-server publish-update /var/lib/assemble
 发布之后：更新包在数据目录的 `updates/<平台>/<版本>/` 下，清单是 `updates/latest.json`；每个平台只留最新的一版，旧版本的目录被删掉。它们不在 `blobs/` 里，不计入云盘预算，备份时随数据目录一起打包；恢复演练目前只核对 `blobs/`，这一部分还没有演练过。
 
 公钥是仓库里的 `deploy/updater.pubkey`，编进服务端和桌面应用。私钥只在发布用的那台 Mac 上（`~/.assemble/updater.key`，没有口令），不进仓库、日志、界面和持续集成；脚本只把它的路径交给 `tauri signer sign`。丢了就再也发不出更新，装出去的应用只能重装，所以请另留一份只有你自己能读的备份。重做一对钥匙要同时换掉编进两边的公钥，并且先手动给所有人装一次带着新公钥的版本——所以它救不了已经装出去的应用。
+
+**2026-11-27 11:39 第一次发布：`0.1.117`。** 先只校验地跑了一遍，再 `--apply`：取的是"安装包"流程为 `873131d` 跑出的 Windows 安装包，Mac 应用在那台 Mac 上构建并用本地证书签名，两个包用私钥签名后经 `deploy/push-update.sh` 传到服务器，服务器用编进去的公钥验签通过；清单在 `https://as.yxswy.com/updates/latest.json`（`cache-control: public, no-cache`，带 ETag），更新包支持按范围取（206）、长缓存。当时主干已经往前走了（另一个会话合并了一批新功能），所以是在单独检出的 `873131d` 里跑的。发出去的版本号只要求比已经发布的大，不要求是主干的最新提交。装出去的应用要等各自的下一次检查才会发现它（启动 15 秒后一次，之后每 6 小时一次，托盘里"检查更新"是手动的一次）。
 
 发布目录由 `scripts/release/stage.ts` 做（`publish.ts` 会调它）：Mac 的应用包打成 `Assemble_<版本>_aarch64.app.tar.gz`，顶层就是 `Assemble.app`，这是 Tauri 更新插件要的样子；两个包各用 `--app-version <版本>` 签一次；只打应用包本身，不带 macOS 的元数据文件。发布用的 Mac 应用包必须是本地那张证书签的，脚本会认一遍：换了证书，更新之后系统就不认得它，会再问一次钥匙串。
 
@@ -400,7 +408,7 @@ docker ps -a | grep restore-drill; ls -d /var/backups/assemble/restore-drill-*
 - **公开注册与邮箱变更的真人完整流程。** 账户是本人 2026-11-25 用 GitHub 注册的，GitHub 真人授权实际发生过；用邮箱收信验证注册、改密码、找回密码、给账户绑定 GitHub 这些，真人还没有逐项走过。入口、SMTP 真发送与防线已核对。
 - **在途上传时停止服务的表现**：第四次升级已量出停旧服务到新服务就绪为 0.85 秒，但没有用真实上传压停止等待。
 - **续期钩子**没有真的触发过（证书 2027-02 到期）。
-- **桌面端的更新还没有在正式服务上发布过**（2026-11-27）。本机端到端和各项自动化测试见[决策 0015](../decisions/0015-desktop-auto-update.md)；`deploy/push-update.sh` 往正式服务器上传的那一步也还没有真的跑过。
+- **装出去的应用自己换上新版，还没有亲眼看到**（2026-11-27）。`0.1.117` 已经发布（见"发布桌面端的更新"），这台 Mac 上是 `0.1.116`，要等它的下一次检查；Windows 上还是旧版，要先手动装带更新器的第一版。本机端到端和各项自动化测试见[决策 0015](../decisions/0015-desktop-auto-update.md)。另外：锁屏的时候应用照样会按"空闲"换上新版，换完之后要等人回来解锁才恢复登录（钥匙串锁着），这一条还没有遇到过。
 
 ## 2026-11-25：影视三端正式升级
 

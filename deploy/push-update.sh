@@ -31,9 +31,11 @@ ssh_options="-o BatchMode=yes"
 
 echo "传给 $server"
 ssh $ssh_options "$server" "install -d -m 0700 '$remote'"
-# 只打包发布目录里的文件本身：COPYFILE_DISABLE 不把 macOS 的元数据文件带进去。
+# 只打包发布目录里的文件本身：COPYFILE_DISABLE 不把 macOS 的元数据文件带进去。文件上还留着
+# 系统加的扩展属性（下载来的文件带着 com.apple.provenance），服务器的 GNU tar 不认识、会一行行
+# 提醒，那一类提醒关掉，别的照旧报出来。
 COPYFILE_DISABLE=1 tar czf - -C "$directory" . \
-  | ssh $ssh_options "$server" "tar xzf - -C '$remote' && chown -R 10001:10001 '$remote'"
+  | ssh $ssh_options "$server" "tar xzf - --warning=no-unknown-keyword -C '$remote' && chown -R 10001:10001 '$remote'"
 # 校验也好，发布也好，成了没成都把临时目录删掉。
 cleanup() {
   ssh $ssh_options "$server" "rm -rf '$remote'"
