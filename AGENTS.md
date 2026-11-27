@@ -46,7 +46,7 @@ Assemble 是一个全新的、自带服务端的项目，用来完全替换 jarv
 
 ## 验证
 
-- 提交前运行 `bun run verify`。它覆盖 Biome、类型检查、界面与工具脚本的测试、前端构建、Rust 格式、静态检查与全部 Rust 测试（含服务端）。装了 Windows 的 Rust 目标时（`rust-toolchain.toml` 里列了它），它还会给能在本机上检查的六个基础库做一次针对 Windows 目标的静态检查。
+- 提交前运行 `bun run verify`。它覆盖 Biome、类型检查、界面与工具脚本的测试、前端构建、Rust 格式、静态检查与全部 Rust 测试（含服务端）。装了 Windows 的 Rust 目标时（`rust-toolchain.toml` 里列了它），它还会给六个基础库的规则做一次针对 Windows 目标的静态检查；Windows 本机额外启用完整远控原生适配。新增 H.264/Opus 后，原生适配带 C/C++ 依赖，和 TLS/SQLite 一样不能从 Mac 交叉编译 Windows 版本，完整验证必须看 Windows CI，不能把规则检查写成原生适配已通过。
 - **iOS 应用**的核心包用 `bun run ios:test` 测（Swift，只在装了 Xcode 的 Mac 上）。`bun run ios:simulate` 在模拟器里对着一次性的本机服务端把配对登录、名单、到点通知、点开定位整条路走一遍，也只在 Mac 上；它驱动的是模拟器里的界面，不动人的鼠标键盘。
 - **工具链钉在 `rust-toolchain.toml`**，工作区的 `rust-version` 与 `deploy/Dockerfile` 里的基础镜像和它一致；升级时三处一起改。稳定版每六周更新一次，新版本会带来新的检查，钉住之后验证只会在有人主动升级时才可能变红。不要在流程里另外安装"最新的稳定版"。
 - **仓库是公开的**：<https://github.com/puzzle-fuzzy/Assemble>。每次推送，持续集成在 macOS 与 Windows 上各跑一遍 `bun run verify`，并构建服务端镜像；打标签或手动触发时产出安装包。推完去看结果，三个流程都要看：<https://github.com/puzzle-fuzzy/Assemble/actions>。"验证"的两栏之外还有"服务端镜像"——`bun run verify` 不构建镜像，镜像的构建上下文又是白名单（`.dockerignore`），编译时要读的文件（`include_str!`、`include_bytes!`）不在里面就只有那个流程会红。2026-11-27 公钥文件漏在白名单外，连红三次没有人看见。

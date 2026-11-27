@@ -21,8 +21,8 @@ interface Step {
 
 /**
  * 装了 Windows 的 Rust 目标时，顺便给能在本机上检查的 crate 做一次针对 Windows 的静态检查：
- * 不依赖窗口，也不需要交叉编译 C 代码的基础库，含远程采集/输入适配。客户端（TLS）与服务端（SQLite）
- * 带本机依赖，从 macOS 上检查不了，只能到 Windows 环境里去验。
+ * 不依赖窗口，也不需要交叉编译 C 代码的六个基础库规则。远控原生适配（H.264/Opus）、客户端
+ * （TLS）与服务端（SQLite）带本机依赖，从 macOS 上检查不了 Windows 版本，必须到 Windows 环境验。
  */
 async function windowsTargetInstalled(): Promise<boolean> {
   const listed = Bun.spawn(["rustup", "target", "list", "--installed"], {

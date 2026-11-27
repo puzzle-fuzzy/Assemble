@@ -1,4 +1,4 @@
-//! macOS 13+ 使用 ScreenCaptureKit 系统音频，不创建或选择麦克风输入设备。
+//! macOS 13+ 使用 `ScreenCaptureKit` 系统音频，不创建或选择麦克风输入设备。
 use super::{Arc, AtomicBool, Mutex, Ordering, Samples};
 use screencapturekit::{prelude::*, stream::delegate_trait::SCStreamDelegateTrait};
 pub(super) struct Stream(SCStream);
@@ -40,8 +40,10 @@ impl SCStreamOutputTrait for Handler {
                 48_000,
                 buffers[0]
                     .data()
-                    .chunks_exact(4)
-                    .zip(buffers[1].data().chunks_exact(4))
+                    .as_chunks::<4>()
+                    .0
+                    .iter()
+                    .zip(buffers[1].data().as_chunks::<4>().0.iter())
                     .map(|(left, right)| [float(left), float(right)]),
             );
         } else if buffers.len() == 1 && buffers[0].data_byte_size() == count * 8 {
@@ -49,7 +51,9 @@ impl SCStreamOutputTrait for Handler {
                 48_000,
                 buffers[0]
                     .data()
-                    .chunks_exact(8)
+                    .as_chunks::<8>()
+                    .0
+                    .iter()
                     .map(|frame| [float(&frame[..4]), float(&frame[4..])]),
             );
         } else {

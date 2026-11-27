@@ -22,6 +22,8 @@ Mac 需要为当前应用授予“屏幕与系统音频录制”（屏幕录制�
 
 macOS 构建需要 Xcode 26.3 或更高版本：ScreenCaptureKit 11 的必需传递依赖 `apple-metal` 的 Swift 桥接包含 macOS 26 SDK 符号，即使只使用系统音频也会编译它，不能靠关闭可选功能移除。验证与安装包任务在 `macos-15` 上显式选择 Xcode 26.3；[运行器清单](https://github.com/actions/runner-images/blob/main/images/macos/macos-15-Readme.md)中默认仍是 16.4。构建 SDK 与最低运行版本不同，应用最低运行版本仍为 macOS 13；旧系统与系统音频仍需真机验收。
 
+Windows 目标检查由 `scripts/verify/windows.ts` 按宿主选择范围：六个基础库的规则在 Mac 也检查；带 H.264/Opus 本机 C/C++ 依赖的原生适配只在 Windows 启用。两平台的主验证仍分别检查和测试各自完整的原生实现，不能用 Mac 上的纯规则交叉检查替代 Windows CI。
+
 ```sh
 bun run verify
 cargo test -p assemble-server --test remote
