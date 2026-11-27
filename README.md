@@ -60,6 +60,8 @@ bun run browser:host  # 单独构建本机 Chrome 连接宿主；登记步骤见
 
 bun run media:dev    # 影视展示站开发页面：127.0.0.1:1422/movies/，复用本地服务端
 bun run mcp          # 构建给助手用的入口 target/release/assemble-mcp，连正式服务
+bun run build        # 打包桌面端安装包，版本是 0.1.<提交数>；macOS 上构建完接着用本地证书签名
+bun run release:publish # 只在发布用的那台 Mac 上：取 Windows 安装包、构建并签名、送到服务器校验；加 --apply 才发布
 bun run sign:mac     # macOS 上用本地自签证书给刚构建的程序签名；build、mcp、browser:host 构建完会自动接着做
 ```
 
@@ -71,6 +73,8 @@ bun run sign:mac     # macOS 上用本地自签证书给刚构建的程序签名
 | --------------------- | ------------------------------------ | ---------------------------------------------------------- |
 | `bun run dev`（调试） | 本地开发服务 `http://127.0.0.1:8787` | 不用指定；设了 `ASSEMBLE_SERVER_ORIGIN` 就连它             |
 | 发布构建              | 构建时给定的地址                     | `ASSEMBLE_SERVER_ORIGIN=https://…`；没给就拒绝启动，不去猜 |
+
+装出来的应用会自己更新（[决策 0015](docs/decisions/0015-desktop-auto-update.md)）：启动后查正式服务上的清单，后台下载、验签，空闲时换上新版。`bun run dev` 和不带应用包的可执行文件不更新，连的是正式地址也不更新。
 
 `bun run verify` 依次执行 Biome、类型检查、界面与工具脚本的测试、前端构建、Rust 格式、Rust 静态检查与全部 Rust 测试（含服务端与助手入口）。装了 Windows 的 Rust 目标时（`rust-toolchain.toml` 里列了它），它还会给能在本机上检查的五个基础库做一次针对 Windows 目标的静态检查。客户端与服务端带着 TLS 与 SQLite 的本机依赖，从 macOS 上检查不了 Windows 目标，依赖它们的助手入口也一样，桌面应用壳更是一次都没在这台 Mac 上为 Windows 编译过——那是持续集成里 Windows 那一栏的事。
 

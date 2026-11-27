@@ -32,6 +32,9 @@
 !apps/browser-extension/package.json
 !apps/media-web/
 !apps/media-web/**
+# 给桌面更新包验签的公钥由 assemble-protocol 用 include_str! 读进去，构建服务端时要它在。
+!deploy/
+!deploy/updater.pubkey
 **/node_modules
 **/dist
 **/data

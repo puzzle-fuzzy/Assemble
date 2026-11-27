@@ -101,7 +101,7 @@ pub fn run() -> Result<(), StartupError> {
                 }
             }
         })
-        .build(tauri::generate_context!())
+        .build(context())
         .map_err(StartupError::from)?
         .run(|app, event| {
             if let RunEvent::Exit = event {
@@ -109,6 +109,13 @@ pub fn run() -> Result<(), StartupError> {
             }
         });
     Ok(())
+}
+
+/// 这个应用自己的配置：`tauri.conf.json` 加上编进去的界面资源。
+/// 测试里带着更新插件的模拟应用也用它：那个插件要读到配置里 `plugins.updater` 那一段才肯初始化。
+/// 宏只能展开一次（它定义的符号不能重复），所以两处共用这一个函数。
+fn context<R: tauri::Runtime>() -> tauri::Context<R> {
+    tauri::generate_context!()
 }
 
 /// 先停入口，再等待下载和原生宿主连接收尾，最后删除本实例的临时桥接凭据。
@@ -228,8 +235,9 @@ fn start(
             .map_err(|error| io::Error::other(error.to_string()))
             .and_then(|directory| LogFile::open(&directory, "desktop.log")),
     );
+    // 记的是应用自己的版本（自动更新拿它比先后），不是 cargo 包的那个 0.1.0。
     tracing::info!(
-        version = env!("CARGO_PKG_VERSION"),
+        version = %app.package_info().version,
         "Assemble desktop is starting; the local log file is attached unless a warning says otherwise"
     );
 
@@ -238,8 +246,10 @@ fn start(
     let settings = transfers::load_settings(&handle);
     let notifier = Arc::new(notify::SystemNotifier::new(handle.clone()));
     let browser_secrets = secrets.clone();
-    // 上次是为了换新版才重启的话，这一次照样不弹窗口。
-    let background = background || update::relaunch_queued(&handle);
+    // 上次是为了换新版才重启的话，这一次照样不弹窗口。记号每次启动都要读掉，本来就是后台启动时
+    // 也一样：不读它会留在那里，两分钟内的下一次启动就被当成"这一回也不弹窗口"。
+    let relaunching = update::relaunch_queued(&handle);
+    let background = background || relaunching;
     handle.manage(AppState::new(
         handle.clone(),
         client,

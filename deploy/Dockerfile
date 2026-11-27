@@ -34,6 +34,8 @@ COPY apps/server/ apps/server/
 # 要读到它们的清单与入口文件。它们都不会被编译（上面只构建 assemble-server）；见 .dockerignore。
 COPY apps/desktop/src-tauri/ apps/desktop/src-tauri/
 COPY apps/mcp/ apps/mcp/
+# 给桌面更新包验签的公钥由 assemble-protocol 用 include_str! 读进去，编译服务端时要它在。
+COPY deploy/updater.pubkey deploy/updater.pubkey
 # 编译产物与下载的依赖放在缓存卷里，不进镜像层；成品拷出来交给下一阶段。
 ENV CARGO_TARGET_DIR=/target
 ARG CARGO_BUILD_JOBS=2

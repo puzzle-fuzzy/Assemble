@@ -34,7 +34,7 @@ function run(program: string, args: string[]): string {
 }
 
 /** 产物放在哪：问 cargo，另外指定过 CARGO_TARGET_DIR 的工作树也能找对。 */
-function targetDirectory(): string {
+export function targetDirectory(): string {
   const metadata = run("cargo", [
     "metadata",
     "--format-version",

@@ -73,7 +73,7 @@ pub fn build(app: &AppHandle) -> tauri::Result<()> {
             LAUNCH_ID => toggle_launch(app),
             UPDATE_ID => {
                 if state::update_view(app).state == UpdateState::Ready {
-                    // 立刻换上并重新打开窗口。成了就不会回来。
+                    // 立刻换上并重新打开窗口：Windows 上安装器起来进程就结束，macOS 上提出重启的请求。
                     if let Err(error) = update::apply(app, false) {
                         report_update_failure(app, &error);
                     }

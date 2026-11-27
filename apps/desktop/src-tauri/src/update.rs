@@ -6,7 +6,8 @@
 //! 什么时候换上是一条纯规矩（[`IdleWatch`]）：主窗口收起、又没有文件在传，并且下载完之后
 //! 已经这样持续了 [`IDLE_FOR`]。正在传文件的时候重启会打断传输，所以等。
 //!
-//! 更新包的签名由更新插件核对（公钥编在应用里，关不掉），核对不过的包装不上；这一条这里不重复做。
+//! 更新包的签名由更新插件核对（公钥编在应用里，关不掉），核对不过的包装不上；这一条这里不重复做，
+//! 只对着真实运行的服务端验过接得对不对（`against_server`）。
 
 use std::sync::atomic::{AtomicBool, Ordering};
 #[cfg(target_os = "windows")]
@@ -20,6 +21,9 @@ use tauri_plugin_updater::UpdaterExt;
 
 use crate::commands::CommandError;
 use crate::state::{AppState, MAIN_WINDOW, Snapshot, UpdateState};
+
+#[cfg(test)]
+mod against_server;
 
 /// 启动后这么久查第一次：不抢启动时的联网。
 pub(crate) const FIRST_CHECK_AFTER: Duration = Duration::from_secs(15);
@@ -223,11 +227,15 @@ async fn watch_for_idle(app: AppHandle) {
         }
         let hidden = main_window_hidden(&app);
         let busy = busy(&state.snapshot());
-        if watch.observe(hidden, busy, Instant::now()) == Decision::Apply
-            && let Err(error) = apply(&app, true)
-        {
-            tracing::warn!(code = error.code, message = %error.message, "the update could not be applied; it will be retried");
-            watch = IdleWatch::default();
+        if watch.observe(hidden, busy, Instant::now()) == Decision::Apply {
+            match apply(&app, true) {
+                // 重启已经提出去了：不再看，免得又提一次。
+                Ok(()) => return,
+                Err(error) => {
+                    tracing::warn!(code = error.code, message = %error.message, "the update could not be applied; it will be retried");
+                    watch = IdleWatch::default();
+                }
+            }
         }
     }
 }
@@ -252,6 +260,14 @@ pub(crate) async fn cycle(app: &AppHandle) {
         view.total = None;
     });
     let outcome = check_and_fetch(app, pending).await;
+    // 下载好那一种在 check_and_fetch 里已经记过；另外两种在这里记，日志里看得出每一轮的结果。
+    match &outcome {
+        Ok(Outcome::UpToDate) => tracing::info!("no newer version has been published"),
+        Err(code) => {
+            tracing::warn!(code = %code, "the update check did not succeed; it will be retried");
+        }
+        Ok(Outcome::Fetched { .. }) => {}
+    }
     let checked_at = i64::try_from(now_millis()).ok();
     state.set_update(|view| {
         view.checked_at = checked_at;
@@ -340,7 +356,7 @@ async fn check_and_fetch(app: &AppHandle, pending: &Pending) -> Result<Outcome, 
             .package
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
-            .replace(Some(Package { update, bytes }));
+            .replace(Package { update, bytes });
         Ok(Outcome::Fetched { version })
     }
     #[cfg(not(any(target_os = "macos", target_os = "windows")))]
@@ -350,7 +366,8 @@ async fn check_and_fetch(app: &AppHandle, pending: &Pending) -> Result<Outcome, 
     }
 }
 
-/// 换上已下载的新版并重启。`quiet`：重启之后只在托盘里，不弹窗口。这一步成了就不会回来。
+/// 换上已下载的新版并重启。`quiet`：重启之后只在托盘里，不弹窗口。
+/// Windows 上安装器起来之后进程就结束了，这一步不回来；macOS 上提出重启的请求就回来。
 pub(crate) fn apply(app: &AppHandle, quiet: bool) -> Result<(), CommandError> {
     let version = ready_version(app).ok_or_else(not_ready)?;
     if quiet {
@@ -359,7 +376,10 @@ pub(crate) fn apply(app: &AppHandle, quiet: bool) -> Result<(), CommandError> {
     #[cfg(target_os = "macos")]
     {
         tracing::info!(version = %version, "restarting into the new version");
-        app.restart()
+        // 不直接 restart()：从主线程（托盘菜单）调它时 Tauri 不发退出事件，退出时要做的清理就被
+        // 跳过了。这里只提出退出的请求，事件循环照常发退出事件、做完清理，然后才重启。
+        app.request_restart();
+        Ok(())
     }
     #[cfg(target_os = "windows")]
     {
@@ -452,13 +472,18 @@ fn not_ready() -> CommandError {
 }
 
 /// 插件的错误换成稳定错误码。`None` 表示"没有新版"，不是出错。
+///
+/// 包不是那把钥匙签的、签完之后被改过、不是为清单上的那个版本签的、签名里没写版本——对用户来说是
+/// 同一件事：这个包不可信，不装。所以都给签名那一个错误码。
 fn code_of(error: &tauri_plugin_updater::Error) -> Option<&'static str> {
     use tauri_plugin_updater::Error as Failure;
     match error {
         Failure::ReleaseNotFound | Failure::TargetNotFound(_) | Failure::TargetsNotFound(_) => None,
-        Failure::Minisign(_) | Failure::Base64(_) | Failure::SignatureUtf8(_) => {
-            Some(code::SIGNATURE)
-        }
+        Failure::Minisign(_)
+        | Failure::Base64(_)
+        | Failure::SignatureUtf8(_)
+        | Failure::SignedVersionMismatch { .. }
+        | Failure::MissingSignedVersion => Some(code::SIGNATURE),
         Failure::Network(_) | Failure::Reqwest(_) => Some(code::UNREACHABLE),
         _ => Some(code::FAILED),
     }
@@ -595,6 +620,19 @@ mod tests {
     }
 
     #[test]
+    fn the_app_and_the_server_pin_the_same_public_key() {
+        // 公钥有两份：这里给更新插件验下载下来的包，assemble_protocol 里那份给服务端在发布时核对。
+        // 两份对不上的话，服务端放出去的包应用会拒收（或者反过来），所以钉在一起。
+        let config: serde_json::Value =
+            serde_json::from_str(include_str!("../tauri.conf.json")).unwrap();
+        assert_eq!(
+            config["plugins"]["updater"]["pubkey"],
+            assemble_protocol::updates::PUBLIC_KEY
+        );
+        assert_eq!(config["plugins"]["updater"]["requireSignedVersion"], true);
+    }
+
+    #[test]
     fn a_missing_release_is_not_an_error() {
         use tauri_plugin_updater::Error as Failure;
         assert_eq!(code_of(&Failure::ReleaseNotFound), None);
@@ -604,6 +642,18 @@ mod tests {
         );
         assert_eq!(
             code_of(&Failure::SignatureUtf8("x".into())),
+            Some(code::SIGNATURE)
+        );
+        // 签名是为别的版本签的、签名里没写版本：同样是这个包不可信。
+        assert_eq!(
+            code_of(&Failure::SignedVersionMismatch {
+                signed: "0.1.1".into(),
+                announced: "0.1.2".into(),
+            }),
+            Some(code::SIGNATURE)
+        );
+        assert_eq!(
+            code_of(&Failure::MissingSignedVersion),
             Some(code::SIGNATURE)
         );
         assert_eq!(

@@ -96,4 +96,17 @@ describe("构建身份", () => {
     expect(info.channel).toBe("local");
     expect(info.commit).toMatch(/^[0-9a-f]{7}$/);
   });
+
+  test("打包时界面显示的是传进来的那一个版本，不是配置里的起点", () => {
+    const root = Bun.fileURLToPath(new URL("../../", import.meta.url));
+    expect(
+      readBuildInfo(root, { ASSEMBLE_BUILD_VERSION: "0.1.431" }).version,
+    ).toBe("0.1.431");
+    // 界面显示的版本必须和装进应用的一致，认不出的写法不拿去冒充。
+    for (const version of ["0.1", "latest", "0.1.431-beta", "v0.1.431"]) {
+      expect(() =>
+        readBuildInfo(root, { ASSEMBLE_BUILD_VERSION: version }),
+      ).toThrow("build version");
+    }
+  });
 });
