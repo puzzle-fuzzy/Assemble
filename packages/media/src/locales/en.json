@@ -5,7 +5,11 @@
     "sharedHint": "Administrators maintain shared entries. Everyone can browse them.",
     "privateHint": "Only you can access your private entries, images and reviews."
   },
-  "type": { "all": "All types", "movie": "Movie", "tv": "TV series" },
+  "type": {
+    "all": "All types",
+    "movie": "Movie",
+    "tv": "TV series"
+  },
   "status": {
     "all": "All statuses",
     "planned": "Want to watch",
@@ -98,7 +102,15 @@
     "reload": "Load latest entry",
     "actorCredits": "Works featuring {{name}}",
     "source": "Catalog sources",
-    "readOnly": "Read-only library"
+    "readOnly": "Read-only library",
+    "previewPoster": "Enlarge the poster for {{title}}",
+    "browsePosters": "Browse posters ({{count}})",
+    "previousImage": "Previous image",
+    "nextImage": "Next image",
+    "imagePosition": "Image {{number}} of {{count}}",
+    "chooseImage": "View poster {{number}}",
+    "galleryImage": "{{title}} gallery image {{number}}",
+    "retryImage": "Reload image"
   },
   "import": {
     "title": "Find and import catalog data",

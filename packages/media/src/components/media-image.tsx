@@ -1,6 +1,7 @@
 import { Button } from "@assemble/ui/button";
+import { cn } from "@assemble/ui/lib/utils";
 import { LoadingState } from "@assemble/ui/loading-state";
-import { ImageOffIcon } from "lucide-react";
+import { ImageOffIcon, RotateCwIcon } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useMediaTranslation } from "../i18n";
 import type {
@@ -8,6 +9,20 @@ import type {
   ImageLoader,
   MediaImageVariant,
 } from "../model";
+import "./media-image.css";
+
+export type MediaImagePhase = "loading" | "ready" | "missing" | "failed";
+export interface MediaImageProps {
+  image: Image | null;
+  imageLoader: ImageLoader;
+  alt: string;
+  variant?: MediaImageVariant;
+  className?: string;
+  priority?: boolean;
+  allowRetry?: boolean;
+  compact?: boolean;
+  onStateChange?: (phase: MediaImagePhase) => void;
+}
 
 export function MediaImage({
   image,
@@ -15,68 +30,99 @@ export function MediaImage({
   alt,
   variant = "360",
   className,
-}: {
-  image: Image | null;
-  imageLoader: ImageLoader;
-  alt: string;
-  variant?: MediaImageVariant;
-  className?: string;
-}) {
+  priority = false,
+  allowRetry = true,
+  compact = false,
+  onStateChange,
+}: MediaImageProps) {
   const { t } = useMediaTranslation();
-  const [state, setState] = useState<{
-    key: string;
-    url: string | null;
-    failed: boolean;
-  }>({ key: "", url: null, failed: false });
   const [attempt, setAttempt] = useState(0);
-  const key = image ? `${image.assetId}:${variant}:${attempt}` : "";
+  const [result, setResult] = useState<{
+    key: string;
+    loader: ImageLoader;
+    url: string | null;
+  } | null>(null);
+  const key = `${image?.assetId}:${variant}:${attempt}`;
+  const current =
+    result?.key === key && result.loader === imageLoader ? result : null;
+  const phase: MediaImagePhase = !image
+    ? "missing"
+    : !current
+      ? "loading"
+      : current.url
+        ? "ready"
+        : "failed";
+  useEffect(() => onStateChange?.(phase), [onStateChange, phase]);
   useEffect(() => {
+    if (!image) return;
     const controller = new AbortController();
-    setState({ key, url: null, failed: false });
-    if (image)
-      void imageLoader(image, variant, controller.signal).then(
-        (url) => {
-          if (!controller.signal.aborted) setState({ key, url, failed: false });
-        },
-        () => {
-          if (!controller.signal.aborted)
-            setState({ key, url: null, failed: true });
-        },
-      );
+    void imageLoader(image, variant, controller.signal).then(
+      (url) => {
+        if (!controller.signal.aborted)
+          setResult({ key, loader: imageLoader, url });
+      },
+      () => {
+        if (!controller.signal.aborted)
+          setResult({ key, loader: imageLoader, url: null });
+      },
+    );
     return () => controller.abort();
   }, [image, imageLoader, variant, key]);
-  if (image && (state.key !== key || (!state.url && !state.failed)))
-    return <LoadingState className={className} label={t("common.loading")} />;
-  if (state.url && state.key === key && !state.failed)
-    return (
-      <img
-        src={state.url}
-        alt={alt}
-        width={image?.width}
-        height={image?.height}
-        loading="lazy"
-        decoding="async"
-        className={className}
-        onError={() => setState({ key, url: null, failed: true })}
-      />
-    );
+  const imageElement = image && current?.url && (
+    <img
+      src={current.url}
+      alt={alt}
+      width={image.width}
+      height={image.height}
+      loading={priority ? "eager" : "lazy"}
+      decoding="async"
+      className={variant === "original" ? className : "media-image-content"}
+      onError={() => setResult({ key, loader: imageLoader, url: null })}
+    />
+  );
+  // 原图按固有比例放入预览舞台，其余状态和缩略图共用有界的外框。
+  if (variant === "original" && imageElement) return imageElement;
+  const label = t(phase === "failed" ? "entry.imageFailed" : "entry.noImage");
   return (
-    <div className={className}>
-      <div className="flex h-full min-h-24 flex-col items-center justify-center gap-2 rounded-lg bg-muted p-3 text-center text-muted-foreground">
-        <ImageOffIcon aria-hidden="true" />
-        <span className="text-xs">
-          {t(state.failed ? "entry.imageFailed" : "entry.noImage")}
-        </span>
-        {state.failed && (
-          <Button
-            variant="outline"
-            size="default"
-            onClick={() => setAttempt((value) => value + 1)}
-          >
-            {t("common.retry")}
-          </Button>
-        )}
-      </div>
+    <div
+      className={cn("media-image-frame", className)}
+      data-image-state={phase}
+      data-compact={compact || undefined}
+    >
+      {imageElement ||
+        (phase === "loading" ? (
+          <LoadingState
+            className="media-image-loading"
+            label={t("common.loading")}
+          />
+        ) : (
+          <div className="media-image-placeholder">
+            {phase === "failed" && allowRetry ? (
+              <Button
+                variant="ghost"
+                size="icon"
+                className="media-image-retry"
+                aria-label={`${t("entry.retryImage")}：${alt || label}`}
+                title={t("entry.retryImage")}
+                onClick={(event) => {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  setAttempt((value) => value + 1);
+                }}
+              >
+                <RotateCwIcon aria-hidden="true" />
+              </Button>
+            ) : (
+              <ImageOffIcon
+                role="img"
+                aria-label={`${alt || label}：${label}`}
+              />
+            )}
+            <span className={compact ? "sr-only" : "media-image-label"}>
+              {label}
+            </span>
+          </div>
+        ))}
     </div>
   );
 }

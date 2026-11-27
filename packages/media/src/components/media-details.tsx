@@ -3,8 +3,11 @@ import { Button } from "@assemble/ui/button";
 import { Separator } from "@assemble/ui/separator";
 import { CopyIcon } from "lucide-react";
 import { useState } from "react";
+import type { MediaClient } from "../client";
+import type { MediaAccessFailure } from "../hooks/use-media-task";
 import { useMediaTranslation } from "../i18n";
 import type { ImageLoader, MediaEntry, MediaPersonIdentity } from "../model";
+import { MediaEntryPosters } from "./entry-posters";
 import { MediaImage } from "./media-image";
 
 export function MediaDetails({
@@ -14,18 +17,22 @@ export function MediaDetails({
   onCopyMagnet,
   onSignIn,
   presentation = "workspace",
+  galleryClient,
+  onAccessFailure,
 }: {
   entry: MediaEntry;
   imageLoader: ImageLoader;
   onActor?: (identity: MediaPersonIdentity, name: string) => void;
   onCopyMagnet?: (entry: MediaEntry) => Promise<void>;
   onSignIn?: () => void;
-  presentation?: "workspace" | "reader";
+  presentation?: "workspace" | "reader" | "management";
+  galleryClient?: MediaClient;
+  onAccessFailure?: (failure: MediaAccessFailure) => void;
 }) {
   const { t } = useMediaTranslation();
-  const reading = presentation === "reader";
-  const Heading = reading ? "h1" : "h2";
-  const SectionHeading = reading ? "h2" : "h3";
+  const reading = presentation !== "workspace";
+  const Heading = presentation === "reader" ? "h1" : "h2";
+  const SectionHeading = presentation === "reader" ? "h2" : "h3";
   const [copy, setCopy] = useState<"idle" | "pending" | "done" | "error">(
     "idle",
   );
@@ -43,61 +50,86 @@ export function MediaDetails({
     <>
       {!reading && <Separator />}
       {(!reading || entry.overview.trim()) && (
-        <section className="flex flex-col gap-2">
+        <section className={reading ? "detail-section" : "flex flex-col gap-2"}>
           <SectionHeading className="font-medium">
             {t("entry.overview")}
           </SectionHeading>
-          <p className="whitespace-pre-wrap break-words text-sm leading-relaxed">
+          <p
+            className={
+              reading
+                ? "detail-prose"
+                : "whitespace-pre-wrap break-words text-sm leading-relaxed"
+            }
+          >
             {entry.overview || t("entry.noOverview")}
           </p>
         </section>
       )}
       {(!reading || entry.review?.trim()) && (
-        <section className="flex flex-col gap-2">
+        <section className={reading ? "detail-section" : "flex flex-col gap-2"}>
           <SectionHeading className="font-medium">
             {t("entry.review")}
           </SectionHeading>
-          <p className="whitespace-pre-wrap break-words text-sm leading-relaxed">
+          <p
+            className={
+              reading
+                ? "detail-prose"
+                : "whitespace-pre-wrap break-words text-sm leading-relaxed"
+            }
+          >
             {entry.review || t("entry.noReview")}
           </p>
         </section>
       )}
       {entry.notes && (
-        <section className="flex flex-col gap-2">
+        <section className={reading ? "detail-section" : "flex flex-col gap-2"}>
           <SectionHeading className="font-medium">
             {t("entry.notes")}
           </SectionHeading>
-          <p className="whitespace-pre-wrap break-words text-sm">
+          <p
+            className={
+              reading
+                ? "detail-prose"
+                : "whitespace-pre-wrap break-words text-sm"
+            }
+          >
             {entry.notes}
           </p>
         </section>
       )}
       {(!reading || entry.cast.length > 0) && (
-        <section className="flex flex-col gap-3">
+        <section className={reading ? "detail-section" : "flex flex-col gap-3"}>
           <SectionHeading className="font-medium">
             {t("entry.cast")}
           </SectionHeading>
           {entry.cast.length === 0 ? (
             <p className="text-sm text-muted-foreground">{t("entry.noCast")}</p>
           ) : (
-            <ul className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+            <ul
+              className={
+                reading
+                  ? "detail-cast-list"
+                  : "grid grid-cols-2 gap-3 sm:grid-cols-3"
+              }
+            >
               {entry.cast.map((person) => (
                 <li
                   key={`${person.identity?.provider}:${person.identity?.externalId ?? person.name}:${person.character}`}
-                  className="flex min-w-0 items-start gap-2"
+                  className="detail-actor-item"
                 >
                   <MediaImage
                     image={person.photo}
                     imageLoader={imageLoader}
                     alt={person.name}
                     variant="200"
-                    className="aspect-[2/3] w-12 shrink-0 rounded object-cover"
+                    compact
+                    className="detail-actor-photo"
                   />
-                  <div className="flex min-w-0 flex-col gap-1">
+                  <div className="detail-actor-description">
                     {person.identity && onActor ? (
                       <Button
                         variant="link"
-                        className="h-auto min-h-8 justify-start whitespace-normal p-0 text-left"
+                        className="detail-actor-name"
                         onClick={() =>
                           person.identity &&
                           onActor(person.identity, person.name)
@@ -106,10 +138,10 @@ export function MediaDetails({
                         {person.name}
                       </Button>
                     ) : (
-                      <p className="break-words text-sm">{person.name}</p>
+                      <p className="detail-actor-name">{person.name}</p>
                     )}
                     {person.character && (
-                      <p className="text-xs text-muted-foreground">
+                      <p className="detail-actor-role">
                         {t("entry.character", { name: person.character })}
                       </p>
                     )}
@@ -121,7 +153,7 @@ export function MediaDetails({
         </section>
       )}
       {entry.identities.length > 0 && (
-        <section className="flex flex-col gap-2">
+        <section className={reading ? "detail-section" : "flex flex-col gap-2"}>
           <SectionHeading className="font-medium">
             {t("entry.source")}
           </SectionHeading>
@@ -163,26 +195,54 @@ export function MediaDetails({
           : "flex min-w-0 flex-col gap-5"
       }
     >
-      <div className="flex flex-col gap-5 sm:flex-row">
-        <MediaImage
-          image={entry.poster}
-          imageLoader={imageLoader}
-          alt={entry.title}
-          variant="480"
+      <div
+        className={
+          reading ? "detail-viewer" : "flex flex-col gap-5 sm:flex-row"
+        }
+        data-presentation={presentation}
+      >
+        {presentation === "management" && galleryClient ? (
+          <aside
+            className="detail-poster-column"
+            aria-label={t("entry.gallery")}
+          >
+            <MediaEntryPosters
+              key={`${galleryClient.scope}:${entry.id}:${entry.version}`}
+              client={galleryClient}
+              entry={entry}
+              imageLoader={imageLoader}
+              onAccessFailure={onAccessFailure}
+            />
+          </aside>
+        ) : (
+          <MediaImage
+            image={entry.poster}
+            imageLoader={imageLoader}
+            alt={entry.title}
+            variant="480"
+            className={
+              reading
+                ? "aspect-[2/3] w-48 shrink-0 rounded-lg object-cover sm:w-60"
+                : "aspect-[2/3] w-40 shrink-0 rounded-lg object-cover"
+            }
+          />
+        )}
+        <div
           className={
-            reading
-              ? "aspect-[2/3] w-48 shrink-0 rounded-lg object-cover sm:w-60"
-              : "aspect-[2/3] w-40 shrink-0 rounded-lg object-cover"
+            reading ? "detail-content" : "flex min-w-0 flex-1 flex-col gap-3"
           }
-        />
-        <div className="flex min-w-0 flex-1 flex-col gap-3">
-          <Heading className="break-words text-2xl font-semibold">
+        >
+          <Heading
+            className={
+              reading ? "detail-title" : "break-words text-2xl font-semibold"
+            }
+          >
             {entry.title}
           </Heading>
           {entry.originalTitle && entry.originalTitle !== entry.title && (
-            <p className="text-muted-foreground">{entry.originalTitle}</p>
+            <p className="detail-original-title">{entry.originalTitle}</p>
           )}
-          <div className="flex flex-wrap gap-2">
+          <div className={reading ? "detail-labels" : "flex flex-wrap gap-2"}>
             <Badge>{t(`status.${entry.status}`)}</Badge>
             <Badge variant="secondary">{t(`type.${entry.mediaType}`)}</Badge>
             {entry.year !== null && (
@@ -194,7 +254,7 @@ export function MediaDetails({
               </Badge>
             ))}
           </div>
-          <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-2 text-sm">
+          <dl className="mt-5 grid grid-cols-[auto_1fr] gap-x-4 gap-y-2 text-sm">
             {(!reading || entry.releaseDate) && (
               <>
                 <dt className="text-muted-foreground">
@@ -224,7 +284,7 @@ export function MediaDetails({
           {entry.magnetUri && onCopyMagnet ? (
             <Button
               variant="outline"
-              className="w-fit"
+              className="mt-4 w-fit"
               onClick={() => void copyMagnet()}
               disabled={copy === "pending"}
             >
@@ -232,7 +292,7 @@ export function MediaDetails({
               {t(copy === "done" ? "entry.copied" : "entry.copyMagnet")}
             </Button>
           ) : entry.magnetAvailable && onSignIn ? (
-            <Button variant="outline" className="w-fit" onClick={onSignIn}>
+            <Button variant="outline" className="mt-4 w-fit" onClick={onSignIn}>
               {t("entry.signInMagnet")}
             </Button>
           ) : (
@@ -251,11 +311,7 @@ export function MediaDetails({
               {t("entry.copyFailed")}
             </p>
           )}
-          {reading && (
-            <div className="mt-4 flex max-w-prose flex-col gap-6">
-              {details}
-            </div>
-          )}
+          {reading && <div>{details}</div>}
         </div>
       </div>
       {!reading && details}

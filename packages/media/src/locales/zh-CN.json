@@ -5,7 +5,11 @@
     "sharedHint": "共享条目由管理员维护，所有人可以浏览。",
     "privateHint": "私人条目、图片与观后感仅对你可见。"
   },
-  "type": { "all": "全部类型", "movie": "电影", "tv": "剧集" },
+  "type": {
+    "all": "全部类型",
+    "movie": "电影",
+    "tv": "剧集"
+  },
   "status": {
     "all": "全部状态",
     "planned": "想看",
@@ -98,7 +102,15 @@
     "reload": "载入最新资料",
     "actorCredits": "{{name}} 的作品",
     "source": "资料来源",
-    "readOnly": "只读片库"
+    "readOnly": "只读片库",
+    "previewPoster": "放大《{{title}}》海报",
+    "browsePosters": "浏览海报（{{count}}）",
+    "previousImage": "上一张",
+    "nextImage": "下一张",
+    "imagePosition": "第 {{number}} / {{count}} 张",
+    "chooseImage": "查看第 {{number}} 张海报",
+    "galleryImage": "{{title}} 的图集 {{number}}",
+    "retryImage": "重新加载图片"
   },
   "import": {
     "title": "搜索资料并导入",

@@ -590,7 +590,7 @@ function WorkspaceContent({
           }}
         >
           <DialogContent
-            className="max-h-[90svh] overflow-y-auto sm:max-w-5xl"
+            className="media-management-dialog max-h-[90svh] overflow-y-auto sm:max-w-6xl"
             aria-describedby={undefined}
             onCloseAutoFocus={(event) => {
               if (detailTrigger.current?.isConnected) {
@@ -640,6 +640,9 @@ function WorkspaceContent({
                     key={`${selected.id}:${selected.version}`}
                     entry={selected}
                     imageLoader={imageLoader}
+                    presentation="management"
+                    galleryClient={client}
+                    onAccessFailure={onAccessFailure}
                     onActor={showActor}
                     onCopyMagnet={onCopyMagnet}
                     onSignIn={onSignIn}
@@ -750,6 +753,7 @@ function WorkspaceContent({
                     imageLoader={imageLoader}
                     alt={candidate.title}
                     variant="200"
+                    compact
                     className="aspect-[2/3] w-14 shrink-0 rounded object-cover"
                   />
                   <div>

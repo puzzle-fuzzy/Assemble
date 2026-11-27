@@ -202,6 +202,7 @@ export function MediaImport({
                     imageLoader={imageLoader}
                     alt={item.title}
                     variant="200"
+                    compact
                     className="aspect-[2/3] w-16 shrink-0 rounded object-cover"
                   />
                   <div className="flex min-w-0 flex-1 flex-col gap-2">

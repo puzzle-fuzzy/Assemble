@@ -32,7 +32,6 @@ import {
 } from "./common";
 import { DetailViewer, PosterViewer } from "./detail-viewer";
 import { MediaImageView, PosterCard } from "./poster";
-import "./detail-viewer.css";
 
 type ReaderProps = { client: MediaClient; imageLoader: ImageLoader };
 

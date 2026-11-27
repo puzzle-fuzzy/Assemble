@@ -443,7 +443,13 @@ function CollectionsContent({
           if (!open) setSelected(null);
         }}
       >
-        <DialogContent className="max-h-[90svh] overflow-y-auto sm:max-w-3xl">
+        <DialogContent
+          className={
+            presentation === "management"
+              ? "media-management-dialog max-h-[90svh] overflow-y-auto sm:max-w-6xl"
+              : "max-h-[90svh] overflow-y-auto sm:max-w-3xl"
+          }
+        >
           <DialogHeader>
             <DialogTitle>{selected?.title}</DialogTitle>
             <DialogDescription>{t("scope.shared")}</DialogDescription>
@@ -451,6 +457,11 @@ function CollectionsContent({
           {selected && (
             <MediaDetails
               entry={selected}
+              presentation={
+                presentation === "management" ? "management" : "workspace"
+              }
+              galleryClient={libraryClient}
+              onAccessFailure={onAccessFailure}
               imageLoader={imageLoader}
               onCopyMagnet={onCopyMagnet}
             />
@@ -721,6 +732,7 @@ function CollectionEditor({
                   imageLoader={imageLoader}
                   alt={item.title}
                   variant="200"
+                  compact
                   className="aspect-[2/3] w-10 shrink-0 rounded object-cover"
                 />
                 <p className="min-w-0 flex-1 text-sm">

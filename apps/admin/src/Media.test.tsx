@@ -20,6 +20,7 @@ import {
   render,
   search,
   settle,
+  waitFor,
   waitForText,
 } from "./test-support/dom";
 
@@ -115,6 +116,8 @@ function response(path: string): Response {
   if (path.startsWith("/v1/media/shared/entries?")) return json(list());
   if (path === `/v1/media/shared/entries/${entry.id}`)
     return json({ item: entry });
+  if (path === `/v1/media/shared/entries/${entry.id}/gallery`)
+    return json({ entryId: entry.id, version: entry.version, items: [] });
   if (path.startsWith("/v1/media/search?")) return json({ items: [candidate] });
   if (path.startsWith("/v1/media/catalog/details?"))
     return json({ item: candidate });
@@ -186,7 +189,12 @@ function AccountSurface({ client }: { client: MediaClient }) {
     </>
   );
 }
+let previousUrl: string;
 beforeEach(() => {
+  previousUrl = window.location.href;
+  (
+    window as unknown as { happyDOM: { setURL: (url: string) => void } }
+  ).happyDOM.setURL("http://localhost/admin/");
   setLanguage("zh-CN");
   window.history.replaceState(null, "", "/admin/");
   requests.length = 0;
@@ -203,10 +211,158 @@ beforeEach(() => {
 afterEach(async () => {
   await cleanup();
   globalThis.fetch = originalFetch;
+  (
+    window as unknown as { happyDOM: { setURL: (url: string) => void } }
+  ).happyDOM.setURL(previousUrl);
   await act(async () => setLanguage("zh-CN"));
 });
 
 describe("影视业务界面与权限", () => {
+  test("管理详情复用封面预览和轮播，关闭原图保留详情、筛选与维护操作", async () => {
+    const poster = {
+      assetId: "admin-cover",
+      width: 400,
+      height: 600,
+      contentType: "image/webp",
+    };
+    const second = { ...poster, assetId: "admin-second" };
+    handle = (path) =>
+      path === `/v1/media/shared/entries/${entry.id}`
+        ? json({ item: { ...entry, poster } })
+        : path.endsWith(`/${entry.id}/gallery`)
+          ? json({
+              entryId: entry.id,
+              version: entry.version,
+              items: [poster, second],
+            })
+          : response(path);
+    const host = await render(<App />);
+    await navigate(host, "media");
+    await search(host, "真实");
+    await click(button(host, "查看 真实片名 的详情"));
+    await waitForText(document.body, "浏览海报（2）");
+    const details = document.body.querySelector<HTMLElement>('[role="dialog"]');
+    if (!details) throw new Error("DETAILS_NOT_OPEN");
+    expect(
+      details.querySelector('[data-presentation="management"]'),
+    ).not.toBeNull();
+    const cover = button(details, "放大《真实片名》海报");
+    await click(cover);
+    await waitFor(
+      () => document.querySelectorAll('[role="dialog"]').length === 2,
+      "嵌套原图预览",
+    );
+    const preview = document.querySelector<HTMLElement>(".detail-lightbox");
+    if (!preview) throw new Error("PREVIEW_NOT_OPEN");
+    await waitFor(
+      () =>
+        preview
+          .querySelector("img")
+          ?.getAttribute("src")
+          ?.endsWith("variant=original") === true,
+      "原图加载",
+    );
+    await click(button(preview, "下一张"));
+    await waitFor(
+      () =>
+        preview
+          .querySelector("img.detail-lightbox-image")
+          ?.getAttribute("src")
+          ?.includes(second.assetId) === true,
+      "轮播第二张",
+    );
+    await act(async () =>
+      preview.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "Escape", bubbles: true }),
+      ),
+    );
+    await waitFor(
+      () => document.querySelector(".detail-lightbox") === null,
+      "关闭原图",
+    );
+    await waitFor(() => document.activeElement === cover, "焦点返回详情封面");
+    expect(details.isConnected).toBe(true);
+    expect(button(details, "编辑")).toBeDefined();
+    expect(button(details, "图集与封面")).toBeDefined();
+    expect(button(details, "删除")).toBeDefined();
+    expect(
+      host.querySelector<HTMLInputElement>('input[type="search"]')?.value,
+    ).toBe("真实");
+    expect(
+      requests.filter(({ init }) => init?.method && init.method !== "GET"),
+    ).toHaveLength(0);
+  });
+
+  test("管理封面解码失败后能重试，失败占位不被放大按钮遮挡", async () => {
+    const poster = {
+      assetId: "admin-broken-cover",
+      width: 400,
+      height: 600,
+      contentType: "image/webp",
+    };
+    handle = (path) =>
+      path === `/v1/media/shared/entries/${entry.id}`
+        ? json({ item: { ...entry, poster } })
+        : response(path);
+    const host = await render(<App />);
+    await navigate(host, "media");
+    await click(button(host, "查看 真实片名 的详情"));
+    await waitFor(
+      () => Boolean(document.querySelector(".detail-cover img")),
+      "封面元素",
+    );
+    const frame = document.querySelector(".detail-cover");
+    const image = frame?.querySelector("img");
+    if (!image) throw new Error("COVER_NOT_FOUND");
+    await act(async () => image.dispatchEvent(new Event("error")));
+    const retry = button(document.body, "重新加载图片：真实片名");
+    expect(document.querySelector(".detail-cover")).toBe(frame);
+    expect(frame?.getAttribute("data-image-state")).toBe("failed");
+    expect(document.querySelector(".detail-poster-trigger")).toBeNull();
+    await click(retry);
+    await waitFor(() => Boolean(frame?.querySelector("img")), "重新加载封面");
+    expect(frame?.querySelector("img")).not.toBe(image);
+    expect(button(document.body, "放大《真实片名》海报")).toBeDefined();
+    expect(document.querySelectorAll('[role="dialog"]').length).toBe(1);
+  });
+
+  test("管理预览期间图集请求发现会话失效，卸载详情与原图，不留下旧账户图片", async () => {
+    const poster = {
+      assetId: "admin-auth-cover",
+      width: 400,
+      height: 600,
+      contentType: "image/webp",
+    };
+    let deny: ((value: Response) => void) | undefined;
+    handle = (path) =>
+      path === `/v1/media/shared/entries/${entry.id}`
+        ? json({ item: { ...entry, poster } })
+        : path.endsWith(`/${entry.id}/gallery`)
+          ? new Promise<Response>((resolve) => {
+              deny = resolve;
+            })
+          : response(path);
+    const host = await render(<App />);
+    await navigate(host, "media");
+    await click(button(host, "查看 真实片名 的详情"));
+    await waitFor(
+      () => Boolean(document.querySelector(".detail-cover img")),
+      "封面元素",
+    );
+    await click(button(document.body, "放大《真实片名》海报"));
+    await waitFor(
+      () => Boolean(document.querySelector(".detail-lightbox")),
+      "原图预览",
+    );
+    await act(async () => deny?.(json({ code: "UNAUTHORIZED" }, 401)));
+    await waitFor(
+      () => document.querySelectorAll('[role="dialog"]').length === 0,
+      "失效后清除弹窗",
+    );
+    expect(document.querySelector('[data-poster-motion="true"]')).toBeNull();
+    expect(document.body.textContent).not.toContain(entry.notes);
+  });
+
   test("管理影视详情保留查询和列表，关闭弹窗后焦点回到原行", async () => {
     const host = await render(<App />);
     await navigate(host, "media");

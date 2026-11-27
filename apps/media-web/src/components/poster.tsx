@@ -1,11 +1,12 @@
-import {
-  browserImageLoader,
-  type ImageLoader,
-  type MediaCandidate,
-  type MediaEntry,
-  type MediaImage,
-  type MediaImageVariant,
-} from "@assemble/media";
+import { browserImageLoader } from "@assemble/media/browser-client";
+import type { MediaImagePhase } from "@assemble/media/components/media-image";
+import type {
+  ImageLoader,
+  MediaCandidate,
+  MediaEntry,
+  MediaImage,
+  MediaImageVariant,
+} from "@assemble/media/model";
 import { Button } from "@assemble/ui/button";
 import { cn } from "@assemble/ui/lib/utils";
 import { LoadingState } from "@assemble/ui/loading-state";
@@ -25,6 +26,7 @@ export function MediaImageView({
   priority = false,
   allowRetry = true,
   responsivePoster = false,
+  onStateChange,
 }: {
   image: MediaImage | null;
   imageLoader: ImageLoader;
@@ -34,6 +36,8 @@ export function MediaImageView({
   priority?: boolean;
   allowRetry?: boolean;
   responsivePoster?: boolean;
+  compact?: boolean;
+  onStateChange?: (phase: MediaImagePhase) => void;
 }) {
   const { t } = useSiteTranslation();
   const [revision, setRevision] = useState(0);
@@ -52,6 +56,14 @@ export function MediaImageView({
       : imageLoader === browserImageLoader && image
         ? browserImageSource(image, variant)
         : loaded?.source;
+  const phase: MediaImagePhase = !image
+    ? "missing"
+    : source === undefined
+      ? "loading"
+      : source === null
+        ? "failed"
+        : "ready";
+  useEffect(() => onStateChange?.(phase), [onStateChange, phase]);
   useEffect(() => {
     if (!image || imageLoader === browserImageLoader) return;
     const controller = new AbortController();

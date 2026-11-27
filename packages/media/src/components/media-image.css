@@ -1,0 +1,62 @@
+.media-image-frame {
+  position: relative;
+  display: block;
+  min-inline-size: 0;
+  min-block-size: 0;
+  aspect-ratio: 2 / 3;
+  overflow: hidden;
+  background: var(--muted);
+}
+
+.media-image-content,
+.media-image-placeholder,
+.media-image-loading {
+  position: absolute;
+  inset: 0;
+  inline-size: 100%;
+  block-size: 100%;
+  min-inline-size: 0;
+  min-block-size: 0;
+  border-radius: inherit;
+}
+
+.media-image-content {
+  display: block;
+  object-fit: cover;
+}
+
+.media-image-placeholder {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  padding: 0.25rem;
+  text-align: center;
+  color: var(--muted-foreground);
+}
+
+.media-image-placeholder > svg {
+  flex-shrink: 0;
+  inline-size: 1.25rem;
+  block-size: 1.25rem;
+}
+
+.media-image-label {
+  max-inline-size: 100%;
+  font-size: 0.75rem;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.media-image-retry {
+  flex-shrink: 0;
+  inline-size: 2rem;
+  block-size: 2rem;
+  padding: 0;
+}
+
+.media-image-frame[data-compact] .media-image-placeholder {
+  gap: 0;
+  padding: 0;
+}

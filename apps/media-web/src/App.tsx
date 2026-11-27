@@ -3,8 +3,8 @@ import {
   createBrowserMediaClient,
   createBrowserMediaCollectionsClient,
   getMediaSession,
-  type MediaSession,
-} from "@assemble/media";
+} from "@assemble/media/browser-client";
+import type { MediaSession } from "@assemble/media/model";
 import { Alert, AlertDescription, AlertTitle } from "@assemble/ui/alert";
 import { Button } from "@assemble/ui/button";
 import { DisplayPreferencesMenu } from "@assemble/ui/display-preferences";
