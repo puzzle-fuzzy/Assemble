@@ -26,18 +26,16 @@ pub struct Checkpoint {
 fn invalid() -> TransferError {
     TransferError::HashMismatch
 }
+#[cfg(windows)]
 fn plain(metadata: &std::fs::Metadata) -> bool {
-    if metadata.file_type().is_symlink() {
-        return false;
-    }
-    #[cfg(windows)]
-    {
-        use std::os::windows::fs::MetadataExt;
-        if metadata.file_attributes() & 0x400 != 0 {
-            return false;
-        }
-    }
-    true
+    use std::os::windows::fs::MetadataExt;
+    // 重解析点还包括目录联接，不能只检查文件符号链接。
+    !metadata.file_type().is_symlink() && metadata.file_attributes() & 0x400 == 0
+}
+
+#[cfg(not(windows))]
+fn plain(metadata: &std::fs::Metadata) -> bool {
+    !metadata.file_type().is_symlink()
 }
 
 impl Checkpoint {
