@@ -51,6 +51,8 @@ pub enum Compose {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PlannerView {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub navigation: Vec<assemble_protocol::schedule::RecordLocations>,
     /// 还没读的通知，新的在前。
     pub notifications: Vec<NotificationView>,
     /// 还在进行中的日程，按最近的一场排在前面。
@@ -91,7 +93,7 @@ pub struct ScheduleView {
     /// 提前多少分钟提醒；`None` 就是到点才提醒。
     pub remind_before: Option<u32>,
     pub notes: Option<String>,
-    /// 从今天起、七天之内会出现的几场，含今天已经过去的那些。
+    /// 一次性未来安排保留开始时刻；重复日程展开七天，含今天已过去的。
     pub occurrences: Vec<Timestamp>,
 }
 
@@ -164,6 +166,7 @@ pub fn view(planner: &Planner, focus: Option<&str>, compose: Option<Compose>) ->
     reminders.sort_by(|a, b| a.due_at.cmp(&b.due_at).then_with(|| a.title.cmp(&b.title)));
 
     PlannerView {
+        navigation: planner.navigation.clone(),
         notifications: planner
             .notifications
             .iter()
@@ -185,6 +188,19 @@ pub fn view(planner: &Planner, focus: Option<&str>, compose: Option<Compose>) ->
 
 /// 一条日程从今天起七天之内会出现的几场。
 fn occurrences_of(schedule: &Schedule, since: i64) -> Vec<Timestamp> {
+    // 已迁移的远期旅行也应可见；重复安排仍只展开七天，避免无限名单。
+    if schedule.content.repeat == Repeat::None {
+        return if schedule.content.start_at.as_millis() >= since
+            || schedule
+                .content
+                .end_at
+                .is_some_and(|end| end.as_millis() > since)
+        {
+            vec![schedule.content.start_at]
+        } else {
+            Vec::new()
+        };
+    }
     let rule = Recurrence::new(
         schedule.content.start_at.as_millis(),
         schedule.content.repeat,
@@ -345,6 +361,7 @@ mod tests {
 
     fn planner() -> Planner {
         Planner {
+            navigation: Vec::new(),
             schedules: Vec::new(),
             reminders: Vec::new(),
             notifications: vec![Notification {
@@ -471,6 +488,17 @@ mod tests {
         };
         assert_eq!(occurrences_of(&once, nine.as_millis() - MINUTE), vec![nine]);
         assert_eq!(occurrences_of(&once, nine.as_millis() + MINUTE), Vec::new());
+        let future = assemble_protocol::schedule::Schedule {
+            content: assemble_protocol::schedule::ScheduleContent {
+                start_at: Timestamp::from_millis(nine.as_millis() + 90 * 24 * 60 * MINUTE).unwrap(),
+                ..once.content.clone()
+            },
+            ..once.clone()
+        };
+        assert_eq!(
+            occurrences_of(&future, nine.as_millis()),
+            vec![future.content.start_at]
+        );
 
         // 完成的日程不进名单。
         let done = assemble_protocol::schedule::Schedule {
@@ -478,6 +506,7 @@ mod tests {
             ..once
         };
         let listing = Planner {
+            navigation: Vec::new(),
             schedules: vec![done],
             reminders: Vec::new(),
             notifications: Vec::new(),
@@ -506,6 +535,7 @@ mod tests {
             }
         };
         let listing = Planner {
+            navigation: Vec::new(),
             schedules: Vec::new(),
             reminders: vec![
                 reminder("late", ReminderStatus::Scheduled, 5),
@@ -549,6 +579,7 @@ mod tests {
             Some("note-1")
         );
         let read = Planner {
+            navigation: Vec::new(),
             notifications: Vec::new(),
             ..planner()
         };

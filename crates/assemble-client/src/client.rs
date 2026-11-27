@@ -543,6 +543,26 @@ impl Client {
         self.call_json(Call::get("/v1/planner"), options).await
     }
 
+    /// 按所属记录重新授权导航，不接受调用者提供的目标 URL。
+    pub async fn record_locations(
+        &self,
+        resource: &str,
+        id: &str,
+        options: &RequestOptions<'_>,
+    ) -> Result<Vec<assemble_protocol::schedule::Location>, ClientError> {
+        if !matches!(resource, "schedule" | "reminder" | "memo") {
+            return Err(ClientError::InvalidRequest);
+        }
+        self.call_json(
+            Call::get(&format!(
+                "/v1/planner/locations/{resource}/{}",
+                id_segment(id)?
+            )),
+            options,
+        )
+        .await
+    }
+
     /// 新建一条日程。`idempotency_key` 用过的话拿回的是原来那一条。
     pub async fn create_schedule(
         &self,

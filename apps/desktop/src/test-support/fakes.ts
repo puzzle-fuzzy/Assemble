@@ -447,6 +447,12 @@ export class FakeBridge implements Bridge {
   openPublicMedia() {
     return this.answer("openPublicMedia", undefined);
   }
+  openRecordLocation(resource: string, id: string, label: string) {
+    return this.answer(
+      `openRecordLocation:${resource}:${id}:${label}`,
+      undefined,
+    );
+  }
 
   updateCheck() {
     this.calls.push("updateCheck");

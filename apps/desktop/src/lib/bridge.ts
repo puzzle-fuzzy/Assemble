@@ -110,6 +110,11 @@ export interface Bridge {
   /** 把主窗口叫到前面。发送面板里"请先登录"时用。 */
   openMain(): Promise<void>;
   openPublicMedia(): Promise<void>;
+  openRecordLocation(
+    resource: "schedule" | "reminder" | "memo",
+    id: string,
+    label: string,
+  ): Promise<void>;
   /** 取消一条传输：还没传完的停下，已经到服务端的撤回。 */
   cancelTransfer(transferId: string): Promise<void>;
   /** 再发一次。只有"文件根本没到服务端"的失败才有用。 */
@@ -222,6 +227,8 @@ export const bridge: Bridge = {
   closeSendPanel: () => invoke<void>("close_send_panel"),
   openMain: () => invoke<void>("open_main"),
   openPublicMedia: () => invoke<void>("open_public_media"),
+  openRecordLocation: (resource, id, label) =>
+    invoke<void>("open_record_location", { resource, id, label }),
   cancelTransfer: (transferId) =>
     invoke<void>("cancel_transfer", { transferId }),
   retryTransfer: (transferId) => invoke<void>("retry_transfer", { transferId }),
@@ -344,6 +351,10 @@ export interface MediaBridge {
 
 /** 复制只传标识，Rust 重新核验账户并读取原文后写系统剪贴板。 */
 export const memoBridge: MemoBridge = {
+  openLocation: (id, label) =>
+    run(() =>
+      invoke<void>("open_record_location", { resource: "memo", id, label }),
+    ),
   list: (query, signal) =>
     mediaInvoke("memo_list", { query }, isMemoList, signal),
   get: (id, signal) => mediaInvoke("memo_get", { id }, isMemo, signal),

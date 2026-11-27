@@ -54,6 +54,7 @@ fn time(value: i64) -> Result<Timestamp, ApiError> {
 impl Row {
     fn view(self) -> Result<Memo, ApiError> {
         Ok(Memo {
+            locations: Vec::new(),
             id: self.id,
             version: self.version,
             content: MemoContent {
@@ -98,7 +99,12 @@ async fn get_one(
     identity: Identity,
     Path(id): Path<String>,
 ) -> Result<Json<Memo>, ApiError> {
-    Ok(Json(load(&state.pool, &identity.account_id, &id).await?))
+    let mut tx = state.pool.begin().await?;
+    let mut memo = load(&mut *tx, &identity.account_id, &id).await?;
+    memo.locations =
+        crate::planner::locations::load(&mut *tx, &identity.account_id, "memo", &id).await?;
+    tx.commit().await?;
+    Ok(Json(memo))
 }
 async fn list(
     State(state): State<Shared>,

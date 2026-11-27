@@ -264,6 +264,16 @@ function isNotificationView(value: unknown): value is NotificationView {
 function isPlannerView(value: unknown): value is PlannerView {
   return (
     isRecord(value) &&
+    (value.navigation === undefined ||
+      (Array.isArray(value.navigation) &&
+        value.navigation.every(
+          (binding) =>
+            isRecord(binding) &&
+            ["schedule", "reminder"].includes(String(binding.resource)) &&
+            hasString(binding, "id") &&
+            Array.isArray(binding.locations) &&
+            binding.locations.every(isLocation),
+        ))) &&
     Array.isArray(value.notifications) &&
     value.notifications.every(isNotificationView) &&
     Array.isArray(value.schedules) &&

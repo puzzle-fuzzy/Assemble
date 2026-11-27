@@ -122,7 +122,10 @@ mod tests {
                 "memo_requests",
                 "memos",
                 "notifications",
+                "planner_import_baselines",
+                "planner_import_runs",
                 "planner_mutations",
+                "record_locations",
                 "reminders",
                 "schedules",
                 "sends",
@@ -140,7 +143,7 @@ mod tests {
             .fetch_one(&again)
             .await
             .unwrap();
-        assert_eq!(applied, 12);
+        assert_eq!(applied, 13);
     }
 
     #[tokio::test]

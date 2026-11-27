@@ -20,7 +20,9 @@
     "**/scripts": true,
     "**/deploy": true,
     "**/data": true,
-    "**/.artifacts": true
+    "**/.artifacts": true,
+    "**/PRODUCT.md": true,
+    "**/.codegraph": true
   },
   "editor.cursorSmoothCaretAnimation": "on",
   "workbench.tree.indent": 10,

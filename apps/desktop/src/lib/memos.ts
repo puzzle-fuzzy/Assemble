@@ -30,6 +30,7 @@ export interface MemoSummary {
   updatedAt: string;
 }
 export interface Memo extends MemoContent {
+  locations?: import("./types").Location[];
   id: string;
   version: number;
   createdAt: string;
@@ -47,6 +48,7 @@ export interface MemoList {
   pageSize: number;
 }
 export interface MemoBridge {
+  openLocation?(id: string, label: string): Promise<void>;
   list(query: MemoQuery, signal?: AbortSignal): Promise<MemoList>;
   get(id: string, signal?: AbortSignal): Promise<Memo>;
   create(
@@ -82,7 +84,18 @@ function identity(value: unknown): value is Record<string, unknown> {
   );
 }
 export function isMemo(value: unknown): value is Memo {
-  return identity(value) && typeof value.text === "string";
+  return (
+    identity(value) &&
+    typeof value.text === "string" &&
+    (value.locations === undefined ||
+      (Array.isArray(value.locations) &&
+        value.locations.every(
+          (location) =>
+            object(location) &&
+            typeof location.label === "string" &&
+            typeof location.address === "string",
+        )))
+  );
 }
 export function isMemoList(value: unknown): value is MemoList {
   return (

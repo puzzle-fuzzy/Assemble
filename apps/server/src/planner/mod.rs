@@ -12,6 +12,8 @@
 //!
 //! 到点检查见 [`tick`]：每一场只通知一次，太晚的不补，提醒不管多晚都补。
 
+pub mod archive;
+pub mod locations;
 pub mod notifications;
 pub mod reminders;
 pub mod schedules;
@@ -105,6 +107,7 @@ pub async fn planner_of(
     .fetch_all(pool)
     .await?;
     Ok(Planner {
+        navigation: locations::listing(pool, account_id).await?,
         schedules: schedules.iter().map(schedules::ScheduleRow::view).collect(),
         reminders: reminders.iter().map(reminders::ReminderRow::view).collect(),
         notifications: notifications

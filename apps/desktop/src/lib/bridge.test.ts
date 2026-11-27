@@ -82,6 +82,18 @@ const {
 const { messageFor } = await import("@/lib/messages");
 
 describe("桥接", () => {
+  test("地点导航只传记录和标签，目标网址由 Rust 重新读取", async () => {
+    await bridge.openRecordLocation("schedule", "schedule-1", "上海虹桥站");
+    expect(calls.at(-1)).toEqual({
+      command: "open_record_location",
+      args: { resource: "schedule", id: "schedule-1", label: "上海虹桥站" },
+    });
+    await memoBridge.openLocation?.("memo-1", "杭州东");
+    expect(calls.at(-1)).toEqual({
+      command: "open_record_location",
+      args: { resource: "memo", id: "memo-1", label: "杭州东" },
+    });
+  });
   test("远程具名命令核验响应，不向界面暴露凭据或路径", async () => {
     const session = {
       id: "remote-1",

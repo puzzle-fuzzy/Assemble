@@ -65,6 +65,8 @@ pub struct MemoUpdate {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Memo {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub locations: Vec<crate::schedule::Location>,
     pub id: String,
     pub version: i64,
     #[serde(flatten)]

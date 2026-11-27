@@ -1,4 +1,4 @@
-// 日程卡片：到点还没读的提醒、七天之内的安排，以及新建与修改的表单。
+// 日程卡片：到点提醒、未来安排（重复日程展开七天），以及新建与修改表单。
 //
 // 界面只摆 Rust 算好的东西：重复的日程展开成哪几场，在 Rust 那边定好。
 // 每一次改动都带着看到的版本号；别处改过时 Rust 已经换上最新的名单，这里只提示"再看一眼"。
@@ -298,6 +298,30 @@ export function PlannerCard({
               <ul className="flex flex-col">
                 {notifications.map((notification, index) => (
                   <NotificationRow
+                    locations={
+                      planner.navigation?.find(
+                        (binding) =>
+                          binding.resource ===
+                            (notification.scheduleId
+                              ? "schedule"
+                              : "reminder") &&
+                          binding.id ===
+                            (notification.scheduleId ??
+                              notification.reminderId),
+                      )?.locations
+                    }
+                    onOpen={(label) => {
+                      const id =
+                        notification.scheduleId ?? notification.reminderId;
+                      if (id)
+                        void act(() =>
+                          source.openRecordLocation(
+                            notification.scheduleId ? "schedule" : "reminder",
+                            id,
+                            label,
+                          ),
+                        );
+                    }}
                     key={notification.id}
                     separated={index > 0}
                     ref={notification.id === focus ? focused : undefined}
@@ -331,6 +355,13 @@ export function PlannerCard({
                 {shownEntries.map((entry, index) =>
                   "schedule" in entry ? (
                     <ScheduleRow
+                      locations={
+                        planner.navigation?.find(
+                          (binding) =>
+                            binding.resource === "schedule" &&
+                            binding.id === entry.schedule.id,
+                        )?.locations
+                      }
                       key={entry.key}
                       separated={index > 0}
                       source={source}
@@ -342,6 +373,13 @@ export function PlannerCard({
                     />
                   ) : (
                     <ReminderRow
+                      locations={
+                        planner.navigation?.find(
+                          (binding) =>
+                            binding.resource === "reminder" &&
+                            binding.id === entry.reminder.id,
+                        )?.locations
+                      }
                       key={entry.key}
                       separated={index > 0}
                       source={source}

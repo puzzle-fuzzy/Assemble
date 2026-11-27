@@ -123,6 +123,7 @@ mod tests {
             Event::SendUpdated { send: send() },
             Event::PlannerChanged {
                 planner: Planner {
+                    navigation: Vec::new(),
                     schedules: Vec::new(),
                     reminders: Vec::new(),
                     notifications: Vec::new(),

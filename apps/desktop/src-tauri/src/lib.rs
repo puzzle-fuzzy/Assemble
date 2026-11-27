@@ -154,6 +154,7 @@ fn handlers() -> impl Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool + Send + Sync +
         commands::remote_fullscreen,
         commands::memo_list,
         commands::memo_get,
+        commands::open_record_location,
         commands::memo_create,
         commands::memo_update,
         commands::memo_remove,

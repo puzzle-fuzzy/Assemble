@@ -37,6 +37,7 @@ import { LoadingState } from "@assemble/ui/loading-state";
 import { Textarea } from "@assemble/ui/textarea";
 import { type ReactNode, useEffect, useId, useRef, useState } from "react";
 import { toast } from "sonner";
+import { LocatedText } from "@/LocatedText";
 import { toBridgeError } from "@/lib/bridge";
 import { useMemoTranslation } from "@/lib/memo-i18n";
 import {
@@ -530,14 +531,40 @@ function MemosContent({
           {problem()}
           <FieldGroup>
             <Field>
-              <FieldLabel htmlFor={`${prefix}-read`}>{t("text")}</FieldLabel>
-              <Textarea
-                id={`${prefix}-read`}
-                readOnly
-                rows={12}
-                className="min-h-52 whitespace-pre-wrap"
-                value={details?.text ?? ""}
-              />
+              {details?.locations?.length && source.openLocation ? (
+                <>
+                  <FieldLabel asChild>
+                    <span>{t("text")}</span>
+                  </FieldLabel>
+                  <div className="min-h-52 whitespace-pre-wrap break-words text-sm">
+                    <LocatedText
+                      text={details.text}
+                      locations={details.locations}
+                      onOpen={(label) => {
+                        void source
+                          .openLocation?.(details.id, label)
+                          .catch((error) => {
+                            const code = toBridgeError(error).code;
+                            setError(code);
+                          });
+                      }}
+                    />
+                  </div>
+                </>
+              ) : (
+                <>
+                  <FieldLabel htmlFor={`${prefix}-read`}>
+                    {t("text")}
+                  </FieldLabel>
+                  <Textarea
+                    id={`${prefix}-read`}
+                    readOnly
+                    rows={12}
+                    className="min-h-52 whitespace-pre-wrap"
+                    value={details?.text ?? ""}
+                  />
+                </>
+              )}
             </Field>
           </FieldGroup>
           <DialogFooter>

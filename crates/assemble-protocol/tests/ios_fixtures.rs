@@ -300,6 +300,7 @@ fn sample() -> Value {
             },
         },
         "planner": Planner {
+            navigation: Vec::new(),
             schedules: schedules(),
             reminders: reminders(),
             notifications: notifications(),

@@ -5,7 +5,13 @@
     "title": "常用文本",
     "text": "  第一行\n第二行🙂\n ",
     "createdAt": "2026-11-26T01:02:03.000Z",
-    "updatedAt": "2026-11-26T01:02:03.000Z"
+    "updatedAt": "2026-11-26T01:02:03.000Z",
+    "locations": [
+      {
+        "label": "第一行",
+        "address": "上海市丁香路425号"
+      }
+    ]
   },
   "listing": {
     "items": [

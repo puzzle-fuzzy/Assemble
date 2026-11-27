@@ -7,6 +7,7 @@ import { type ReactNode, type Ref, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
+import { LocatedText } from "@/LocatedText";
 import type { Bridge } from "@/lib/bridge";
 import { uiText, useDesktopTranslation } from "@/lib/i18n";
 import {
@@ -15,7 +16,12 @@ import {
   reminderLine,
   scheduleLine,
 } from "@/lib/planner-text";
-import type { NotificationView, ReminderView, ScheduleView } from "@/lib/types";
+import type {
+  Location,
+  NotificationView,
+  ReminderView,
+  ScheduleView,
+} from "@/lib/types";
 import { cn } from "@/lib/utils";
 import type { Form } from "@/PlannerForm";
 
@@ -23,6 +29,7 @@ import type { Form } from "@/PlannerForm";
 export type Act = (what: () => Promise<unknown>) => Promise<string | null>;
 
 interface ItemProps<T> {
+  locations?: Location[];
   source: Bridge;
   item: T;
   /** 这台设备现在的名字。别的设备（多半是助手）记下的，要标出来。 */
@@ -40,6 +47,8 @@ function Row({
   actions,
   children,
   separated = false,
+  locations = [],
+  onOpen,
 }: {
   title: string;
   /** 记下它的设备；就是这台电脑时为 null。 */
@@ -47,6 +56,8 @@ function Row({
   actions: ReactNode;
   children: ReactNode;
   separated?: boolean;
+  locations?: Location[];
+  onOpen: (label: string) => void;
 }) {
   return (
     <li className="relative flex flex-wrap items-start gap-3 py-3">
@@ -54,7 +65,7 @@ function Row({
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-center gap-2">
           <h3 className="truncate text-sm font-medium" title={title}>
-            {title}
+            <LocatedText text={title} locations={locations} onOpen={onOpen} />
           </h3>
           {by === null ? null : (
             <Badge variant="outline" className="max-w-40 truncate">
@@ -77,13 +88,24 @@ function Line({ text }: { text: string }) {
 }
 
 /** 几句备注。长的先不摆全，鼠标停上去能看整段。 */
-function Note({ text }: { text: string }) {
+function Note({
+  text,
+  locations = [],
+  onOpen,
+}: {
+  text: string;
+  locations?: Location[];
+  onOpen: (label: string) => void;
+}) {
   return (
     <p
-      className="mt-1 line-clamp-2 text-xs whitespace-pre-line text-muted-foreground"
+      className={cn(
+        "mt-1 text-xs whitespace-pre-line text-muted-foreground",
+        !locations.length && "line-clamp-2",
+      )}
       title={text}
     >
-      {text}
+      <LocatedText text={text} locations={locations} onOpen={onOpen} />
     </p>
   );
 }
@@ -124,6 +146,8 @@ function Confirming({
 
 /** 一条没读的通知。它对应的那条提醒还在名单上时，顺手就能看完。 */
 export function NotificationRow({
+  locations = [],
+  onOpen,
   notification,
   reminder,
   highlighted,
@@ -133,6 +157,8 @@ export function NotificationRow({
   ref,
   separated = false,
 }: {
+  locations?: Location[];
+  onOpen: (label: string) => void;
   notification: NotificationView;
   /** 它对应的那条提醒；名单里找得到时才有。 */
   reminder: ReminderView | null;
@@ -156,10 +182,25 @@ export function NotificationRow({
     >
       {separated ? <Separator className="absolute inset-x-0 top-0" /> : null}
       <div className="min-w-0 flex-1">
-        <h3 className="text-sm font-medium">{notification.title}</h3>
+        <h3 className="text-sm font-medium">
+          <LocatedText
+            text={notification.title}
+            locations={locations}
+            onOpen={onOpen}
+          />
+        </h3>
         {notification.body ? (
-          <p className="line-clamp-3 text-xs whitespace-pre-line text-muted-foreground">
-            {notification.body}
+          <p
+            className={cn(
+              "text-xs whitespace-pre-line text-muted-foreground",
+              !locations.length && "line-clamp-3",
+            )}
+          >
+            <LocatedText
+              text={notification.body}
+              locations={locations}
+              onOpen={onOpen}
+            />
           </p>
         ) : null}
         <p className="text-xs text-muted-foreground">
@@ -191,6 +232,7 @@ export function NotificationRow({
 }
 
 export function ScheduleRow({
+  locations: bindings = [],
   source,
   item,
   deviceName,
@@ -202,8 +244,19 @@ export function ScheduleRow({
   useDesktopTranslation();
   const [confirming, setConfirming] = useState(false);
   const later = laterLabel(item, Date.now());
+  const locations = item.location
+    ? [
+        ...bindings.filter((l) => l.label !== item.location?.label),
+        item.location,
+      ]
+    : bindings;
+  const onOpen = (label: string) => {
+    void act(() => source.openRecordLocation("schedule", item.id, label));
+  };
   return (
     <Row
+      locations={locations}
+      onOpen={onOpen}
       separated={separated}
       title={item.title}
       by={item.createdBy === deviceName ? null : item.createdBy}
@@ -253,13 +306,24 @@ export function ScheduleRow({
     >
       <Line text={scheduleLine(item, Date.now())} />
       {later === null ? null : <Line text={later} />}
-      {item.location ? <Line text={item.location.label} /> : null}
-      {item.notes ? <Note text={item.notes} /> : null}
+      {item.location ? (
+        <p className="text-xs text-muted-foreground">
+          <LocatedText
+            text={item.location.label}
+            locations={locations}
+            onOpen={onOpen}
+          />
+        </p>
+      ) : null}
+      {item.notes ? (
+        <Note text={item.notes} locations={locations} onOpen={onOpen} />
+      ) : null}
     </Row>
   );
 }
 
 export function ReminderRow({
+  locations = [],
   source,
   item,
   deviceName,
@@ -272,8 +336,13 @@ export function ReminderRow({
   const [confirming, setConfirming] = useState(false);
   // 到点的提醒不能再改时间，只能看完或者不办。
   const fired = item.status === "fired";
+  const onOpen = (label: string) => {
+    void act(() => source.openRecordLocation("reminder", item.id, label));
+  };
   return (
     <Row
+      locations={locations}
+      onOpen={onOpen}
       separated={separated}
       title={item.title}
       by={item.createdBy === deviceName ? null : item.createdBy}
@@ -321,7 +390,9 @@ export function ReminderRow({
       }
     >
       <Line text={reminderLine(item, Date.now())} />
-      {item.notes ? <Note text={item.notes} /> : null}
+      {item.notes ? (
+        <Note text={item.notes} locations={locations} onOpen={onOpen} />
+      ) : null}
     </Row>
   );
 }

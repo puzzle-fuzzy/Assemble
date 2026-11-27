@@ -24,6 +24,14 @@ enum Command {
     Serve,
     /// 只读取配置并连接数据库，报告结果后退出。部署前用它检查环境变量。
     CheckConfig,
+    /// 核对 Jarvis 日程导出；显式 apply 后事务导入指定的已验证邮箱账户。
+    ImportPlannerArchive {
+        directory: std::path::PathBuf,
+        #[arg(long)]
+        email: String,
+        #[arg(long)]
+        apply: bool,
+    },
     /// 核对 Jarvis 影视导出包；只有显式 apply 才连接目标并原子导入空片库。
     ImportMediaArchive {
         directory: std::path::PathBuf,
@@ -268,6 +276,34 @@ fn main() -> ExitCode {
         }
     };
     match cli.command {
+        Command::ImportPlannerArchive {
+            directory,
+            email,
+            apply,
+        } => {
+            let result = runtime.block_on(async {
+                if !apply {
+                    return assemble_server::planner::archive::inspect(&directory).await;
+                }
+                let (_, pool) = assemble_server::load().await.map_err(|_| {
+                    assemble_server::planner::archive::Error("PLANNER_IMPORT_TARGET_UNAVAILABLE")
+                })?;
+                let result =
+                    assemble_server::planner::archive::import(&pool, &directory, &email).await;
+                pool.close().await;
+                result
+            });
+            match result {
+                Ok(report) => {
+                    println!("{}", serde_json::to_string(&report).unwrap_or_default());
+                    ExitCode::SUCCESS
+                }
+                Err(error) => {
+                    eprintln!("{error}");
+                    ExitCode::FAILURE
+                }
+            }
+        }
         Command::ImportMediaArchive { directory, apply } => {
             let result = runtime.block_on(async {
                 if apply {

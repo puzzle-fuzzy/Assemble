@@ -839,6 +839,31 @@ pub fn open_public_media(app: AppHandle) -> Result<(), CommandError> {
         .map_err(|_| CommandError::local("BROWSER_UNAVAILABLE", "browser could not be opened"))
 }
 
+/// 地点由服务端按当前身份重新读出，界面只交记录标识和显示名称。
+#[tauri::command]
+pub async fn open_record_location(
+    app: AppHandle,
+    resource: String,
+    id: String,
+    label: String,
+) -> Result<(), CommandError> {
+    use tauri_plugin_opener::OpenerExt;
+    let state = app.state::<AppState>();
+    let locations = state
+        .client
+        .record_locations(&resource, &id, &RequestOptions::new(&state.lifetime))
+        .await
+        .map_err(|error| planner_error(&error))?;
+    let url = locations
+        .iter()
+        .find(|location| location.label == label)
+        .and_then(assemble_protocol::schedule::Location::directions_url)
+        .ok_or_else(|| CommandError::local("NOT_FOUND", "the location is no longer available"))?;
+    app.opener()
+        .open_url(url.as_str(), None::<&str>)
+        .map_err(|_| CommandError::local("BROWSER_UNAVAILABLE", "maps could not be opened"))
+}
+
 /// 取消一条传输：还没发完的不发了，已经发到服务端的撤回。
 #[tauri::command]
 pub async fn cancel_transfer(app: AppHandle, transfer_id: String) {

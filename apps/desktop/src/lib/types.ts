@@ -191,7 +191,7 @@ export interface ScheduleView {
   /** 提前多少分钟提醒；到点才提醒时为 null。 */
   remindBefore: number | null;
   notes: string | null;
-  /** 从今天起七天之内会出现的几场，含今天已经过去的，按时间排。 */
+  /** 一次性未来安排保留开始时刻；重复日程展开七天，按时间排。 */
   occurrences: string[];
 }
 
@@ -219,6 +219,11 @@ export interface NotificationView {
 
 /** 日程面板：还没读的通知、还在进行中的日程与提醒。 */
 export interface PlannerView {
+  navigation?: {
+    resource: "schedule" | "reminder";
+    id: string;
+    locations: Location[];
+  }[];
   /** 新的在前。 */
   notifications: NotificationView[];
   /** 最近的一场在前的排前面。 */

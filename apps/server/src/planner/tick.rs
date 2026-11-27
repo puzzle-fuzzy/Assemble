@@ -179,6 +179,12 @@ async fn announce_occurrence(
 
     let mut tx = state.pool.begin_with("BEGIN IMMEDIATE").await?;
     // 同一场已经提醒过：主键撞上，什么都不改。
+    let suppressed: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM planner_import_baselines WHERE account_id=? AND schedule_id=? AND skip_through_at>=?)")
+        .bind(&schedule.account_id).bind(&schedule.id).bind(occurrence).fetch_one(&mut *tx).await?;
+    if suppressed {
+        tx.rollback().await?;
+        return Ok(false);
+    }
     let inserted = sqlx::query(
         "INSERT OR IGNORE INTO notifications \
          (id, account_id, kind, title, body, schedule_id, reminder_id, occurrence_at, raised_at) \

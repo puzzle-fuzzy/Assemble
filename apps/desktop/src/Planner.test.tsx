@@ -194,6 +194,50 @@ function trackScrolling() {
 }
 
 describe("日程", () => {
+  test("迁入记录只改标题时，保留未编辑时间的秒与毫秒", async () => {
+    const planner = listing();
+    const train = planner.schedules[1];
+    if (!train) throw new Error("SCHEDULE_MISSING");
+    train.startAt = train.startAt.replace("00.000Z", "17.123Z");
+    train.endAt = train.endAt?.replace("00.000Z", "59.999Z") ?? null;
+    const source = new FakeBridge(snapshot({ phase: "signedIn", planner }));
+    const view = await renderApp(source, "日程与提醒");
+    await settle();
+    const page = card(view.host, "日程");
+    await click(button(await planned(page, "火车"), "编辑"));
+    await fill(page, "标题", "高铁");
+    await click(button(page, "保存"));
+    expect(source.lastSubmitted).toMatchObject({
+      startAt: train.startAt,
+      endAt: train.endAt,
+    });
+  });
+  test("导入的标题和备注地名可点击，导航只交本人记录标识", async () => {
+    const planner = listing();
+    planner.navigation = [
+      {
+        resource: "schedule",
+        id: "schedule-1",
+        locations: [
+          { label: "周会", address: "上海市丁香路425号" },
+          { label: "三楼小会议室", address: "上海市丁香路425号" },
+        ],
+      },
+    ];
+    const source = new FakeBridge(snapshot({ phase: "signedIn", planner }));
+    const view = await renderApp(source, "日程与提醒");
+    await settle();
+    const row = await planned(card(view.host, "日程"), "周会");
+    const link = [...row.querySelectorAll("a")].find(
+      (a) => a.textContent === "三楼小会议室",
+    );
+    expect(link?.href).toContain("https://maps.apple.com/directions?");
+    if (!link) throw new Error("LOCATION_LINK_MISSING");
+    await click(link);
+    expect(source.calls).toContain(
+      "openRecordLocation:schedule:schedule-1:三楼小会议室",
+    );
+  });
   test("没登录时没有这一块", async () => {
     const view = await renderApp(new FakeBridge(snapshot()), "日程与提醒");
     await settle();
@@ -276,7 +320,7 @@ describe("日程", () => {
     expect(source.calls).toEqual(["plannerRefresh"]);
   });
 
-  test("七天之内什么都没有时如实说", async () => {
+  test("没有待处理安排时显示空状态", async () => {
     const empty = listing({
       notifications: [],
       schedules: [],
@@ -288,7 +332,7 @@ describe("日程", () => {
     const view = await renderApp(source, "日程与提醒");
     await settle();
     const page = card(view.host, "日程");
-    expect(text(page)).toContain("七天之内没有安排。");
+    expect(text(page)).toContain("暂无即将到来的安排。");
     expect(text(page)).not.toContain("到点的提醒");
     expect(text(page)).not.toContain("接下来的安排");
     expect(button(page, "全部已读")).toBeUndefined();

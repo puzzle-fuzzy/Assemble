@@ -65,6 +65,31 @@ pub struct Location {
     pub address: String,
 }
 
+impl Location {
+    /// 与 Jarvis 一致的公共地图链接；地址只能成为编码后的单个参数。
+    pub fn directions_url(&self) -> Option<url::Url> {
+        if self.address.trim().is_empty()
+            || self.address.encode_utf16().count() > 1000
+            || self.address.chars().any(char::is_control)
+        {
+            return None;
+        }
+        let mut url = url::Url::parse("https://maps.apple.com/directions").ok()?;
+        url.query_pairs_mut()
+            .append_pair("destination", self.address.trim());
+        Some(url)
+    }
+}
+
+/// 只读地点绑定；来源名称固定为 schedule、reminder、memo。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RecordLocations {
+    pub resource: String,
+    pub id: String,
+    pub locations: Vec<Location>,
+}
+
 /// 一条日程可以改动的全部内容。新建时整份给出，修改时也整份给出：
 /// 修改带着版本号，整份替换就不会因为两边各改一半而互相覆盖。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -278,6 +303,8 @@ pub struct Notification {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Planner {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub navigation: Vec<RecordLocations>,
     pub schedules: Vec<Schedule>,
     pub reminders: Vec<Reminder>,
     /// 还没读的通知，新的在前。
@@ -316,6 +343,26 @@ mod tests {
     use serde_json::json;
 
     use super::*;
+
+    #[test]
+    fn map_destination_cannot_escape_the_fixed_origin_or_inject_parameters() {
+        let location = Location {
+            label: "车站".into(),
+            address: "上海&x=javascript:alert(1)#片段".into(),
+        };
+        let url = location.directions_url().unwrap();
+        assert_eq!(url.origin().ascii_serialization(), "https://maps.apple.com");
+        assert_eq!(url.query_pairs().count(), 1);
+        assert_eq!(url.query_pairs().next().unwrap().1, location.address);
+        assert!(
+            Location {
+                address: "bad\naddress".into(),
+                ..location
+            }
+            .directions_url()
+            .is_none()
+        );
+    }
 
     fn at(text: &str) -> Timestamp {
         serde_json::from_value(json!(text)).unwrap()

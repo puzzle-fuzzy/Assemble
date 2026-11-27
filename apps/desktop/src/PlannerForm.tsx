@@ -116,10 +116,21 @@ export function PlannerForm({
       return;
     }
     setInvalidDraft(null);
+    // 旧日程可能精确到秒/毫秒；只改标题时，分钟选择器不能顺手抹掉未编辑的精度。
+    const originalStart = schedule?.startAt ?? reminder?.dueAt;
+    const originalEnd = schedule?.endAt;
     void onSave({
       title: title.trim(),
-      start,
-      end: end ? fromLocalInput(end) : null,
+      start:
+        originalStart && at === toLocalInput(originalStart)
+          ? originalStart
+          : start,
+      end:
+        originalEnd && end === toLocalInput(originalEnd)
+          ? originalEnd
+          : end
+            ? fromLocalInput(end)
+            : null,
       repeat,
       remindBefore: lead === "" ? null : Number(lead),
       place: place.trim(),

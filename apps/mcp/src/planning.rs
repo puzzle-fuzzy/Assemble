@@ -626,6 +626,7 @@ mod tests {
         );
         done.status = assemble_protocol::schedule::ScheduleStatus::Done;
         let planner = Planner {
+            navigation: Vec::new(),
             notifications: vec![
                 assemble_protocol::schedule::Notification {
                     id: "note-1".into(),
@@ -742,6 +743,7 @@ mod tests {
         let now = now();
         let (account, device) = who(now);
         let planner = Planner {
+            navigation: Vec::new(),
             notifications: Vec::new(),
             schedules: vec![schedule(
                 "s-later",

@@ -170,6 +170,18 @@
     "launchAtLogin": "enabled",
     "notice": null,
     "planner": {
+      "navigation": [
+        {
+          "resource": "schedule",
+          "id": "sche-2",
+          "locations": [
+            {
+              "label": "上海虹桥站",
+              "address": "申虹路 1500 号"
+            }
+          ]
+        }
+      ],
       "notifications": [
         {
           "id": "sche-1-1795544400000",
