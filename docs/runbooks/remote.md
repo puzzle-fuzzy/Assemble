@@ -24,6 +24,8 @@ macOS 构建需要 Xcode 26.3 或更高版本：ScreenCaptureKit 11 的必需传
 
 Windows 目标检查由 `scripts/verify/windows.ts` 按宿主选择范围：六个基础库的规则在 Mac 也检查；带 H.264/Opus 本机 C/C++ 依赖的原生适配只在 Windows 启用。两平台的主验证仍分别检查和测试各自完整的原生实现，不能用 Mac 上的纯规则交叉检查替代 Windows CI。
 
+Noise 依赖仅启用现用套件的 ChaChaPoly、SHA-256、Curve25519 和系统随机源特性，继续使用 snow 的默认纯 Rust 实现；其 `std` 默认特性会连带引入未使用的 `ring` C 代码，阻断 Mac 上的 Windows 目标规则检查，因此显式关闭。协议、核对代码和会话绑定不变，握手及篡改拒绝测试继续验证这条实际路径。
+
 ```sh
 bun run verify
 cargo test -p assemble-server --test remote
