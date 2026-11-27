@@ -1,6 +1,14 @@
 # 部署 Assemble 服务端
 
-## 当前发布：2026-11-27 图集同步与封面弹窗
+## 当前发布：2026-11-27 云盘目录、回收站与操作日志
+
+正式服务已更新为 `ghcr.io/puzzle-fuzzy/assemble-server:9a7dfe5eefdd`，源码 `9a7dfe5eefdde0b5de488b10adc8f25afaac36c2`，镜像标识 `sha256:dd7bbba7c02d2ca84c691deb574ec0ddec9c659319547dd8b4167fe27572a9c9`。[Windows/macOS 验证](https://github.com/puzzle-fuzzy/Assemble/actions/runs/46014498628)与[服务端镜像](https://github.com/puzzle-fuzzy/Assemble/actions/runs/46014498660)全部成功。本机提交前完整 verify 通过，用时 137.8 秒；N3 真实 Windows、Chrome 与镜像验收见[回收站手册](drive-trash.md)。
+
+受限备份位于 `/var/backups/assemble/20261127-141559-n3-release/`，包含配置、一致数据库、完整数据归档（759,920,640 字节）及摘要和逐表核对回执。先用真实三份 Compose、无网络临时容器和线上数据副本演练，再停写升级正式库；迁移从 1～13 更新为 1～16，旧脚本校验一致。原业务列的内容指纹和数量均相同：账户 1、设备 3、云盘文件 2、日程 5、提醒 5、影视条目 147、合集 16、备忘录 13；实体内容长度与摘要一致。停服务到就绪约 57.14 秒，随后容器 healthy，`check-config` 通过。
+
+只改镜像引用，Compose、其余环境、密钥、nginx、已签名桌面更新均核对未变。HTTPS 健康、就绪、管理端、影视、网页登录与下载页均 200；匿名管理会话、云盘目录及回收站均 401、no-store。没有创建正式测试账户或更改用户文件。本次未发布或安装桌面签名更新；Mac WebView、两台真实设备目录与恢复交互仍待验收。服务重新接受写入后必须保全最新数据向前修复，不能用旧数据库覆盖。
+
+## 此前发布：2026-11-27 图集同步与封面弹窗
 
 服务端与管理端已更新为 `ghcr.io/puzzle-fuzzy/assemble-server:e94b1631cd16`，对应源码 `e94b1631cd16fdfc87e3d48d741eb1353f81356e`。镜像标识为 `sha256:fd0f6620a163c88d141a79f5f0d0f6f060dd7b27cb5c452984ec579dc532c6b8`。[Windows/macOS 验证](https://github.com/puzzle-fuzzy/Assemble/actions/runs/45981364782)和[服务端镜像](https://github.com/puzzle-fuzzy/Assemble/actions/runs/45981364521)均成功；本机最终 `bun run verify` 为 481 项 TS、690 项 Rust 通过，2 项既有忽略，用时 121.4 秒。新增回归覆盖来源超量去重与翻页预算、真实任务批量替换及损坏图片保留原图集、简洁错误提示、已知失败与未知提交的不同重试策略及版本冲突恢复。
 
