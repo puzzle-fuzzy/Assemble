@@ -945,3 +945,34 @@ fn a_completed_receipt_replaces_a_paused_source_error() {
     assert_eq!(view_of(&registry, &id).failure, None);
     assert_eq!(view_of(&registry, &id).phase, TransferPhase::Complete);
 }
+
+#[test]
+fn another_download_never_discards_an_unconfirmed_cleanup_checkpoint() {
+    let mut registry = Registry::default();
+    let remote = kept("f1", "file.bin", 10, &"a".repeat(64));
+    let old = registry.fetch_from_drive(&remote);
+    registry.begin_receive(&old);
+    assert!(registry.remember_download(
+        &old,
+        assemble_device::resume::Checkpoint {
+            directory: std::env::temp_dir(),
+            staging: format!(".assemble-resume-{}", "b".repeat(32)),
+            name: "file.bin".into(),
+            size: 10,
+            sha256: "a".repeat(64),
+            parts: vec![]
+        }
+    ));
+    registry.receive_failed(&old, TransferFailure::WriteFailed);
+    let next = registry.fetch_from_drive(&remote);
+    assert_ne!(next, old);
+    assert_eq!(registry.fetch_from_drive(&remote), next);
+    let mut restarted = Registry::default();
+    assert!(restarted.restore_recovery(registry.recovery()));
+    assert!(restarted.download_checkpoint(&old).is_some());
+    assert_eq!(
+        restarted.next_job(Instant::now()),
+        Next::Work(Job::CleanupDownload { id: old })
+    );
+    assert!(view_of(&restarted, &next).resumable);
+}

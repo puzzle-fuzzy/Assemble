@@ -705,8 +705,14 @@ fn valid_recovery(record: &TransferRecord) -> bool {
                     .is_none_or(|u| u.valid() && u.size == o.file.size && u.sha256 == o.file.sha256)
         }
         Origin::FromDrive(f) => {
+            let base = format!("drive-{}", f.id);
             record.view.direction == Direction::In
-                && record.view.id == format!("drive-{}", f.id)
+                && (record.view.id == base
+                    || record
+                        .view
+                        .id
+                        .strip_prefix(format!("{base}-").as_str())
+                        .is_some_and(|suffix| suffix.parse::<u64>().is_ok()))
                 && f.size == record.view.size
                 && is_sha256_hex(&f.sha256)
                 && record.download.as_ref().is_none_or(|c| {
@@ -1091,19 +1097,33 @@ impl Registry {
 
     /// 排队去云盘里取一个文件。同一个文件已经排着、或者正在取时，不重复排。
     ///
-    /// 之前取回过（或者没取成）的，新的一次顶替旧记录：同一个标识始终只有一条，
-    /// 界面不会列出两个一样的。
+    /// 旧记录还欠暂存清理时必须保留，新意图使用另一个本机标识，不能丢失清理回执。
     pub fn fetch_from_drive(&mut self, file: &DriveFile) -> String {
-        let id = format!("drive-{}", file.id);
+        let base = format!("drive-{}", file.id);
+        if let Some(record) = self.transfers.iter().find(|record| {
+            matches!(&record.origin,Origin::FromDrive(source) if source.id==file.id)
+                && record.view.phase.is_active()
+        }) {
+            return record.id().to_owned();
+        }
+        let mut id = base.clone();
         if self
             .transfers
             .iter()
-            .any(|record| record.id() == id && record.view.phase.is_active())
+            .any(|r| r.id() == base && r.download.is_some())
         {
-            return id;
+            loop {
+                id = format!("{base}-{}", self.next_local);
+                self.next_local = self.next_local.wrapping_add(1).max(1);
+                if !self.transfers.iter().any(|r| r.id() == id) {
+                    break;
+                }
+            }
         }
         self.transfers.retain(|record| record.id() != id);
-        self.push(TransferRecord::from_drive(file));
+        let mut record = TransferRecord::from_drive(file);
+        record.view.id.clone_from(&id);
+        self.push(record);
         id
     }
 

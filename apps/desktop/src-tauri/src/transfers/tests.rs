@@ -1538,11 +1538,11 @@ async fn a_drive_file_fetched_here_lands_in_the_inbox_like_any_other_delivery() 
     assert_eq!(f.state().saved_file_for_handle(1), Some(saved));
     assert_eq!(f.state().next_job(), Next::Nothing);
 
-    // 再取一次：不覆盖先前那份，加序号；记录还是同一条。
-    assert_eq!(f.state().fetch_from_drive(&remote), id);
+    // 再取一次：不覆盖先前那份；旧清理未确认时，新意图使用另一个本机标识。
+    let second = f.state().fetch_from_drive(&remote);
     until("the second copy to be fetched", || {
-        view_of(&f, &id).phase == TransferPhase::Complete
-            && view_of(&f, &id).saved_as.as_deref() == Some("合同 (2).pdf")
+        view_of(&f, &second).phase == TransferPhase::Complete
+            && view_of(&f, &second).saved_as.as_deref() == Some("合同 (2).pdf")
     })
     .await;
     assert_eq!(entries(&f.inbox()), ["合同 (2).pdf", "合同.pdf"]);
