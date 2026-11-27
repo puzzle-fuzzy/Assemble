@@ -6,6 +6,7 @@ use assemble_protocol::remote::{
     RemoteBatch, RemoteFrame, RemotePhase, RemotePoll, RemoteRequest, RemoteSession, RemoteView,
     SequencedInput,
 };
+use assemble_protocol::remote::{RemoteEnd, RemoteEndReason};
 use axum::extract::{DefaultBodyLimit, Path, Query, State};
 use axum::http::{StatusCode, header};
 use axum::response::{IntoResponse, Response};
@@ -35,8 +36,12 @@ struct Entry {
     frame_at: i64,
 }
 impl Entry {
-    fn end(&mut self) {
+    fn end(&mut self, reason: RemoteEndReason) {
+        if self.session.phase == RemotePhase::Ended {
+            return;
+        }
         self.session.phase = RemotePhase::Ended;
+        self.session.end_reason = Some(reason);
         self.frame = None;
         self.inputs.clear();
     }
@@ -50,7 +55,11 @@ impl Entry {
             RemotePhase::Ended => false,
         };
         if expired {
-            self.end();
+            self.end(if self.session.phase == RemotePhase::Pending {
+                RemoteEndReason::Expired
+            } else {
+                RemoteEndReason::Disconnected
+            });
         }
     }
     fn includes(&self, id: &Identity) -> bool {
@@ -135,6 +144,7 @@ async fn create(
         host_name: host.name,
         phase: RemotePhase::Pending,
         created_at: now,
+        end_reason: None,
     };
     {
         let mut entries = state
@@ -211,17 +221,17 @@ async fn authorize(state: &Shared, identity: &Identity, id: &str) -> Result<(), 
             e.session.host_id.clone()
         }
     };
-    if !crate::devices::exists(&state.pool, &peer).await? {
-        if let Some(e) = state
+    if crate::devices::find(&state.pool, &identity.account_id, &peer)
+        .await?
+        .is_none()
+        && let Some(e) = state
             .remote
             .entries
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .get_mut(id)
-        {
-            e.end();
-        }
-        return Err(ApiError::not_found());
+    {
+        e.end(RemoteEndReason::DeviceRevoked);
     }
     Ok(())
 }
@@ -270,8 +280,19 @@ async fn end(
     State(state): State<Shared>,
     identity: Identity,
     Path(id): Path<String>,
+    body: axum::body::Bytes,
 ) -> Result<StatusCode, ApiError> {
     authorize(&state, &identity, &id).await?;
+    let reason = if body.is_empty() {
+        RemoteEndReason::Stopped
+    } else {
+        if body.len() > 256 {
+            return Err(ApiError::invalid("invalid remote end reason"));
+        }
+        serde_json::from_slice::<RemoteEnd>(&body)
+            .map_err(|_| ApiError::invalid("invalid remote end reason"))?
+            .reason
+    };
     {
         let mut entries = state
             .remote
@@ -279,7 +300,33 @@ async fn end(
             .lock()
             .unwrap_or_else(PoisonError::into_inner);
         let e = entries.get_mut(&id).ok_or_else(ApiError::not_found)?;
-        e.end();
+        // 服务端决定拒绝与过期；设备只报告自己停止、断网或原生能力失败。
+        if !matches!(
+            reason,
+            RemoteEndReason::Stopped
+                | RemoteEndReason::Disconnected
+                | RemoteEndReason::CaptureFailed
+                | RemoteEndReason::InputFailed
+        ) {
+            return Err(ApiError::invalid("end reason is server-owned"));
+        }
+        if e.session.host_id != identity.device_id
+            && matches!(
+                reason,
+                RemoteEndReason::CaptureFailed | RemoteEndReason::InputFailed
+            )
+        {
+            return Err(ApiError::invalid("only the host may report native errors"));
+        }
+        let reason = if e.session.phase == RemotePhase::Pending
+            && e.session.host_id == identity.device_id
+            && reason == RemoteEndReason::Stopped
+        {
+            RemoteEndReason::Declined
+        } else {
+            reason
+        };
+        e.end(reason);
     }
     crate::audit::record(
         &state.pool,
@@ -443,7 +490,7 @@ async fn inputs(
         .filter(|event| event.sequence > e.input_sequence)
         .count();
     if e.inputs.len() + count > MAX_INPUTS {
-        e.end();
+        e.end(RemoteEndReason::InputFailed);
         return Err(ApiError::conflict("REMOTE_ENDED", "input queue overflow"));
     }
     for event in batch.events {
@@ -469,6 +516,7 @@ mod tests {
                 host_name: "Mac".into(),
                 phase: RemotePhase::Pending,
                 created_at: Timestamp::from_millis(now).unwrap(),
+                end_reason: None,
             },
             controller_seen: now,
             host_seen: now,
@@ -489,12 +537,17 @@ mod tests {
         pending.host_seen = now + REQUEST_TTL_MS;
         pending.expire(now + REQUEST_TTL_MS + 1);
         assert_eq!(pending.session.phase, RemotePhase::Ended);
+        assert_eq!(pending.session.end_reason, Some(RemoteEndReason::Expired));
         assert!(pending.inputs.is_empty());
         let mut active = entry(now);
         active.session.phase = RemotePhase::Active;
         active.controller_seen = now + PEER_TIMEOUT_MS + 1;
         active.expire(now + PEER_TIMEOUT_MS + 1);
         assert_eq!(active.session.phase, RemotePhase::Ended);
+        assert_eq!(
+            active.session.end_reason,
+            Some(RemoteEndReason::Disconnected)
+        );
         assert!(active.inputs.is_empty());
     }
 }

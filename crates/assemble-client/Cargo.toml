@@ -8,6 +8,7 @@ description = "桌面端访问 Assemble 服务端的唯一出口：固定来源�
 
 [dependencies]
 assemble-protocol.workspace = true
+assemble-remote.workspace = true
 assemble-store.workspace = true
 assemble-transfer.workspace = true
 axum.workspace = true

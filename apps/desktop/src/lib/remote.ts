@@ -1,4 +1,14 @@
 // 远程响应的独立契约；凭据与本机路径永不经过这里。
+export const remoteEndReasons = [
+  "stopped",
+  "declined",
+  "expired",
+  "disconnected",
+  "deviceRevoked",
+  "captureFailed",
+  "inputFailed",
+] as const;
+export type RemoteEndReason = (typeof remoteEndReasons)[number];
 export interface RemoteSession {
   id: string;
   controllerId: string;
@@ -7,6 +17,7 @@ export interface RemoteSession {
   hostName: string;
   phase: "pending" | "active" | "ended";
   createdAt: string;
+  endReason?: RemoteEndReason;
 }
 export interface RemoteView {
   sessions: RemoteSession[];
@@ -65,7 +76,10 @@ export function isRemoteSession(v: unknown): v is RemoteSession {
     ) &&
     ["pending", "active", "ended"].includes(String(v.phase)) &&
     typeof v.createdAt === "string" &&
-    Number.isFinite(Date.parse(v.createdAt))
+    Number.isFinite(Date.parse(v.createdAt)) &&
+    (v.endReason === undefined ||
+      (v.phase === "ended" &&
+        remoteEndReasons.some((reason) => reason === v.endReason)))
   );
 }
 export function isRemoteView(v: unknown): v is RemoteView {

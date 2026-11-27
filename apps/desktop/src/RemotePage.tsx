@@ -46,6 +46,7 @@ import type {
   RemoteView,
 } from "@/lib/remote";
 import {
+  remoteEnded,
   remoteError,
   remoteText,
   useRemoteTranslation,
@@ -148,7 +149,10 @@ export function RemotePage({
   const [local, setLocal] = useState<RemoteSession | null>(null);
   const [closed, setClosed] = useState<string[]>([]);
   const [pending, setPending] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [feedback, setFeedback] = useState<{
+    message: string;
+    failed: boolean;
+  } | null>(null);
   const session = [...view.sessions, ...(local ? [local] : [])].find(
     (s) =>
       s.controllerId === ownId && s.phase !== "ended" && !closed.includes(s.id),
@@ -156,11 +160,11 @@ export function RemotePage({
   async function connect(hostId: string) {
     if (pending) return;
     setPending(true);
-    setError(null);
+    setFeedback(null);
     try {
       setLocal(await source.request(hostId));
     } catch (error) {
-      setError(remoteError(error));
+      setFeedback({ message: remoteError(error), failed: true });
     } finally {
       setPending(false);
     }
@@ -180,10 +184,10 @@ export function RemotePage({
         source={source}
         session={session}
         onSendFiles={onSendFiles}
-        onEnded={(message) => {
+        onEnded={(message, failed) => {
           setClosed((ids) => [...ids, session.id]);
           setLocal(null);
-          if (message) setError(message);
+          if (message) setFeedback({ message, failed: failed ?? true });
         }}
       />
     );
@@ -193,12 +197,17 @@ export function RemotePage({
   );
   return (
     <div className="flex min-w-0 flex-col gap-4">
-      {error ? (
-        <Alert variant="destructive">
-          <AlertDescription>{error}</AlertDescription>
+      {feedback ? (
+        <Alert
+          variant={feedback.failed ? "destructive" : "default"}
+          role={feedback.failed ? "alert" : "status"}
+        >
+          <AlertDescription>{feedback.message}</AlertDescription>
         </Alert>
       ) : null}
-      <p className="text-sm text-muted-foreground">{t("intro")}</p>
+      {peers.length ? (
+        <p className="text-sm text-muted-foreground">{t("intro")}</p>
+      ) : null}
       {peers.length ? (
         <ul className="divide-y rounded-lg border">
           {peers.map((d) => (
@@ -246,7 +255,7 @@ function RemoteController({
 }: {
   source: RemoteBridge;
   session: RemoteSession;
-  onEnded: (error?: string) => void;
+  onEnded: (error?: string, failed?: boolean) => void;
   onSendFiles: () => void;
 }) {
   const { t } = useRemoteTranslation();
@@ -284,12 +293,12 @@ function RemoteController({
     if (activeRef.current && !ended.current) queue.push({ type: "releaseAll" });
   }, [queue]);
   const finish = useCallback(
-    (error?: string) => {
+    (error?: string, failed = true) => {
       if (ended.current) return;
       ended.current = true;
       queue.stop();
       void source.end(session.id).catch(() => {});
-      onEndedRef.current(error);
+      onEndedRef.current(error, failed);
     },
     [source, session.id, queue],
   );
@@ -325,7 +334,12 @@ function RemoteController({
         const result = await source.poll(session.id, after);
         if (disposed) return;
         if (result.session.phase === "ended") {
-          finish();
+          finish(
+            remoteEnded(result.session),
+            !["stopped", "declined", "expired"].includes(
+              result.session.endReason ?? "stopped",
+            ),
+          );
           return;
         }
         setActive(result.session.phase === "active");

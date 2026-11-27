@@ -3,6 +3,7 @@ use crate::{Client, ClientError, RequestOptions};
 use assemble_protocol::remote::{
     RemoteBatch, RemoteFrame, RemotePoll, RemoteRequest, RemoteSession, RemoteView,
 };
+use assemble_protocol::remote::{RemoteEnd, RemoteEndReason};
 use reqwest::Method;
 use serde::{Serialize, de::DeserializeOwned};
 
@@ -79,6 +80,22 @@ impl Client {
     ) -> Result<(), ClientError> {
         self.remote_call(Method::POST, &path(id, "end")?, vec![], None, options)
             .await?;
+        Ok(())
+    }
+    pub async fn remote_end_with_reason(
+        &self,
+        id: &str,
+        reason: RemoteEndReason,
+        options: &RequestOptions<'_>,
+    ) -> Result<(), ClientError> {
+        self.remote_call(
+            Method::POST,
+            &path(id, "end")?,
+            vec![],
+            Some(payload(&RemoteEnd { reason })?),
+            options,
+        )
+        .await?;
         Ok(())
     }
     pub async fn remote_poll(

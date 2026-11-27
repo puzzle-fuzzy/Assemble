@@ -17,6 +17,24 @@ pub enum RemotePhase {
     Ended,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum RemoteEndReason {
+    Stopped,
+    Declined,
+    Expired,
+    Disconnected,
+    DeviceRevoked,
+    CaptureFailed,
+    InputFailed,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct RemoteEnd {
+    pub reason: RemoteEndReason,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RemoteSession {
@@ -27,6 +45,8 @@ pub struct RemoteSession {
     pub host_name: String,
     pub phase: RemotePhase,
     pub created_at: Timestamp,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub end_reason: Option<RemoteEndReason>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]

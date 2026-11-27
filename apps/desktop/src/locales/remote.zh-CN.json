@@ -24,6 +24,15 @@
   "escape": "发送 Esc",
   "failed": "远程连接中断，请重新连接。",
   "ended": "连接已结束",
+  "end": {
+    "stopped": "对方已结束远程连接。",
+    "declined": "对方拒绝了控制请求。",
+    "expired": "控制请求已过期，请重新连接。",
+    "disconnected": "对方连接中断，键鼠控制已停止，请重新连接。",
+    "deviceRevoked": "参与连接的设备已被移除，远程控制已停止。",
+    "captureFailed": "对方无法继续采集屏幕，请检查屏幕录制权限后重新连接。",
+    "inputFailed": "对方的键鼠控制已停止，请检查系统权限后重新连接。"
+  },
   "offline": "离线",
   "REMOTE_CAPTURE_FAILED": "无法采集屏幕。Mac 请在系统设置中允许屏幕录制，然后重试。",
   "REMOTE_INPUT_FAILED": "无法控制键鼠。Mac 请在系统设置中允许辅助功能；Windows 无法操作权限更高的窗口。",

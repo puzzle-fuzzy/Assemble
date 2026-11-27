@@ -161,12 +161,15 @@ async fn consent_direction_latest_frame_input_ack_and_revocation_cross_real_http
         .remove_device(&host.device.id, &controller.options())
         .await
         .unwrap();
-    status(
-        controller
-            .remote_poll(&session.id, 0, 0, &controller.options())
-            .await,
-        404,
+    let ended = controller
+        .remote_poll(&session.id, 0, 0, &controller.options())
+        .await
+        .unwrap();
+    assert_eq!(
+        ended.session.end_reason,
+        Some(RemoteEndReason::DeviceRevoked)
     );
+    assert!(ended.frame.is_none());
     status(
         host.remote_poll(&session.id, 2, 0, &host.options()).await,
         401,
@@ -276,6 +279,19 @@ async fn decline_and_end_erase_frames_and_prevent_old_inputs() {
     host.remote_end(&declined.id, &host.options())
         .await
         .unwrap();
+    controller
+        .remote_end(&declined.id, &controller.options())
+        .await
+        .unwrap();
+    assert_eq!(
+        controller
+            .remote_poll(&declined.id, 0, 0, &controller.options())
+            .await
+            .unwrap()
+            .session
+            .end_reason,
+        Some(RemoteEndReason::Declined)
+    );
     status(host.remote_accept(&declined.id, &host.options()).await, 409);
     let session = controller
         .remote_request(&request, &controller.options())
@@ -296,11 +312,66 @@ async fn decline_and_end_erase_frames_and_prevent_old_inputs() {
         .await
         .unwrap();
     assert_eq!(result.session.phase, RemotePhase::Ended);
+    assert_eq!(result.session.end_reason, Some(RemoteEndReason::Stopped));
     assert!(result.frame.is_none());
     status(
         host.remote_frame(&session.id, &frame(), &host.options())
             .await,
         409,
+    );
+    drop(stream);
+    f.server.stop().await;
+}
+
+#[tokio::test]
+async fn native_failures_are_host_only_and_cleanup_does_not_overwrite_the_first_reason() {
+    let mut f = fixture().await;
+    let controller = register(&f, 'a', "电脑", Platform::Windows).await;
+    let host = register(&f, 'b', "另一台", Platform::Macos).await;
+    let mut stream = host.open_events();
+    next_event(&mut stream).await;
+    let session = controller
+        .remote_request(
+            &RemoteRequest {
+                host_id: host.device.id.clone(),
+            },
+            &controller.options(),
+        )
+        .await
+        .unwrap();
+    host.remote_accept(&session.id, &host.options())
+        .await
+        .unwrap();
+    status(
+        controller
+            .remote_end_with_reason(
+                &session.id,
+                RemoteEndReason::CaptureFailed,
+                &controller.options(),
+            )
+            .await,
+        400,
+    );
+    status(
+        host.remote_end_with_reason(&session.id, RemoteEndReason::Expired, &host.options())
+            .await,
+        400,
+    );
+    host.remote_end_with_reason(&session.id, RemoteEndReason::CaptureFailed, &host.options())
+        .await
+        .unwrap();
+    controller
+        .remote_end(&session.id, &controller.options())
+        .await
+        .unwrap();
+    assert_eq!(
+        controller
+            .remote_poll(&session.id, 0, 0, &controller.options())
+            .await
+            .unwrap()
+            .session
+            .end_reason,
+        Some(RemoteEndReason::CaptureFailed)
     );
     drop(stream);
     f.server.stop().await;

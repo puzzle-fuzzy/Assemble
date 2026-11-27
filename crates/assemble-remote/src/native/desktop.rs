@@ -33,6 +33,18 @@ pub struct Host {
     pressed: Pressed,
     sequence: u32,
 }
+impl crate::worker::Backend for Host {
+    type Error = NativeError;
+    fn frame(&mut self) -> Result<RemoteFrame, NativeError> {
+        Self::frame(self)
+    }
+    fn apply(&mut self, input: &RemoteInput) -> Result<(), NativeError> {
+        Self::apply(self, input)
+    }
+    fn release_all(&mut self) -> Result<(), NativeError> {
+        Self::release_all(self)
+    }
+}
 impl Host {
     pub fn open() -> Result<Self, NativeError> {
         let monitors = Monitor::all().map_err(|_| NativeError::Capture)?;
@@ -130,8 +142,10 @@ impl Host {
         if matches!(input, RemoteInput::Text { .. }) {
             self.release_all()?;
         }
-        self.pressed.observe(input);
-        self.inject(input)
+        self.pressed.before_inject(input);
+        let result = self.inject(input);
+        self.pressed.after_inject(input, result.is_ok());
+        result
     }
     fn inject(&mut self, input: &RemoteInput) -> Result<(), NativeError> {
         let result = match input {
@@ -180,7 +194,9 @@ impl Host {
     pub fn release_all(&mut self) -> Result<(), NativeError> {
         let mut failed = false;
         for event in self.pressed.releases() {
-            if self.inject(&event).is_err() {
+            let released = self.inject(&event).is_ok();
+            self.pressed.after_inject(&event, released);
+            if !released {
                 failed = true;
             }
         }

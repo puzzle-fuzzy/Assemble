@@ -1,80 +1,176 @@
-//! 手动运行的本机探针：实际采集经过本地中转到另一设备身份，不保存画面、不移动或键入。
+//! 手动探针：真实采集、并行输入/画面、本地中转、原文摘要核对和显式停止；不保存画面或键入。
 #![cfg_attr(test, allow(clippy::pedantic))]
 #[cfg(any(target_os = "windows", target_os = "macos"))]
 #[path = "../../../server/tests/common/mod.rs"]
 mod common;
-
+#[cfg(any(target_os = "windows", target_os = "macos"))]
+mod probe {
+    use assemble_protocol::remote::{
+        RemoteBatch, RemoteFrame, RemoteInput, RemotePhase, RemoteRequest, SequencedInput,
+    };
+    use assemble_remote::{
+        native::{Host, NativeError},
+        worker::{Backend, HostWorker},
+    };
+    use sha2::{Digest, Sha256};
+    use std::{
+        collections::HashMap,
+        sync::{Arc, Mutex},
+        time::Duration,
+    };
+    use tokio_util::sync::CancellationToken;
+    type Hashes = Arc<Mutex<HashMap<u32, String>>>;
+    type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
+    struct Tracked {
+        native: Host,
+        hashes: Hashes,
+    }
+    fn digest(frame: &RemoteFrame) -> std::result::Result<String, NativeError> {
+        let bytes = serde_json::to_vec(frame).map_err(|_| NativeError::Capture)?;
+        Ok(assemble_protocol::primitives::to_hex(&Sha256::digest(
+            bytes,
+        )))
+    }
+    impl Backend for Tracked {
+        type Error = NativeError;
+        fn frame(&mut self) -> std::result::Result<RemoteFrame, NativeError> {
+            let frame = self.native.frame()?;
+            let mut hashes = self.hashes.lock().map_err(|_| NativeError::Capture)?;
+            if hashes.len() >= 64 {
+                return Err(NativeError::Capture);
+            }
+            hashes.insert(frame.sequence, digest(&frame)?);
+            Ok(frame)
+        }
+        fn apply(&mut self, input: &RemoteInput) -> std::result::Result<(), NativeError> {
+            self.native.apply(input)
+        }
+        fn release_all(&mut self) -> std::result::Result<(), NativeError> {
+            self.native.release_all()
+        }
+    }
+    pub async fn run(fixture: &common::Fixture) -> Result<()> {
+        let platform = assemble_protocol::primitives::Platform::current();
+        let controller = common::register(fixture, 'a', "local probe controller", platform).await;
+        let host = common::register(fixture, 'b', "local probe host", platform).await;
+        let mut stream = host.open_events();
+        common::next_event(&mut stream).await;
+        let session = controller
+            .remote_request(
+                &RemoteRequest {
+                    host_id: host.device.id.clone(),
+                },
+                &controller.options(),
+            )
+            .await?;
+        let hashes = Hashes::default();
+        let captured = hashes.clone();
+        let worker = HostWorker::start(
+            move || {
+                Ok(Tracked {
+                    native: Host::open()?,
+                    hashes: captured,
+                })
+            },
+            CancellationToken::new(),
+        )
+        .await?;
+        if let Err(error) = host.remote_accept(&session.id, &host.options()).await {
+            let _ = worker.shutdown().await;
+            return Err(error.into());
+        }
+        let cancel = CancellationToken::new();
+        let until = cancel.clone();
+        let client = host.client.clone();
+        let id = session.id.clone();
+        let driver = tokio::spawn(async move { client.run_remote_host(&id, worker, &until).await });
+        let result = exchange(&controller, &host, &session.id, &hashes).await;
+        cancel.cancel();
+        let stats = driver.await??;
+        let frame = result?;
+        if stats.inputs_applied != 1 || stats.frames_sent == 0 {
+            return Err("native relay work was not acknowledged".into());
+        }
+        println!(
+            "native_relay_ok width={} height={} displays={} encoded_bytes={} sent={} unchanged={} release_all_ok ended_ok",
+            frame.width,
+            frame.height,
+            frame.displays.len(),
+            frame.jpeg.len(),
+            stats.frames_sent,
+            stats.frames_unchanged
+        );
+        drop(stream);
+        Ok(())
+    }
+    async fn exchange(
+        controller: &common::Registered,
+        host: &common::Registered,
+        id: &str,
+        hashes: &Hashes,
+    ) -> Result<RemoteFrame> {
+        let frame = tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                let received = controller
+                    .remote_poll(id, 0, 0, &controller.options())
+                    .await?;
+                if let Some(frame) = received.frame {
+                    return std::result::Result::<_, assemble_client::ClientError>::Ok(frame);
+                }
+                tokio::time::sleep(Duration::from_millis(25)).await;
+            }
+        })
+        .await??;
+        if hashes
+            .lock()
+            .map_err(|_| "probe hashes unavailable")?
+            .get(&frame.sequence)
+            != Some(&digest(&frame)?)
+        {
+            return Err("relayed screen frame differs".into());
+        }
+        controller
+            .remote_inputs(
+                id,
+                &RemoteBatch {
+                    events: vec![SequencedInput {
+                        sequence: 1,
+                        input: RemoteInput::ReleaseAll,
+                    }],
+                },
+                &controller.options(),
+            )
+            .await?;
+        tokio::time::timeout(Duration::from_secs(3), async {
+            loop {
+                if host
+                    .remote_poll(id, 0, 0, &host.options())
+                    .await?
+                    .inputs
+                    .is_empty()
+                {
+                    return std::result::Result::<_, assemble_client::ClientError>::Ok(());
+                }
+                tokio::time::sleep(Duration::from_millis(25)).await;
+            }
+        })
+        .await??;
+        controller.remote_end(id, &controller.options()).await?;
+        let ended = host.remote_poll(id, 1, 0, &host.options()).await?;
+        if ended.session.phase != RemotePhase::Ended || ended.frame.is_some() {
+            return Err("session did not close".into());
+        }
+        Ok(frame)
+    }
+    use super::common;
+}
 #[cfg(any(target_os = "windows", target_os = "macos"))]
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut fixture = common::fixture().await;
-    let result = probe(&fixture).await;
+    let result = probe::run(&fixture).await;
     fixture.server.stop().await;
     result
-}
-#[cfg(any(target_os = "windows", target_os = "macos"))]
-async fn probe(fixture: &common::Fixture) -> Result<(), Box<dyn std::error::Error>> {
-    use assemble_protocol::{
-        primitives::Platform,
-        remote::{RemoteBatch, RemoteInput, RemotePhase, RemoteRequest, SequencedInput},
-    };
-    let controller =
-        common::register(fixture, 'a', "local probe controller", Platform::Windows).await;
-    let host = common::register(fixture, 'b', "local probe host", Platform::Windows).await;
-    let mut stream = host.open_events();
-    common::next_event(&mut stream).await;
-    let session = controller
-        .remote_request(
-            &RemoteRequest {
-                host_id: host.device.id.clone(),
-            },
-            &controller.options(),
-        )
-        .await?;
-    let mut native = assemble_remote::native::Host::open()?;
-    host.remote_accept(&session.id, &host.options()).await?;
-    let frame = native.frame()?;
-    host.remote_frame(&session.id, &frame, &host.options())
-        .await?;
-    let received = controller
-        .remote_poll(&session.id, 0, 0, &controller.options())
-        .await?;
-    if received.frame.as_ref() != Some(&frame) {
-        return Err("relayed screen frame differs".into());
-    }
-    controller
-        .remote_inputs(
-            &session.id,
-            &RemoteBatch {
-                events: vec![SequencedInput {
-                    sequence: 1,
-                    input: RemoteInput::ReleaseAll,
-                }],
-            },
-            &controller.options(),
-        )
-        .await?;
-    let incoming = host.remote_poll(&session.id, 0, 0, &host.options()).await?;
-    for event in incoming.inputs {
-        native.apply(&event.input)?;
-    }
-    native.release_all()?;
-    controller
-        .remote_end(&session.id, &controller.options())
-        .await?;
-    let ended = host.remote_poll(&session.id, 1, 0, &host.options()).await?;
-    if ended.session.phase != RemotePhase::Ended || ended.frame.is_some() {
-        return Err("session did not close".into());
-    }
-    println!(
-        "native_relay_ok width={} height={} displays={} encoded_bytes={} release_all_ok ended_ok",
-        frame.width,
-        frame.height,
-        frame.displays.len(),
-        frame.jpeg.len()
-    );
-    drop(stream);
-    Ok(())
 }
 #[cfg(not(any(target_os = "windows", target_os = "macos")))]
 fn main() {

@@ -24,6 +24,15 @@
   "escape": "Send Esc",
   "failed": "The remote connection was interrupted. Connect again.",
   "ended": "Session ended",
+  "end": {
+    "stopped": "The other computer ended the remote session.",
+    "declined": "The other computer declined the control request.",
+    "expired": "The control request expired. Connect again.",
+    "disconnected": "The other computer disconnected. Input control has stopped. Connect again.",
+    "deviceRevoked": "A participating device was removed. Remote control has stopped.",
+    "captureFailed": "Screen capture stopped on the other computer. Check screen recording permission and connect again.",
+    "inputFailed": "Input control stopped on the other computer. Check system permissions and connect again."
+  },
   "offline": "Offline",
   "REMOTE_CAPTURE_FAILED": "Screen capture is unavailable. On Mac, allow screen recording in System Settings and retry.",
   "REMOTE_INPUT_FAILED": "Input control is unavailable. On Mac, allow Accessibility in System Settings. Windows cannot control elevated windows.",

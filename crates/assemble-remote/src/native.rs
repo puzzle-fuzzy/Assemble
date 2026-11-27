@@ -2,4 +2,4 @@
 #[cfg(any(target_os = "windows", target_os = "macos"))]
 mod desktop;
 #[cfg(any(target_os = "windows", target_os = "macos"))]
-pub use desktop::Host;
+pub use desktop::{Host, NativeError};

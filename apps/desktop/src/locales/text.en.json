@@ -173,7 +173,8 @@
       "launchAtLoginFailed": "Launch at login could not be changed. Try again later.",
       "updateApplyFailed": "The new version could not be installed. It will be tried again at the next launch.",
       "remoteCaptureFailed": "Remote screen capture stopped. Check screen recording permission and connect again.",
-      "remoteInputFailed": "Remote input stopped. Check Accessibility permission and connect again."
+      "remoteInputFailed": "Remote input stopped. Check Accessibility permission and connect again.",
+      "remoteDisconnected": "The remote connection was interrupted. Input control has stopped. Connect again."
     },
     "fileTooLarge": "“{{name}}” exceeds 100 MB and cannot be sent.",
     "fileUnreadable": "“{{name}}” cannot be read. It may have been moved, or you may not have permission.",

@@ -2,6 +2,8 @@
 #![cfg_attr(test, allow(clippy::pedantic))]
 use assemble_protocol::remote::{RemoteButton, RemoteInput};
 
+pub mod worker;
+
 #[cfg(feature = "native")]
 pub mod native;
 
@@ -16,6 +18,19 @@ pub struct Pressed {
     buttons: Vec<RemoteButton>,
 }
 impl Pressed {
+    pub fn before_inject(&mut self, input: &RemoteInput) {
+        if matches!(
+            input,
+            RemoteInput::Key { pressed: true, .. } | RemoteInput::Button { pressed: true, .. }
+        ) {
+            self.observe(input);
+        }
+    }
+    pub fn after_inject(&mut self, input: &RemoteInput, accepted: bool) {
+        if accepted {
+            self.observe(input);
+        }
+    }
     pub fn observe(&mut self, input: &RemoteInput) {
         match input {
             RemoteInput::Key { key, pressed } => {
@@ -33,20 +48,26 @@ impl Pressed {
             _ => {}
         }
     }
-    pub fn releases(&mut self) -> Vec<RemoteInput> {
+    pub fn releases(&self) -> Vec<RemoteInput> {
         let mut result: Vec<_> = self
             .keys
-            .drain(..)
+            .iter()
+            .cloned()
             .rev()
             .map(|key| RemoteInput::Key {
                 key,
                 pressed: false,
             })
             .collect();
-        result.extend(self.buttons.drain(..).map(|button| RemoteInput::Button {
-            button,
-            pressed: false,
-        }));
+        result.extend(
+            self.buttons
+                .iter()
+                .copied()
+                .map(|button| RemoteInput::Button {
+                    button,
+                    pressed: false,
+                }),
+        );
         result
     }
 }
@@ -82,6 +103,28 @@ mod tests {
                 }
             ]
         );
+        for input in held.releases() {
+            held.after_inject(&input, true);
+        }
+        assert!(held.releases().is_empty());
+    }
+    #[test]
+    fn failed_releases_remain_tracked_for_explicit_cleanup() {
+        let press = RemoteInput::Button {
+            button: RemoteButton::Left,
+            pressed: true,
+        };
+        let release = RemoteInput::Button {
+            button: RemoteButton::Left,
+            pressed: false,
+        };
+        let mut held = Pressed::default();
+        held.before_inject(&press);
+        held.after_inject(&press, false);
+        held.before_inject(&release);
+        held.after_inject(&release, false);
+        assert_eq!(held.releases(), vec![release.clone()]);
+        held.after_inject(&release, true);
         assert!(held.releases().is_empty());
     }
 }

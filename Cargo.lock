@@ -189,6 +189,7 @@ name = "assemble-client"
 version = "0.1.0"
 dependencies = [
  "assemble-protocol",
+ "assemble-remote",
  "assemble-store",
  "assemble-transfer",
  "axum",
@@ -359,6 +360,8 @@ dependencies = [
  "enigo",
  "image",
  "thiserror 2.0.21",
+ "tokio",
+ "tokio-util",
  "xcap",
 ]
 

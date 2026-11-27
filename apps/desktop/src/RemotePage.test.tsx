@@ -2,6 +2,7 @@ import { afterEach, expect, test } from "bun:test";
 import { setLanguage } from "@assemble/display";
 import { act, StrictMode } from "react";
 import type { RemoteBridge, RemoteSession, SequencedInput } from "@/lib/remote";
+import { isRemoteSession, type RemoteEndReason } from "@/lib/remote";
 import { RemoteBanner, RemotePage } from "@/RemotePage";
 import { button, cleanup, click, render, settle } from "@/test-support/dom";
 
@@ -37,6 +38,51 @@ function fake() {
 afterEach(async () => {
   await cleanup();
   await setLanguage("zh-CN");
+});
+
+test.each([
+  ["declined", "对方拒绝了控制请求。", "status"],
+  ["expired", "控制请求已过期，请重新连接。", "status"],
+  ["disconnected", "对方连接中断，键鼠控制已停止，请重新连接。", "alert"],
+  [
+    "captureFailed",
+    "对方无法继续采集屏幕，请检查屏幕录制权限后重新连接。",
+    "alert",
+  ],
+] as const)(
+  "结束原因 %s 使用对应文案与公告级别",
+  async (reason: RemoteEndReason, message, role) => {
+    const f = fake();
+    f.source.poll = async () => ({
+      session: { ...session, phase: "ended", endReason: reason },
+      frame: null,
+      inputs: [],
+    });
+    const view = await render(
+      <RemotePage
+        source={f.source}
+        view={{ sessions: [session] }}
+        devices={[]}
+        ownId="controller"
+        onSendFiles={() => {}}
+      />,
+    );
+    await settle();
+    expect(view.host.querySelector(`[role="${role}"]`)?.textContent).toContain(
+      message,
+    );
+  },
+);
+test("未知原因与活动会话里的结束原因不能通过桥接", () => {
+  expect(
+    isRemoteSession({ ...session, phase: "ended", endReason: "captureFailed" }),
+  ).toBe(true);
+  expect(
+    isRemoteSession({ ...session, phase: "ended", endReason: "future" }),
+  ).toBe(false);
+  expect(
+    isRemoteSession({ ...session, phase: "active", endReason: "stopped" }),
+  ).toBe(false);
 });
 
 test("左右修饰键共享按下状态，普通按键保留重复，失焦释放全部", async () => {

@@ -635,7 +635,12 @@ mod tests {
             sample.draft = None;
             sample.transfers.clear();
             sample.downloads.tasks.clear();
-            assert!(busy(&sample));
+            match sample.remote.sessions[0].phase {
+                assemble_protocol::remote::RemotePhase::Ended => {
+                    assert!(!busy(&sample), "已结束的会话不能阻止更新");
+                }
+                _ => assert!(busy(&sample), "请求中和活动会话不能被更新打断"),
+            }
             sample.remote.sessions.clear();
             assert!(!busy(&sample));
         }
