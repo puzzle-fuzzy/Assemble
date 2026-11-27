@@ -13,6 +13,7 @@ url.workspace = true
 
 # 库代码只做序列化，不做 JSON 的解析与拼接：serde_json 只有测试在用。
 [dev-dependencies]
+base64.workspace = true
 serde_json.workspace = true
 
 [lints]

@@ -25,7 +25,7 @@ pub struct CommandError {
 }
 
 impl CommandError {
-    fn local(code: &str, message: impl Into<String>) -> Self {
+    pub(crate) fn local(code: &str, message: impl Into<String>) -> Self {
         Self {
             code: code.to_owned(),
             message: message.into(),
@@ -197,6 +197,19 @@ pub fn launch_at_login(app: AppHandle) -> LaunchState {
 }
 
 /// 设置开机启动，并读回系统里的实际状态。
+/// 现在就查一次更新；有新版的话等它下载完才返回。不自动更新的构建原样回它的状态。
+#[tauri::command]
+pub async fn update_check(app: AppHandle) -> Result<crate::state::UpdateView, CommandError> {
+    crate::update::cycle(&app).await;
+    Ok(app.state::<AppState>().update_view())
+}
+
+/// 换上已经下载好的新版并重新打开窗口。成了就不会回来。
+#[tauri::command]
+pub fn update_restart(app: AppHandle) -> Result<(), CommandError> {
+    crate::update::apply(&app, false)
+}
+
 #[tauri::command]
 pub fn set_launch_at_login(app: AppHandle, enabled: bool) -> Result<LaunchState, CommandError> {
     if !crate::state::launch_at_login_supported() {

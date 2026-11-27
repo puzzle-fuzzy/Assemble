@@ -16,13 +16,14 @@ import {
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 
-import { isSnapshot } from "@/lib/guard";
+import { isSnapshot, isUpdateView } from "@/lib/guard";
 import { isMemo, isMemoList, type MemoBridge } from "@/lib/memos";
 import type {
   LaunchState,
   ReminderContent,
   ScheduleContent,
   Snapshot,
+  UpdateView,
 } from "@/lib/types";
 import {
   type DownloadInput,
@@ -140,6 +141,10 @@ export interface Bridge {
   plannerCompose(kind: "reminder" | "schedule" | null): Promise<Snapshot>;
   /** 这台电脑到点时要不要弹提醒。 */
   setPlannerMuted(muted: boolean): Promise<Snapshot>;
+  /** 现在就查一次更新；有新版的话等它下载完才返回。不自动更新的构建原样回它的状态。 */
+  updateCheck(): Promise<UpdateView>;
+  /** 换上已经下载好的新版并重新打开窗口。 */
+  updateRestart(): Promise<void>;
   /** 订阅状态变化，返回取消订阅的函数。 */
   subscribe(listener: (snapshot: Snapshot) => void): Promise<UnlistenFn>;
 }
@@ -242,6 +247,8 @@ export const bridge: Bridge = {
     checked(() => invoke<unknown>("planner_compose", { compose: kind })),
   setPlannerMuted: (muted) =>
     checked(() => invoke<unknown>("set_planner_muted", { muted })),
+  updateCheck: () => updateState(() => invoke<unknown>("update_check")),
+  updateRestart: () => invoke<void>("update_restart"),
   subscribe: (listener) =>
     listen<unknown>(SNAPSHOT_EVENT, (event) => {
       listener(requireSnapshot(event.payload));
@@ -257,6 +264,14 @@ function requireDownloadPreview(value: unknown): DownloadPreview {
 /** 取回一份状态，并在交界处核对它的形状。 */
 async function checked(load: () => Promise<unknown>): Promise<Snapshot> {
   return requireSnapshot(await run(load));
+}
+
+/** 取回自动更新的状态，并在交界处核对它的形状。 */
+async function updateState(load: () => Promise<unknown>): Promise<UpdateView> {
+  const value = await run(load);
+  if (!isUpdateView(value))
+    throw new BridgeError("INVALID_RESPONSE", "invalid update state");
+  return value;
 }
 
 /** 取回一组标识，并在交界处核对它的形状。 */

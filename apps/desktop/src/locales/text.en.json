@@ -136,6 +136,8 @@
     "VERSION_CONFLICT": "This item changed on another device. The latest version is now shown; review it again.",
     "INVALID_STATE": "This item cannot be changed in its current state. The latest version is now shown; review it again.",
     "PLANNER_INPUT": "Some details are invalid and were not saved. Check the title (up to 200 characters), times, and repeat end date.",
+    "UPDATE_NOT_READY": "The new version has not been downloaded yet. Try again later.",
+    "UPDATE_INSTALL_FAILED": "The new version could not be installed. It will be retried later.",
     "GENERIC": "The action could not be completed. Try again later."
   },
   "notice": {
@@ -154,12 +156,23 @@
       "signInToSend": "Sign in before sending files.",
       "signInToUpload": "Sign in before uploading files to the cloud drive.",
       "receiveFolderFallback": "The receive folder is unavailable. This file was saved to the default location.",
-      "launchAtLoginFailed": "Launch at login could not be changed. Try again later."
+      "launchAtLoginFailed": "Launch at login could not be changed. Try again later.",
+      "updateApplyFailed": "The new version could not be installed. It will be tried again at the next launch."
     },
     "fileTooLarge": "“{{name}}” exceeds 100 MB and cannot be sent.",
     "fileUnreadable": "“{{name}}” cannot be read. It may have been moved, or you may not have permission.",
     "unknownInfo": "There is a new notification. Check the current status.",
     "unknownError": "The action could not be completed. Try again later."
+  },
+  "update": {
+    "unsupported": "This build does not update itself.",
+    "idle": "No update check has run yet.",
+    "checking": "Checking for a new version…",
+    "upToDate": "This is the latest version.",
+    "downloading": "Downloading version {{version}}: {{received}} / {{total}}",
+    "downloadingUnknownTotal": "Downloading version {{version}}: {{received}}",
+    "ready": "Version {{version}} is ready. It is applied when Assemble is idle, or you can apply it now.",
+    "failed": "The update did not succeed ({{code}}). It will be retried later."
   },
   "build": {
     "channels": {

@@ -73,6 +73,34 @@ describe("状态契约样本", () => {
     );
   });
 
+  test("覆盖了自动更新的每一步", () => {
+    const views = checked().map((snapshot) => snapshot.update);
+    expect(new Set(views.map((view) => view.state))).toEqual(
+      new Set([
+        "unsupported",
+        "idle",
+        "checking",
+        "upToDate",
+        "downloading",
+        "ready",
+        "failed",
+      ]),
+    );
+    // 版本号只在有新版时出现；进度只在下载时出现；错误码只在失败时出现。
+    for (const view of views) {
+      const expectVersion = ["downloading", "ready"].includes(view.state);
+      expect(view.version !== null).toBe(expectVersion);
+      expect(view.received !== null).toBe(view.state === "downloading");
+      expect(view.error !== null).toBe(view.state === "failed");
+    }
+    // 不自动更新的构建里没有一台是"已经有新版"的。
+    expect(
+      views
+        .filter((view) => view.state === "unsupported")
+        .every((view) => view.version === null && view.checkedAt === null),
+    ).toBe(true);
+  });
+
   test("覆盖了传输的每个阶段、每种失败原因、两个方向、有没有草稿", () => {
     const snapshots = checked();
     const transfers = snapshots.flatMap((snapshot) => snapshot.transfers);

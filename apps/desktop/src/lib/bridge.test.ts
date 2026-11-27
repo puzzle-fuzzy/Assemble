@@ -30,6 +30,14 @@ const STATE: Snapshot = {
   notice: null,
   planner: null,
   plannerMuted: false,
+  update: {
+    state: "idle",
+    version: null,
+    received: null,
+    total: null,
+    checkedAt: null,
+    error: null,
+  },
 };
 
 const calls: InvokeCall[] = [];
@@ -227,6 +235,10 @@ describe("桥接", () => {
     await bridge.plannerFocus("note-1");
     await bridge.plannerCompose("reminder");
     await bridge.setPlannerMuted(true);
+    // 检查更新交回的是更新这一块状态，不是整份快照。
+    respondWith = STATE.update;
+    await bridge.updateCheck();
+    await bridge.updateRestart();
 
     expect(calls).toEqual([
       { command: "snapshot", args: {} },
@@ -302,6 +314,8 @@ describe("桥接", () => {
       { command: "planner_focus", args: { notificationId: "note-1" } },
       { command: "planner_compose", args: { compose: "reminder" } },
       { command: "set_planner_muted", args: { muted: true } },
+      { command: "update_check", args: {} },
+      { command: "update_restart", args: {} },
     ]);
   });
 

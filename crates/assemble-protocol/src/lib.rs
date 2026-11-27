@@ -34,3 +34,4 @@ pub mod primitives;
 pub mod schedule;
 pub mod sends;
 pub mod system_notifications;
+pub mod updates;

@@ -13,6 +13,7 @@ import type {
   ServiceView,
   Snapshot,
   TransferView,
+  UpdateView,
 } from "@/lib/types";
 
 export const ACCOUNT: AccountView = {
@@ -200,9 +201,20 @@ export function snapshot(overrides: Overrides = {}): Snapshot {
     // 登录之后连上服务时，Rust 会把日程名单拿回来。
     planner: phase === "signedIn" ? PLANNER : null,
     plannerMuted: false,
+    update: UPDATE,
     ...rest,
   };
 }
+
+/** 自动更新的状态：还没查过。 */
+export const UPDATE: UpdateView = {
+  state: "idle",
+  version: null,
+  received: null,
+  total: null,
+  checkedAt: null,
+  error: null,
+};
 
 /** 一条传输记录；不说明阶段时，是一个从别的设备收到、已经存好的文件。 */
 export function transfer(overrides: Partial<TransferView> = {}): TransferView {
@@ -415,6 +427,17 @@ export class FakeBridge implements Bridge {
 
   openMain() {
     return this.answer("openMain", undefined);
+  }
+
+  updateCheck() {
+    this.calls.push("updateCheck");
+    return Promise.resolve(this.current.update);
+  }
+
+  updateRestart() {
+    this.calls.push("updateRestart");
+    if (this.failWith) throw this.failWith;
+    return Promise.resolve();
   }
 
   cancelTransfer(transferId: string) {

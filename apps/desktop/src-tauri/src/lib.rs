@@ -24,6 +24,7 @@ mod state;
 mod system_notifications;
 mod transfers;
 mod tray;
+mod update;
 
 use std::io::{self, Write};
 use std::sync::{Arc, Mutex, PoisonError};
@@ -76,6 +77,8 @@ pub fn run() -> Result<(), StartupError> {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_notification::init())
+        // 自动更新也一样只从 Rust 这边用：界面读状态、调两条具名命令，拿不到更新插件。
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .invoke_handler(handlers())
         .setup(move |app| start(app, client, background, handed_over, sink))
         .on_window_event(|window, event| {
@@ -181,6 +184,8 @@ fn handlers() -> impl Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool + Send + Sync +
         commands::retry_transfer,
         commands::open_main,
         commands::dismiss_notice,
+        commands::update_check,
+        commands::update_restart,
         commands::system_notifications_refresh,
         commands::system_notifications_read,
         commands::planner_refresh,
@@ -233,6 +238,8 @@ fn start(
     let settings = transfers::load_settings(&handle);
     let notifier = Arc::new(notify::SystemNotifier::new(handle.clone()));
     let browser_secrets = secrets.clone();
+    // 上次是为了换新版才重启的话，这一次照样不弹窗口。
+    let background = background || update::relaunch_queued(&handle);
     handle.manage(AppState::new(
         handle.clone(),
         client,
@@ -280,6 +287,7 @@ fn start(
     handle.manage(browser);
 
     runtime::start(&handle);
+    update::start(&handle);
     // 让 Windows 的右键菜单指向这个可执行文件（别的运行方式下什么都不做）。
     send_menu::sync(&handle.state::<AppState>().settings());
 
