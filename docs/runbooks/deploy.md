@@ -1,6 +1,14 @@
 # 部署 Assemble 服务端
 
-## 当前发布：2026-11-27 云盘预览
+## 当前发布：2026-11-27 管理端列表网址状态
+
+服务端与管理端已更新为 `ghcr.io/puzzle-fuzzy/assemble-server:5dc2b92638e1`，对应源码 `5dc2b92638e1d52f6834e1c32f3dfeab08cb82d6`。镜像标识为 `sha256:5d0a488eef225c7c67b743f947954a17c7d4b8218519d99ccb8cdbcf5cce4b57`。[Windows/macOS 验证](https://github.com/puzzle-fuzzy/Assemble/actions/runs/45973806894)和[服务端镜像](https://github.com/puzzle-fuzzy/Assemble/actions/runs/45973806832)均成功；本机 `bun run verify` 为 478 项 TS、688 项 Rust 通过，2 项既有忽略。新增 12 项网址恢复回归，覆盖所有管理列表、DHT 筛选、影视页签与合集、前进后退、非法参数和页码越界；另核对桌面影视原有 4 项测试通过。
+
+用户要求翻页后刷新仍保留当前页，并明确选择地址栏保存状态。页码、条数、搜索和列筛选现写入哈希查询串，不用 localStorage；影视合集独立保存页码。正式 Chrome 使用已有会话打开 DHT 第 2 页、每页 10 条，翻到第 3 页后刷新仍显示第 3 页和每页 10 条；没有新建正式测试账户或修改采集模式。完整行为见[管理端手册](admin.md#开发与发布)。
+
+镜像经现有 SSH 通道传入。升级前用线上数据库的一致副本和现有三份 Compose 完成 `check-config`，核对实际挂载指向副本；迁移 1～13 校验和一致，无新迁移。受限备份在 `/var/backups/assemble/20261127-173103-admin-pagination-5dc2b92638e1/`：配置归档、最终一致库、完整数据归档 `data-before.tar`（642,856,960 字节）及摘要、切换前后每张业务表指纹与部署回执；目录 0700、文件 0600。停服务到 healthy 为 23.06 秒，对外重开前每张表数量和内容指纹均相同。只改镜像引用，其余环境、Compose、密钥、nginx 与已签名桌面更新逐项核对未变；容器仍为专用账户、回环端口与只读密钥挂载。本次未发布或安装桌面更新。
+
+## 2026-11-27 云盘预览
 
 服务端与管理端现已部署为 `ghcr.io/puzzle-fuzzy/assemble-server:ef808271dafc`，源码 `ef808271dafce03685582b8b6d28689d0e0e443c` 已先提交并推送 main，镜像标识 `sha256:311875afea73f83d4c5cc9ffcc27d3427e7839c0b1174e4ca6b63e46d0cf6866`。[Windows/macOS 验证](https://github.com/puzzle-fuzzy/Assemble/actions/runs/45965360406)与[服务端镜像](https://github.com/puzzle-fuzzy/Assemble/actions/runs/45965360550)全部成功；本机完整验证为 466 项 TS、688 项 Rust 通过，2 项既有忽略。
 
