@@ -26,6 +26,8 @@ Windows 目标检查由 `scripts/verify/windows.ts` 按宿主选择范围：六�
 
 Noise 依赖仅启用现用套件的 ChaChaPoly、SHA-256、Curve25519 和系统随机源特性，继续使用 snow 的默认纯 Rust 实现；其 `std` 默认特性会连带引入未使用的 `ring` C 代码，阻断 Mac 上的 Windows 目标规则检查，因此显式关闭。协议、核对代码和会话绑定不变，握手及篡改拒绝测试继续验证这条实际路径。
 
+macOS 最终可执行文件还必须包含 `/usr/lib/swift` 的运行库搜索路径，否则 Swift 桥接能编译却会在启动时找不到 `libswift_Concurrency.dylib`。工作区 `.cargo/config.toml` 对 macOS 目标统一设置 rpath，覆盖应用、工具、测试与示例；不使用仅对 CI 生效的临时动态库环境变量，也不将开发机 Xcode 路径打入安装包。系统运行库由 macOS 提供，实际启动和旧系统兼容仍需分别验收。
+
 ```sh
 bun run verify
 cargo test -p assemble-server --test remote

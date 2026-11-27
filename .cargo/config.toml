@@ -1,0 +1,4 @@
+# Swift 桥接静态库不能替依赖它的可执行文件传递链接参数，测试和应用都必须自行找到系统运行库。
+# 使用系统共享缓存中的 Swift 运行库，不依赖开发机 Xcode 的路径或临时环境变量。
+[target.'cfg(target_os = "macos")']
+rustflags = ["-C", "link-arg=-Wl,-rpath,/usr/lib/swift"]
