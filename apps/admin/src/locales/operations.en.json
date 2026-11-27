@@ -32,7 +32,9 @@
     "unavailable": "Unavailable",
     "usage": "{{used}} / {{budget}}",
     "warningTitle": "Storage capacity needs attention",
-    "budgetWarning": "File content usage has reached the warning threshold ({{percent}}%).",
-    "diskWarning": "Available disk space is below 2 GiB."
+    "budgetWarning": "Stored content and upload reservations have reached the warning threshold ({{percent}}%).",
+    "diskWarning": "Available disk space is below 2 GiB.",
+    "uploadReserved": "Upload reservations",
+    "uploadTemp": "Upload temporary files"
   }
 }

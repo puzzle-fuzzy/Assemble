@@ -51,6 +51,7 @@ export type TransferPhase =
   /** 正在收，或者正在发。 */
   | "inProgress"
   /** 发出去了，文件在服务端，等对方接收。只出现在发出去的传输上。 */
+  | "paused"
   | "waiting"
   /** 收到的文件已经存好；发出去的文件对方已经收下。 */
   | "complete"
@@ -81,7 +82,9 @@ export type TransferFailure =
   /** 云盘里的文件在取回之前就被删掉了。 */
   | "vanished"
   /** 应用退出前尚未完成，重启后保留记录但不恢复旧文件任务。 */
-  | "interrupted";
+  | "interrupted"
+  | "destinationChanged"
+  | "uploadExpired";
 
 /** 一条传输的另一头是谁。 */
 export type TransferTarget = /** 一台设备。 */ "device" /** 云盘。 */ | "drive";
@@ -103,6 +106,7 @@ export interface TransferView {
   failure: TransferFailure | null;
   /** 能不能再发一次。规则在 Rust 里，界面照着显示按钮。 */
   retryable: boolean;
+  resumable?: boolean;
   /** 另一头是谁。文案据此措辞。 */
   target: TransferTarget;
 }

@@ -161,7 +161,50 @@
         "savedAs": null,
         "failure": "interrupted",
         "retryable": false,
-        "target": "device"
+        "target": "device",
+        "resumable": false
+      },
+      {
+        "id": "out-paused-upload",
+        "direction": "out",
+        "peer": "云盘",
+        "name": "续传 <资料>.txt",
+        "size": 1024,
+        "phase": "paused",
+        "progress": 0.5,
+        "savedAs": null,
+        "failure": null,
+        "retryable": false,
+        "target": "drive",
+        "resumable": true
+      },
+      {
+        "id": "out-destinationChanged",
+        "direction": "out",
+        "peer": "云盘",
+        "name": "续传 <资料>.txt",
+        "size": 1024,
+        "phase": "failed",
+        "progress": 0.0,
+        "savedAs": null,
+        "failure": "destinationChanged",
+        "retryable": false,
+        "target": "drive",
+        "resumable": false
+      },
+      {
+        "id": "out-uploadExpired",
+        "direction": "out",
+        "peer": "云盘",
+        "name": "续传 <资料>.txt",
+        "size": 1024,
+        "phase": "failed",
+        "progress": 0.0,
+        "savedAs": null,
+        "failure": "uploadExpired",
+        "retryable": false,
+        "target": "drive",
+        "resumable": false
       }
     ],
     "draft": null,
@@ -751,7 +794,8 @@
         "savedAs": null,
         "failure": null,
         "retryable": false,
-        "target": "device"
+        "target": "device",
+        "resumable": false
       },
       {
         "id": "0f1e2d3c4b5a69788796a5b4c3d2e1f2",
@@ -764,7 +808,8 @@
         "savedAs": null,
         "failure": null,
         "retryable": false,
-        "target": "device"
+        "target": "device",
+        "resumable": false
       },
       {
         "id": "1a2b3c4d5e6f708192a3b4c5d6e7f809",
@@ -777,7 +822,8 @@
         "savedAs": "照片 (2).jpg",
         "failure": null,
         "retryable": false,
-        "target": "device"
+        "target": "device",
+        "resumable": false
       },
       {
         "id": "2b3c4d5e6f708192a3b4c5d6e7f8091a",
@@ -790,7 +836,8 @@
         "savedAs": null,
         "failure": "diskFull",
         "retryable": false,
-        "target": "device"
+        "target": "device",
+        "resumable": false
       },
       {
         "id": "3c4d5e6f708192a3b4c5d6e7f8091a2b",
@@ -803,7 +850,8 @@
         "savedAs": null,
         "failure": null,
         "retryable": false,
-        "target": "device"
+        "target": "device",
+        "resumable": false
       },
       {
         "id": "4d5e6f708192a3b4c5d6e7f8091a2b3c",
@@ -816,7 +864,8 @@
         "savedAs": null,
         "failure": null,
         "retryable": false,
-        "target": "device"
+        "target": "device",
+        "resumable": false
       }
     ],
     "draft": null,
@@ -995,7 +1044,8 @@
         "savedAs": null,
         "failure": "verificationFailed",
         "retryable": false,
-        "target": "device"
+        "target": "device",
+        "resumable": false
       }
     ],
     "draft": null,
@@ -1088,7 +1138,8 @@
         "savedAs": null,
         "failure": "writeFailed",
         "retryable": false,
-        "target": "device"
+        "target": "device",
+        "resumable": false
       }
     ],
     "draft": null,
@@ -1199,7 +1250,8 @@
         "savedAs": null,
         "failure": "deviceOffline",
         "retryable": true,
-        "target": "device"
+        "target": "device",
+        "resumable": false
       },
       {
         "id": "out-3",
@@ -1212,7 +1264,8 @@
         "savedAs": null,
         "failure": null,
         "retryable": false,
-        "target": "device"
+        "target": "device",
+        "resumable": false
       },
       {
         "id": "out-2",
@@ -1225,7 +1278,8 @@
         "savedAs": null,
         "failure": null,
         "retryable": false,
-        "target": "device"
+        "target": "device",
+        "resumable": false
       },
       {
         "id": "out-1",
@@ -1238,7 +1292,8 @@
         "savedAs": null,
         "failure": null,
         "retryable": false,
-        "target": "device"
+        "target": "device",
+        "resumable": false
       }
     ],
     "draft": {
@@ -1452,7 +1507,8 @@
         "savedAs": null,
         "failure": "tooLarge",
         "retryable": true,
-        "target": "device"
+        "target": "device",
+        "resumable": false
       },
       {
         "id": "out-5",
@@ -1465,7 +1521,8 @@
         "savedAs": null,
         "failure": "writeFailed",
         "retryable": false,
-        "target": "device"
+        "target": "device",
+        "resumable": false
       },
       {
         "id": "out-7",
@@ -1478,7 +1535,8 @@
         "savedAs": null,
         "failure": null,
         "retryable": false,
-        "target": "device"
+        "target": "device",
+        "resumable": false
       },
       {
         "id": "out-8",
@@ -1491,7 +1549,8 @@
         "savedAs": null,
         "failure": null,
         "retryable": false,
-        "target": "device"
+        "target": "device",
+        "resumable": false
       },
       {
         "id": "out-9",
@@ -1504,7 +1563,8 @@
         "savedAs": null,
         "failure": null,
         "retryable": false,
-        "target": "device"
+        "target": "device",
+        "resumable": false
       },
       {
         "id": "out-10",
@@ -1517,7 +1577,8 @@
         "savedAs": null,
         "failure": null,
         "retryable": false,
-        "target": "device"
+        "target": "device",
+        "resumable": false
       },
       {
         "id": "out-11",
@@ -1530,7 +1591,8 @@
         "savedAs": null,
         "failure": "fileUnreadable",
         "retryable": true,
-        "target": "device"
+        "target": "device",
+        "resumable": false
       }
     ],
     "draft": null,
@@ -1703,7 +1765,8 @@
         "progress": 0.0,
         "savedAs": null,
         "failure": null,
-        "retryable": false
+        "retryable": false,
+        "resumable": false
       },
       {
         "id": "out-13",
@@ -1716,7 +1779,8 @@
         "progress": 0.6,
         "savedAs": null,
         "failure": null,
-        "retryable": false
+        "retryable": false,
+        "resumable": false
       },
       {
         "id": "out-12",
@@ -1729,7 +1793,8 @@
         "progress": 0.0,
         "savedAs": null,
         "failure": "quotaExceeded",
-        "retryable": true
+        "retryable": true,
+        "resumable": false
       },
       {
         "id": "out-11",
@@ -1742,7 +1807,8 @@
         "progress": 1.0,
         "savedAs": null,
         "failure": null,
-        "retryable": false
+        "retryable": false,
+        "resumable": false
       },
       {
         "id": "drive-f-1",
@@ -1755,7 +1821,8 @@
         "progress": 1.0,
         "savedAs": null,
         "failure": null,
-        "retryable": false
+        "retryable": false,
+        "resumable": false
       },
       {
         "id": "drive-f-9",
@@ -1768,7 +1835,8 @@
         "progress": 0.0,
         "savedAs": null,
         "failure": "vanished",
-        "retryable": false
+        "retryable": false,
+        "resumable": false
       }
     ],
     "draft": null,
@@ -2251,7 +2319,8 @@
         "savedAs": null,
         "failure": "interrupted",
         "retryable": false,
-        "target": "device"
+        "target": "device",
+        "resumable": false
       }
     ],
     "draft": null,
@@ -2440,7 +2509,8 @@
         "savedAs": null,
         "failure": "interrupted",
         "retryable": false,
-        "target": "device"
+        "target": "device",
+        "resumable": false
       }
     ],
     "draft": null,
@@ -2629,7 +2699,8 @@
         "savedAs": null,
         "failure": "interrupted",
         "retryable": false,
-        "target": "device"
+        "target": "device",
+        "resumable": false
       }
     ],
     "draft": null,
@@ -2819,7 +2890,8 @@
         "savedAs": null,
         "failure": "interrupted",
         "retryable": false,
-        "target": "device"
+        "target": "device",
+        "resumable": false
       }
     ],
     "draft": null,

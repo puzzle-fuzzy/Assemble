@@ -34,11 +34,17 @@ pub async fn observe_storage(pool: &SqlitePool, storage: &AdminStorage) -> Resul
         signals.push(Signal {
             key: "storage-budget".into(),
             content: Content::StorageBudget {
-                used_bytes: storage.content_bytes,
+                used_bytes: storage
+                    .content_bytes
+                    .saturating_add(storage.upload_reserved_bytes.unwrap_or(0)),
                 budget_bytes: storage.budget_bytes,
                 warning_percent: storage.warning_percent,
             },
-            level: if storage.content_bytes >= storage.budget_bytes {
+            level: if storage
+                .content_bytes
+                .saturating_add(storage.upload_reserved_bytes.unwrap_or(0))
+                >= storage.budget_bytes
+            {
                 Level::Error
             } else {
                 Level::Warning

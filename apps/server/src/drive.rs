@@ -164,6 +164,18 @@ pub(crate) async fn upload_at(
     request: Request,
 ) -> Result<DriveRow, ApiError> {
     let (parts, body) = request.into_parts();
+    let Ok(_worker) = state.uploads.requests.try_acquire() else {
+        return Err(http::refuse_upload(
+            body,
+            ApiError::new(
+                StatusCode::SERVICE_UNAVAILABLE,
+                codes::UNAVAILABLE,
+                "upload workers are busy",
+            ),
+        )
+        .await);
+    };
+
     let name = check_new_file(input, &parts.headers);
 
     // 这几项检查不用看正文。拒绝之前要让对方把话说完，见 [`http::refuse_upload`]。
@@ -198,37 +210,61 @@ pub(crate) async fn upload_at(
         Err(error) => return Err(http::refuse_upload(body, error).await),
     };
 
-    // 正文里的传输错误在进入存放逻辑之前统一成 I/O 错误。
-    let stream = body.into_data_stream().map_err(std::io::Error::other);
-    let mut reader = StreamReader::new(stream);
-    let cancel = CancellationToken::new();
-    let lease = state
-        .blobs
-        .store(&mut reader, input.size, &input.sha256, &cancel)
-        .await
-        .map_err(|error| rejected(&error))?;
+    let reservation = match crate::uploads::capacity::legacy_reserve(
+        state,
+        identity,
+        input.size,
+        &input.sha256,
+        true,
+    )
+    .await
+    {
+        Ok(id) => id,
+        Err(error) => return Err(http::refuse_upload(body, error).await),
+    };
+    let result = tokio::time::timeout(std::time::Duration::from_secs(3600), async {
+        // 正文里的传输错误在进入存放逻辑之前统一成 I/O 错误。
+        let stream = body.into_data_stream().map_err(std::io::Error::other);
+        let mut reader = StreamReader::new(stream);
+        let cancel = CancellationToken::new();
+        let lease = state
+            .blobs
+            .store(&mut reader, input.size, &input.sha256, &cancel)
+            .await
+            .map_err(|error| rejected(&error))?;
 
-    match record_file(state, identity, input, name, parent).await {
-        Ok(row) => {
-            drop(lease);
-            audit::record(
-                &state.pool,
-                Some(&identity.account_id),
-                Some(&identity.device_id),
-                actions::DRIVE_CREATED,
-                Some(&row.id),
-            )
-            .await;
-            tracing::info!(file = %row.id, size = row.size, "file stored in the drive");
-            Ok(row)
+        match record_file(state, identity, input, name, parent, &reservation).await {
+            Ok(row) => {
+                drop(lease);
+                audit::record(
+                    &state.pool,
+                    Some(&identity.account_id),
+                    Some(&identity.device_id),
+                    actions::DRIVE_CREATED,
+                    Some(&row.id),
+                )
+                .await;
+                tracing::info!(file = %row.id, size = row.size, "file stored in the drive");
+                Ok(row)
+            }
+            // 内容收下了，记录却没记上：内容不能留着没人认。
+            Err(error) => {
+                drop(lease);
+                let _ = state.blobs.discard_unreferenced(&input.sha256).await;
+                Err(error)
+            }
         }
-        // 内容收下了，记录却没记上：内容不能留着没人认。
-        Err(error) => {
-            drop(lease);
-            let _ = state.blobs.discard_unreferenced(&input.sha256).await;
-            Err(error)
-        }
-    }
+    })
+    .await
+    .unwrap_or_else(|_| {
+        Err(ApiError::new(
+            StatusCode::REQUEST_TIMEOUT,
+            codes::UNAVAILABLE,
+            "upload request timed out",
+        ))
+    });
+    crate::uploads::capacity::legacy_finish(state, &reservation).await?;
+    result
 }
 
 /// 给内容加引用、记下这个文件：要么都发生，要么都不。配额在这里再算一次。
@@ -238,6 +274,7 @@ async fn record_file(
     input: &NewDriveFile,
     name: String,
     parent: Option<&str>,
+    reservation: &str,
 ) -> Result<DriveRow, ApiError> {
     let id = crate::secrets::random_id().map_err(|error| ApiError::internal(error.to_string()))?;
     let size = i64::try_from(input.size).map_err(|_| ApiError::invalid("the file is too large"))?;
@@ -245,24 +282,17 @@ async fn record_file(
     let mut tx = state.pool.begin_with("BEGIN IMMEDIATE").await?;
     crate::drive_tree::revalidate(&mut tx, identity).await?;
     crate::drive_tree::check_parent(&mut *tx, &identity.account_id, parent).await?;
-    // 上传可能花了一阵子，这期间别的文件也占了地方：以事务里看到的为准。
-    let used = used_bytes(&mut *tx, &identity.account_id).await?;
-    if used.saturating_add(input.size) > state.config.drive_quota_bytes {
-        tx.rollback().await?;
-        return Err(quota_exceeded());
-    }
-    if blobs::over_budget(
-        &mut *tx,
-        &input.sha256,
+    crate::uploads::capacity::commit_check(
+        &mut tx,
+        state,
+        identity,
+        reservation,
         input.size,
-        state.config.storage_budget_bytes,
+        &input.sha256,
+        true,
     )
-    .await?
-    {
-        tx.rollback().await?;
-        tracing::warn!("the storage budget is reached: an upload to the drive was refused");
-        return Err(quota_exceeded());
-    }
+    .await?;
+    crate::uploads::capacity::release(&mut tx, reservation).await?;
     blobs::retain(&mut *tx, &input.sha256, input.size).await?;
     sqlx::query(
         "INSERT INTO drive_files (id, account_id, name, size, mime_type, sha256, created_at, parent_id) \

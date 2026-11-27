@@ -235,6 +235,8 @@ fn handlers() -> impl Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool + Send + Sync +
         commands::close_send_panel,
         commands::cancel_transfer,
         commands::retry_transfer,
+        commands::pause_transfer,
+        commands::resume_transfer,
         commands::open_main,
         commands::open_public_media,
         commands::dismiss_notice,

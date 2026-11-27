@@ -53,6 +53,8 @@ export function transferStatus(transfer: TransferView): string {
       return state("queued");
     case "inProgress":
       return text("transfer.progress", { state: state("running"), percent });
+    case "paused":
+      return text("transfer.paused", { percent });
     case "waiting":
       // 只有发给设备的文件才有"等对方接收"这一步。
       return text("transfer.waiting");
@@ -98,7 +100,14 @@ export type Verdict = "sending" | "delivered" | "failed";
 
 export function verdict(transfers: TransferView[]): Verdict | null {
   if (transfers.length === 0) return null;
-  if (transfers.some((t) => t.phase === "queued" || t.phase === "inProgress"))
+  if (
+    transfers.some(
+      (t) =>
+        t.phase === "queued" ||
+        t.phase === "inProgress" ||
+        t.phase === "paused",
+    )
+  )
     return "sending";
   return transfers.some((t) => t.phase === "failed") ? "failed" : "delivered";
 }

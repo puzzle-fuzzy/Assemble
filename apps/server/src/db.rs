@@ -105,6 +105,8 @@ mod tests {
                 "drive_folder_requests",
                 "drive_folders",
                 "drive_trash",
+                "drive_upload_parts",
+                "drive_uploads",
                 "email_actions",
                 "email_rate_limits",
                 "github_identities",
@@ -136,6 +138,8 @@ mod tests {
                 "sends",
                 "system_notification_reads",
                 "system_notification_state",
+                "upload_cleanup",
+                "upload_reservations",
                 "web_sessions"
             ]
         );

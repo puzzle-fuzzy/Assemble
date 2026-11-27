@@ -142,6 +142,8 @@ export interface Bridge {
   cancelTransfer(transferId: string): Promise<void>;
   /** 再发一次。只有"文件根本没到服务端"的失败才有用。 */
   retryTransfer(transferId: string): Promise<void>;
+  pauseTransfer(transferId: string): Promise<void>;
+  resumeTransfer(transferId: string): Promise<void>;
   /** 在文件的右键菜单里加入（或去掉）"用 Assemble 发送"。只有 Windows 上的打包运行支持。 */
   setSendMenu(enabled: boolean): Promise<Snapshot>;
   /** 提示看过了，收起来。 */
@@ -359,6 +361,9 @@ export const bridge: Bridge = {
   cancelTransfer: (transferId) =>
     invoke<void>("cancel_transfer", { transferId }),
   retryTransfer: (transferId) => invoke<void>("retry_transfer", { transferId }),
+  pauseTransfer: (transferId) => invoke<void>("pause_transfer", { transferId }),
+  resumeTransfer: (transferId) =>
+    invoke<void>("resume_transfer", { transferId }),
   setSendMenu: (enabled) =>
     checked(() => invoke<unknown>("set_send_menu", { enabled })),
   dismissNotice: () => checked(() => invoke<unknown>("dismiss_notice")),

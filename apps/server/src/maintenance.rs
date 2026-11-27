@@ -120,6 +120,9 @@ pub async fn run_once(state: &Shared) -> Result<Report, sqlx::Error> {
         .rows_affected();
 
     // 5. 没人引用的内容与中断的暂存文件。
+    crate::uploads::sweep(state)
+        .await
+        .map_err(|e| sqlx::Error::Protocol(e.code.into()))?;
     state.blobs.cleanup().await?;
     report.blobs = state.blobs.sweep().await?;
     crate::media::assets::cleanup(pool).await?;

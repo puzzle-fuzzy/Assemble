@@ -34,6 +34,12 @@ pub struct AdminOverview {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AdminStorage {
+    /// 未完成上传的预算预留；不与已确认暂存再次相加。
+    #[serde(default)]
+    pub upload_reserved_bytes: Option<u64>,
+    /// 实际暂存文件占用，包含尚待重试清理的内容；无法测量时为 null。
+    #[serde(default)]
+    pub upload_temp_bytes: Option<u64>,
     /// 回收文件的逻辑字节；仍计入原账户配额。
     #[serde(default)]
     pub trash_bytes: u64,

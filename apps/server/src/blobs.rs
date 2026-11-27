@@ -395,7 +395,7 @@ where
     let budget = i64::try_from(budget).unwrap_or(i64::MAX);
     let exceeded: i64 = sqlx::query_scalar(
         "SELECT CASE WHEN EXISTS(SELECT 1 FROM blobs WHERE sha256 = ?1) THEN 0 \
-         ELSE coalesce((SELECT sum(size) FROM blobs), 0) + ?2 > ?3 END",
+         ELSE coalesce((SELECT sum(size) FROM blobs), 0) + coalesce((SELECT sum(bytes) FROM upload_reservations),0) + ?2 > ?3 END",
     )
     .bind(digest)
     .bind(size)

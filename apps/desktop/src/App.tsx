@@ -98,6 +98,7 @@ import type {
 import { updateStatus } from "@/lib/update-text";
 import { cn } from "@/lib/utils";
 import { RemoteBanner, RemotePage } from "@/RemotePage";
+import { UploadControls } from "@/UploadControls";
 
 const MemosPage = lazy(() =>
   import("@/MemosPage").then((module) => ({ default: module.MemosPage })),
@@ -462,7 +463,9 @@ export function App({
                       (item) =>
                         item.target === "drive" &&
                         item.direction === "out" &&
-                        ["queued", "inProgress", "failed"].includes(item.phase),
+                        ["queued", "inProgress", "paused", "failed"].includes(
+                          item.phase,
+                        ),
                     )
                     .map((transfer) => (
                       <TransferRow
@@ -1112,6 +1115,7 @@ const CANCELLABLE: ReadonlySet<TransferView["phase"]> = new Set([
   "queued",
   "inProgress",
   "waiting",
+  "paused",
 ]);
 
 /** 文件传输。收到的自动存进接收位置；发出去的从这里发起，也在这里看得到结果。 */
@@ -1291,6 +1295,12 @@ function TransferRow({
               {uiText("showInFolder")}
             </Button>
           ) : null}
+          <UploadControls
+            source={source}
+            transfer={transfer}
+            onError={onError}
+            disabled={pending}
+          />
           {transfer.retryable ? (
             <Button
               size="default"
@@ -1313,12 +1323,12 @@ function TransferRow({
           ) : null}
         </div>
       </div>
-      {transfer.phase === "inProgress" || transfer.phase === "queued" ? (
+      {["inProgress", "queued", "paused"].includes(transfer.phase) ? (
         <Progress
           aria-label={uiText("transferProgressFor", { value0: transfer.name })}
           className="mt-2"
           value={
-            transfer.phase === "queued"
+            transfer.phase === "queued" && !transfer.resumable
               ? 0
               : Math.floor(transfer.progress * 100)
           }
@@ -1375,7 +1385,10 @@ function DriveCard({
     previousUploads.current = new Set(
       uploads
         .filter(
-          (item) => item.phase === "queued" || item.phase === "inProgress",
+          (item) =>
+            item.phase === "queued" ||
+            item.phase === "inProgress" ||
+            item.phase === "paused",
         )
         .map((item) => item.id),
     );
@@ -1424,6 +1437,7 @@ function DriveCard({
       item.direction === "out" &&
       (item.phase === "queued" ||
         item.phase === "inProgress" ||
+        item.phase === "paused" ||
         item.phase === "failed"),
   );
   const files =

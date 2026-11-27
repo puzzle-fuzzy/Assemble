@@ -152,7 +152,7 @@ function transfer(overrides: Partial<TransferView>): TransferView {
 const BROKEN_TRANSFERS: unknown[] = [
   { id: "t2", name: "a" },
   { ...TRANSFER, direction: "sideways" },
-  { ...TRANSFER, phase: "paused" },
+  { ...TRANSFER, phase: "unknownPhase" },
   { ...TRANSFER, progress: "45%" },
   { ...TRANSFER, savedAs: 7 },
   { ...TRANSFER, target: "somewhere" },

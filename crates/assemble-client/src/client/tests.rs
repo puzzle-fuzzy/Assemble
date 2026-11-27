@@ -29,6 +29,34 @@ use assemble_protocol::primitives::Platform;
 use assemble_protocol::sends::{Direction, FailReason, SendState};
 
 #[tokio::test]
+async fn resumable_capability_only_falls_back_for_explicit_not_found() {
+    for status in [
+        StatusCode::NOT_FOUND,
+        StatusCode::UNAUTHORIZED,
+        StatusCode::SERVICE_UNAVAILABLE,
+    ] {
+        let server = Server::start(with(move |_| {
+            json_response(
+                status,
+                json!({"error":{"code":"UNAVAILABLE","message":"private diagnostic"}}),
+            )
+        }))
+        .await;
+        let client = server.client();
+        client.set_bearer(Some(SecretString::new("test-upload-only")));
+        let cancel = CancellationToken::new();
+        let result = client.upload_supported(&RequestOptions::new(&cancel)).await;
+        if status == StatusCode::NOT_FOUND {
+            assert!(!result.unwrap());
+        } else {
+            assert!(result.is_err());
+        }
+        let requests = server.requests(1).await;
+        assert_eq!(requests[0].path, "/v1/drive/uploads");
+    }
+}
+
+#[tokio::test]
 async fn drive_tree_uses_a_separate_namespace_and_never_falls_back_for_writes() {
     use assemble_protocol::drive_tree::{Create, Query, ROOT};
     let server = Server::start(with(|_| {

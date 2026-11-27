@@ -57,6 +57,7 @@ impl Registry {
                     0.0
                 };
                 view.retryable = false;
+                view.resumable = false;
                 let send = match &record.origin {
                     Origin::Incoming(send) => Some(send.clone()),
                     Origin::Outgoing(outgoing) => outgoing.send.clone(),
@@ -108,6 +109,7 @@ impl Registry {
                 view.progress = 0.0;
             }
             view.retryable = false;
+            view.resumable = false;
             let saved_path = entry
                 .saved_path
                 .filter(|path| view.phase == TransferPhase::Complete && path.is_absolute());

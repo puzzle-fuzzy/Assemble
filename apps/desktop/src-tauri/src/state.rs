@@ -30,8 +30,8 @@ use tokio_util::sync::CancellationToken;
 
 use crate::planner::{Compose, PlannerView};
 use crate::registry::{
-    Cancellation, Delivery, Destination, DraftView, Next, Outgoing, Registry, TransferFailure,
-    TransferView, Updated,
+    Cancellation, Delivery, Destination, DraftView, Next, Registry, TransferFailure, TransferView,
+    Updated,
 };
 
 /// 一次进行中的登录尝试。
@@ -1017,6 +1017,39 @@ impl<R: tauri::Runtime> AppState<R> {
         result
     }
 
+    /// 核对会话与修改共用视图锁，迟到结果不能命中新账户碰巧同名的任务。
+    pub(crate) fn transfer_session<T>(
+        &self,
+        epoch: u64,
+        cancel: &CancellationToken,
+        change: impl FnOnce(&mut Registry) -> T,
+    ) -> Option<T> {
+        let result = self.registry(|registry| {
+            if cancel.is_cancelled() || *self.session_changes().borrow() != epoch {
+                None
+            } else {
+                Some(change(registry))
+            }
+        });
+        self.transfers_changed.notify_one();
+        result
+    }
+    pub fn pause_upload(&self, id: &str) -> bool {
+        let paused = self.registry(|registry| registry.pause_upload(id));
+        if paused {
+            self.stop_transfer(id);
+            self.transfers_changed.notify_one();
+        }
+        paused
+    }
+    pub fn resume_upload(&self, id: &str) -> bool {
+        let resumed = self.registry(|registry| registry.resume_upload(id));
+        if resumed {
+            self.transfers_changed.notify_one();
+        }
+        resumed
+    }
+
     // ---- 传输 ----
 
     /// 别的设备发来了一个文件，或者服务端还在等这台设备处理它。
@@ -1065,7 +1098,8 @@ impl<R: tauri::Runtime> AppState<R> {
     }
 
     /// 领取一个排着队的文件去发。
-    pub fn begin_send(&self, id: &str) -> Option<Outgoing> {
+    #[cfg(test)]
+    pub fn begin_send(&self, id: &str) -> Option<crate::registry::Outgoing> {
         self.registry(|registry| registry.begin_send(id))
     }
 
@@ -1326,25 +1360,10 @@ impl<R: tauri::Runtime> AppState<R> {
         id
     }
 
-    /// 文件存进云盘了。
-    pub fn drive_uploaded(&self, id: &str) -> bool {
-        let stored = self.registry(|registry| registry.drive_uploaded(id));
-        self.transfers_changed.notify_one();
-        stored
-    }
-
     /// 服务端收下了文件，正在等对方接收。返回 `true` 表示文件得去服务端撤回。
+    #[cfg(test)]
     pub fn send_uploaded(&self, id: &str, send: &SendRecord) -> bool {
         self.registry(|registry| registry.send_uploaded(id, send)) == Updated::Withdraw
-    }
-
-    pub fn send_failed(&self, id: &str, failure: TransferFailure) {
-        self.registry(|registry| registry.send_failed(id, failure));
-    }
-
-    /// 网络断了，过一会儿再从头发一遍。
-    pub fn retry_send(&self, id: &str) {
-        self.registry(|registry| registry.retry_send(id, Instant::now()));
     }
 
     /// 再发一次。只有"文件根本没到服务端"的失败才能重发。

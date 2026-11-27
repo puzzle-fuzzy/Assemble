@@ -500,6 +500,12 @@ export class FakeBridge implements Bridge {
     return this.answer(`cancelTransfer:${transferId}`, undefined);
   }
 
+  pauseTransfer(transferId: string) {
+    return this.answer(`pauseTransfer:${transferId}`, undefined);
+  }
+  resumeTransfer(transferId: string) {
+    return this.answer(`resumeTransfer:${transferId}`, undefined);
+  }
   retryTransfer(transferId: string) {
     return this.answer(`retryTransfer:${transferId}`, undefined);
   }

@@ -139,5 +139,8 @@
   "sidebar": "Sidebar",
   "mainNavigation": "Main navigation",
   "accountMenu": "Account menu",
-  "openNavigationMenu": "Open navigation menu"
+  "openNavigationMenu": "Open navigation menu",
+  "pauseUploadFor": "Pause upload of {{name}}",
+  "resumeUploadFor": "Resume upload of {{name}}",
+  "cancelUploadFor": "Cancel upload of {{name}}"
 }

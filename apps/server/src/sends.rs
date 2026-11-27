@@ -253,6 +253,18 @@ pub async fn create(
     let Query(input) =
         query.map_err(|_| ApiError::invalid("the query string is not a valid send request"))?;
     let (parts, body) = request.into_parts();
+    let Ok(_worker) = state.uploads.requests.try_acquire() else {
+        return Err(http::refuse_upload(
+            body,
+            ApiError::new(
+                StatusCode::SERVICE_UNAVAILABLE,
+                codes::UNAVAILABLE,
+                "upload workers are busy",
+            ),
+        )
+        .await);
+    };
+
     let name = check_new_send(&input, &parts.headers);
 
     // 这几项检查不用看正文。拒绝之前要让对方把话说完，见 [`crate::http::refuse_upload`]。
@@ -289,6 +301,43 @@ pub async fn create(
         Err(error) => return Err(crate::http::refuse_upload(body, error).await),
     };
 
+    let reservation = match crate::uploads::capacity::legacy_reserve(
+        &state,
+        &identity,
+        input.size,
+        &input.sha256,
+        false,
+    )
+    .await
+    {
+        Ok(id) => id,
+        Err(error) => return Err(crate::http::refuse_upload(body, error).await),
+    };
+    let result = tokio::time::timeout(
+        std::time::Duration::from_secs(3600),
+        store_offer(&state, &identity, &target, &input, name, &reservation, body),
+    )
+    .await
+    .unwrap_or_else(|_| {
+        Err(ApiError::new(
+            StatusCode::REQUEST_TIMEOUT,
+            codes::UNAVAILABLE,
+            "upload request timed out",
+        ))
+    });
+    crate::uploads::capacity::legacy_finish(&state, &reservation).await?;
+    result
+}
+
+async fn store_offer(
+    state: &Shared,
+    identity: &Identity,
+    target: &crate::devices::DeviceRow,
+    input: &NewSend,
+    name: String,
+    reservation: &str,
+    body: axum::body::Body,
+) -> Result<Response, ApiError> {
     // 正文里的传输错误在进入存放逻辑之前统一成 I/O 错误。
     let stream = body.into_data_stream().map_err(std::io::Error::other);
     let mut reader = StreamReader::new(stream);
@@ -300,13 +349,13 @@ pub async fn create(
         .map_err(|error| rejected(&error))?;
 
     // 上传可能持续了一阵子。对方这会儿已经下线的话，这次发送同样不成立。
-    if !is_online(&state, &identity.account_id, &target.id) {
+    if !is_online(state, &identity.account_id, &target.id) {
         drop(lease);
         state.blobs.discard_unreferenced(&input.sha256).await?;
         return Err(target_offline());
     }
 
-    let row = match record_send(&state, &identity, &target, &input, name).await {
+    let row = match record_send(state, identity, target, input, name, reservation).await {
         Ok(row) => row,
         Err(error) => {
             // 没记成发送，刚收下的内容就没人引用：别把它留在磁盘上等着清扫。
@@ -351,23 +400,23 @@ async fn record_send(
     target: &crate::devices::DeviceRow,
     input: &NewSend,
     name: String,
+    reservation: &str,
 ) -> Result<SendRow, ApiError> {
     let id = crate::secrets::random_id().map_err(|error| ApiError::internal(error.to_string()))?;
     let size = i64::try_from(input.size).map_err(|_| ApiError::invalid("the file is too large"))?;
     let now = Timestamp::now().as_millis();
     let mut tx = state.pool.begin_with("BEGIN IMMEDIATE").await?;
-    if blobs::over_budget(
-        &mut *tx,
-        &input.sha256,
+    crate::uploads::capacity::commit_check(
+        &mut tx,
+        state,
+        identity,
+        reservation,
         input.size,
-        state.config.storage_budget_bytes,
+        &input.sha256,
+        false,
     )
-    .await?
-    {
-        tx.rollback().await?;
-        tracing::warn!("the storage budget is reached: a send was refused");
-        return Err(storage_full());
-    }
+    .await?;
+    crate::uploads::capacity::release(&mut tx, reservation).await?;
     blobs::retain(&mut *tx, &input.sha256, input.size).await?;
     sqlx::query(
         "INSERT INTO sends \

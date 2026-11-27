@@ -121,8 +121,15 @@
       "interrupted": {
         "received": "Interrupted",
         "sent": "Interrupted"
+      },
+      "destinationChanged": {
+        "sent": "The destination folder changed. Select the file and upload again."
+      },
+      "uploadExpired": {
+        "sent": "This upload expired or ended. Upload the file again."
       }
-    }
+    },
+    "paused": "Paused · {{percent}}%"
   },
   "errors": {
     "CREDENTIAL_STORE_UNAVAILABLE": "The system keychain is unavailable. Your sign-in could not be saved.",

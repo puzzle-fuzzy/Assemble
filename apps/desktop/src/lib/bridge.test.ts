@@ -915,6 +915,15 @@ describe("影视具名桥接", () => {
 });
 
 describe("用户文案", () => {
+  test("云盘暂停继续使用具名命令和资源标识", async () => {
+    respondWith = undefined;
+    await bridge.pauseTransfer("out-one");
+    await bridge.resumeTransfer("out-one");
+    expect(calls).toEqual([
+      { command: "pause_transfer", args: { transferId: "out-one" } },
+      { command: "resume_transfer", args: { transferId: "out-one" } },
+    ]);
+  });
   test("只按错误码给出固定文案，不回显技术细节", () => {
     const error = new BridgeError(
       "UNREACHABLE",

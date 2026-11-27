@@ -11,6 +11,8 @@ use reqwest::StatusCode;
 
 fn storage() -> AdminStorage {
     AdminStorage {
+        upload_reserved_bytes: Some(0),
+        upload_temp_bytes: Some(0),
         trash_bytes: 0,
         reclaimable_bytes: Some(0),
         content_bytes: 80,

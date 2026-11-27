@@ -41,6 +41,7 @@ pub struct AppState {
     pub throttle: LoginThrottle,
     /// 文件内容的存放处，按摘要寻址。
     pub blobs: Arc<BlobStore>,
+    pub uploads: crate::uploads::Store,
     pub mailer: Arc<dyn crate::mail::Mailer>,
     pub github_flows: crate::github::Flows,
     pub github_provider: Arc<dyn crate::github::Provider>,
@@ -66,6 +67,7 @@ impl AppState {
             github_flows: crate::github::Flows::default(),
             github_provider: Arc::new(crate::github::GithubProvider(config.github.clone())),
             blobs: Arc::new(BlobStore::new(&config.data_dir, pool.clone())),
+            uploads: crate::uploads::Store::new(&config.data_dir),
             pool,
             config: Arc::new(config),
             presence: Arc::new(Presence::default()),
@@ -78,7 +80,9 @@ impl AppState {
 pub type Shared = Arc<AppState>;
 
 fn drive_routes() -> Router<Shared> {
-    crate::drive_tree::routes().merge(crate::drive_trash::routes())
+    crate::drive_tree::routes()
+        .merge(crate::drive_trash::routes())
+        .merge(crate::uploads::routes())
 }
 
 /// 请求正文的大小上限：单文件上限。它是 u64 而这里是 usize，32 位平台上取饱和值。

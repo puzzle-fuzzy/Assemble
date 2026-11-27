@@ -139,6 +139,22 @@ export function StorageOverview({ storage }: { storage?: AdminStorage }) {
                   {format(storage.reclaimableBytes ?? null)}
                 </dd>
               </div>
+              <div className="flex flex-col gap-2">
+                <dt className="text-sm text-muted-foreground">
+                  {t("storage.uploadReserved")}
+                </dt>
+                <dd className="font-medium tabular-nums">
+                  {format(storage.uploadReservedBytes ?? null)}
+                </dd>
+              </div>
+              <div className="flex flex-col gap-2">
+                <dt className="text-sm text-muted-foreground">
+                  {t("storage.uploadTemp")}
+                </dt>
+                <dd className="font-medium tabular-nums">
+                  {format(storage.uploadTempBytes ?? null)}
+                </dd>
+              </div>
             </dl>
             <StorageWarnings storage={storage} />
             <DataTable

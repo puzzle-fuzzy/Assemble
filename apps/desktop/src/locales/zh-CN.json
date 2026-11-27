@@ -139,5 +139,8 @@
   "sidebar": "功能侧栏",
   "mainNavigation": "主功能",
   "accountMenu": "账户菜单",
-  "openNavigationMenu": "打开功能菜单"
+  "openNavigationMenu": "打开功能菜单",
+  "pauseUploadFor": "暂停上传 {{name}}",
+  "resumeUploadFor": "继续上传 {{name}}",
+  "cancelUploadFor": "取消上传 {{name}}"
 }

@@ -41,3 +41,4 @@ pub mod schedule;
 pub mod sends;
 pub mod system_notifications;
 pub mod updates;
+pub mod uploads;

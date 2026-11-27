@@ -108,6 +108,7 @@ describe("状态契约样本", () => {
       new Set([
         "queued",
         "inProgress",
+        "paused",
         "waiting",
         "complete",
         "failed",
@@ -131,6 +132,8 @@ describe("状态契约样本", () => {
         "quotaExceeded",
         "vanished",
         "interrupted",
+        "destinationChanged",
+        "uploadExpired",
       ]),
     );
     expect(new Set(transfers.map((t) => t.target))).toEqual(
@@ -190,7 +193,7 @@ describe("状态契约样本", () => {
         transfer.phase === "complete" || transfer.phase === "waiting";
       expect(transfer.progress === 1).toBe(done);
       expect(transfer.progress > 0 && transfer.progress < 1).toBe(
-        transfer.phase === "inProgress",
+        transfer.phase === "inProgress" || transfer.phase === "paused",
       );
       // 只有收好的文件才有"实际存成了什么名字"。
       expect(transfer.savedAs !== null && transfer.phase !== "complete").toBe(

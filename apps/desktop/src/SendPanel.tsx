@@ -18,6 +18,7 @@ import { platformName, uiText, useDesktopTranslation } from "@/lib/i18n";
 import { messageFor } from "@/lib/messages";
 import { formatSize, transferStatus, verdict } from "@/lib/transfer-text";
 import type { TransferView } from "@/lib/types";
+import { UploadControls } from "@/UploadControls";
 
 export interface SendPanelProps {
   /** 默认使用真实的桥接；测试时注入替身。 */
@@ -248,7 +249,12 @@ export function SendPanel({ bridge: source = bridge }: SendPanelProps) {
         <>
           <ul className="flex flex-col gap-2">
             {mine.map((transfer) => (
-              <SentFile key={transfer.id} transfer={transfer} />
+              <SentFile
+                key={transfer.id}
+                transfer={transfer}
+                source={source}
+                onError={setProblem}
+              />
             ))}
           </ul>
           {outcome === "failed" ? (
@@ -290,7 +296,15 @@ export function SendPanel({ bridge: source = bridge }: SendPanelProps) {
   );
 }
 
-function SentFile({ transfer }: { transfer: TransferView }) {
+function SentFile({
+  transfer,
+  source,
+  onError,
+}: {
+  transfer: TransferView;
+  source: Bridge;
+  onError: (code: string | null) => void;
+}) {
   return (
     <Item variant="outline" size="xs" asChild>
       <li>
@@ -301,9 +315,11 @@ function SentFile({ transfer }: { transfer: TransferView }) {
           >
             {transfer.name}
           </ItemTitle>
-          {transfer.phase === "inProgress" ? (
+          {["inProgress", "paused", "queued"].includes(transfer.phase) ? (
             <Progress
-              aria-hidden
+              aria-label={uiText("transferProgressFor", {
+                value0: transfer.name,
+              })}
               className="mt-2"
               value={transfer.progress * 100}
             />
@@ -318,6 +334,12 @@ function SentFile({ transfer }: { transfer: TransferView }) {
             {transferStatus(transfer)}
           </p>
         </ItemContent>
+        <UploadControls
+          source={source}
+          transfer={transfer}
+          onError={onError}
+          withCancel
+        />
       </li>
     </Item>
   );

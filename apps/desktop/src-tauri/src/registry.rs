@@ -40,6 +40,8 @@ pub enum TransferPhase {
     InProgress,
     /// 发出去了，文件在服务端，等对方接收。
     Waiting,
+    /// 当前进程内保留源文件与已确认分片，只有用户继续才排队。
+    Paused,
     /// 收到的文件已经存好；发出去的文件对方已经收下。
     Complete,
     Failed,
@@ -54,7 +56,10 @@ pub enum TransferPhase {
 impl TransferPhase {
     /// 还会自己变：没开始、正在传，或者对方还没决定收不收。
     pub fn is_active(self) -> bool {
-        matches!(self, Self::Queued | Self::InProgress | Self::Waiting)
+        matches!(
+            self,
+            Self::Queued | Self::InProgress | Self::Waiting | Self::Paused
+        )
     }
 }
 
@@ -81,6 +86,8 @@ pub enum TransferFailure {
     Vanished,
     /// 应用退出时尚未完成；不会拿旧的文件路径自动重新发送。
     Interrupted,
+    DestinationChanged,
+    UploadExpired,
 }
 
 impl From<ReceiveFailure> for TransferFailure {
@@ -120,7 +127,9 @@ impl TransferFailure {
             | Self::Rejected
             | Self::QuotaExceeded
             | Self::Vanished
-            | Self::Interrupted => None,
+            | Self::Interrupted
+            | Self::DestinationChanged
+            | Self::UploadExpired => None,
         }
     }
 }
@@ -145,6 +154,8 @@ pub struct TransferView {
     pub failure: Option<TransferFailure>,
     /// 能不能再发一次：只有"文件根本没到服务端"的失败才行。规则在 Rust 里，界面照着显示。
     pub retryable: bool,
+    #[serde(default)]
+    pub resumable: bool,
     /// 另一头是谁：一台设备，还是云盘。文案据此措辞。
     pub target: TransferTarget,
 }
@@ -217,6 +228,7 @@ pub struct Outgoing {
     pub file: OutgoingFile,
     /// 服务端收下之后给的那条发送记录；发去云盘的、或者文件还没到服务端时为 `None`。
     pub send: Option<SendRecord>,
+    pub upload: Option<Box<assemble_protocol::uploads::Create>>,
 }
 
 /// 一条记录是怎么来的。
@@ -259,6 +271,14 @@ pub struct TransferRecord {
 }
 
 impl TransferRecord {
+    fn needs_upload_abort(&self) -> bool {
+        !self.settled
+            && matches!(
+                self.view.phase,
+                TransferPhase::Cancelled | TransferPhase::Failed
+            )
+            && self.outgoing().is_some_and(|o| o.upload.is_some())
+    }
     fn incoming(send: &SendRecord) -> Self {
         Self {
             view: TransferView {
@@ -272,6 +292,7 @@ impl TransferRecord {
                 saved_as: None,
                 failure: None,
                 retryable: false,
+                resumable: false,
                 target: TransferTarget::Device,
             },
             origin: Origin::Incoming(send.clone()),
@@ -297,12 +318,14 @@ impl TransferRecord {
                 saved_as: None,
                 failure: None,
                 retryable: false,
+                resumable: false,
                 target: destination.target(),
             },
             origin: Origin::Outgoing(Outgoing {
                 destination: destination.clone(),
                 file,
                 send: None,
+                upload: None,
             }),
             attempts: 0,
             not_before: None,
@@ -327,6 +350,7 @@ impl TransferRecord {
                 saved_as: None,
                 failure: None,
                 retryable: false,
+                resumable: false,
                 target: TransferTarget::Drive,
             },
             origin: Origin::FromDrive(file.clone()),
@@ -382,7 +406,7 @@ impl TransferRecord {
         self.view.phase == TransferPhase::Failed
             && self
                 .outgoing()
-                .is_some_and(|outgoing| outgoing.send.is_none())
+                .is_some_and(|outgoing| outgoing.send.is_none() && outgoing.upload.is_none())
     }
 
     /// 服务端那一次发送的标识。
@@ -458,7 +482,7 @@ impl TransferRecord {
         }
         match self.view.phase {
             // 还在排队或正在接收：它自己会走到头。
-            TransferPhase::Queued | TransferPhase::InProgress => {}
+            TransferPhase::Queued | TransferPhase::InProgress | TransferPhase::Paused => {}
             // 文件已经存好（或者已经收不下来），服务端却还在等：回执没送到，再发一次。
             TransferPhase::Complete | TransferPhase::Failed => {
                 self.settled = false;
@@ -502,11 +526,20 @@ pub enum Cancellation {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Job {
     /// 把一个排着队的文件收下来。
-    Receive { id: String },
+    Receive {
+        id: String,
+    },
     /// 把一个排着队的文件发出去。
-    Send { id: String },
+    Send {
+        id: String,
+    },
     /// 把本机已经有的结局告诉服务端：收下了，或者收不下来。
-    Settle { id: String },
+    Settle {
+        id: String,
+    },
+    AbortUpload {
+        id: String,
+    },
 }
 
 /// 后台任务现在有没有事可做。
@@ -549,6 +582,15 @@ pub(crate) fn pick(records: &[TransferRecord], now: Instant) -> Next {
             .map_or(Duration::ZERO, |time| time.saturating_duration_since(now))
     };
     let mut soonest = Duration::MAX;
+    for record in records.iter().rev().filter(|r| r.needs_upload_abort()) {
+        let wait = wait_of(record);
+        if wait.is_zero() {
+            return Next::Work(Job::AbortUpload {
+                id: record.id().to_owned(),
+            });
+        }
+        soonest = soonest.min(wait);
+    }
     for incoming in [true, false] {
         for record in records.iter().rev() {
             if record.view.phase != TransferPhase::Queued || record.is_delivery() != incoming {
@@ -612,12 +654,109 @@ impl Default for Registry {
 }
 
 impl Registry {
+    pub fn may_send(&mut self, id: &str) -> bool {
+        self.record(id)
+            .is_some_and(|r| r.view.phase == TransferPhase::InProgress && r.outgoing().is_some())
+    }
+    pub fn remember_upload(&mut self, id: &str, input: assemble_protocol::uploads::Create) -> bool {
+        let Some(record) = self.record(id) else {
+            return false;
+        };
+        if record.view.phase != TransferPhase::InProgress {
+            return false;
+        }
+        let Origin::Outgoing(outgoing) = &mut record.origin else {
+            return false;
+        };
+        if matches!(outgoing.destination, Destination::Device(_)) {
+            return false;
+        }
+        if let Some(old) = &outgoing.upload {
+            return old.as_ref() == &input;
+        }
+        outgoing.upload = Some(Box::new(input));
+        true
+    }
+    pub fn pause_upload(&mut self, id: &str) -> bool {
+        let Some(record) = self.record(id) else {
+            return false;
+        };
+        if !matches!(
+            record.view.phase,
+            TransferPhase::Queued | TransferPhase::InProgress
+        ) || record.outgoing().is_none_or(|o| o.upload.is_none())
+        {
+            return false;
+        }
+        record.view.phase = TransferPhase::Paused;
+        record.not_before = None;
+        true
+    }
+    pub fn resume_upload(&mut self, id: &str) -> bool {
+        let Some(record) = self.record(id) else {
+            return false;
+        };
+        if record.view.phase != TransferPhase::Paused
+            || record.outgoing().is_none_or(|o| o.upload.is_none())
+        {
+            return false;
+        }
+        record.view.phase = TransferPhase::Queued;
+        record.not_before = None;
+        true
+    }
+    pub fn upload_to_abort(&mut self, id: &str) -> Option<String> {
+        let record = self.record(id)?;
+        record
+            .needs_upload_abort()
+            .then(|| {
+                record
+                    .outgoing()?
+                    .upload
+                    .as_ref()
+                    .map(|u| u.request_id.clone())
+            })
+            .flatten()
+    }
+    pub fn retry_upload_abort(&mut self, id: &str, now: Instant) {
+        if let Some(record) = self.record(id)
+            && record.needs_upload_abort()
+        {
+            record.attempts = record.attempts.saturating_add(1);
+            record.not_before = Some(now + backoff(record.attempts));
+        }
+    }
+    pub fn upload_aborted(&mut self, id: &str) {
+        if let Some(record) = self.record(id)
+            && record.needs_upload_abort()
+        {
+            record.settled = true;
+            record.not_before = None;
+            // 确认旧意图已终结后，空间等可恢复失败才允许用户显式建立新请求。
+            if record.view.phase == TransferPhase::Failed
+                && !matches!(
+                    record.view.failure,
+                    Some(TransferFailure::DestinationChanged | TransferFailure::UploadExpired)
+                )
+            {
+                if let Origin::Outgoing(outgoing) = &mut record.origin {
+                    outgoing.upload = None;
+                }
+                record.view.progress = 0.0;
+            }
+        }
+    }
     pub fn views(&self) -> Vec<TransferView> {
         self.transfers
             .iter()
             .map(|record| {
                 let mut view = record.view.clone();
                 view.retryable = record.can_retry();
+                view.resumable = record.outgoing().is_some_and(|o| o.upload.is_some())
+                    && matches!(
+                        view.phase,
+                        TransferPhase::Queued | TransferPhase::InProgress | TransferPhase::Paused
+                    );
                 view
             })
             .collect()
@@ -661,7 +800,7 @@ impl Registry {
             && let Some(index) = self
                 .transfers
                 .iter()
-                .rposition(|record| !record.view.phase.is_active())
+                .rposition(|record| !record.view.phase.is_active() && !record.needs_upload_abort())
         {
             self.transfers.remove(index);
         }
@@ -819,7 +958,9 @@ impl Registry {
             && record.view.phase == TransferPhase::InProgress
         {
             record.view.phase = TransferPhase::Queued;
-            record.view.progress = 0.0;
+            if record.outgoing().is_none_or(|o| o.upload.is_none()) {
+                record.view.progress = 0.0;
+            }
             record.attempts += 1;
             record.not_before = Some(now + backoff(record.attempts));
         }
@@ -952,7 +1093,13 @@ impl Registry {
             return false;
         };
         if !matches!(record.origin, Origin::Outgoing(_))
-            || record.view.phase != TransferPhase::InProgress
+            || !matches!(
+                record.view.phase,
+                TransferPhase::InProgress
+                    | TransferPhase::Paused
+                    | TransferPhase::Cancelled
+                    | TransferPhase::Failed
+            )
         {
             return false;
         }
@@ -972,7 +1119,9 @@ impl Registry {
         }
         let outgoing = record.outgoing()?.clone();
         record.view.phase = TransferPhase::InProgress;
-        record.view.progress = 0.0;
+        if outgoing.upload.is_none() {
+            record.view.progress = 0.0;
+        }
         record.not_before = None;
         Some(outgoing)
     }
@@ -1005,8 +1154,11 @@ impl Registry {
         {
             record.view.phase = TransferPhase::Failed;
             record.view.failure = Some(failure);
-            record.view.progress = 0.0;
-            record.settled = true;
+            if record.outgoing().is_none_or(|o| o.upload.is_none()) {
+                record.view.progress = 0.0;
+            }
+            record.settled = record.outgoing().is_none_or(|o| o.upload.is_none());
+            record.not_before = None;
         }
     }
 
@@ -1019,7 +1171,9 @@ impl Registry {
                 .is_some_and(|outgoing| outgoing.send.is_none())
         {
             record.view.phase = TransferPhase::Queued;
-            record.view.progress = 0.0;
+            if record.outgoing().is_none_or(|o| o.upload.is_none()) {
+                record.view.progress = 0.0;
+            }
             record.attempts += 1;
             record.not_before = Some(now + backoff(record.attempts));
         }
@@ -1030,10 +1184,7 @@ impl Registry {
         let Some(record) = self.record(id) else {
             return false;
         };
-        let retryable = record.view.phase == TransferPhase::Failed
-            && record
-                .outgoing()
-                .is_some_and(|outgoing| outgoing.send.is_none());
+        let retryable = record.can_retry();
         if retryable {
             record.view.phase = TransferPhase::Queued;
             record.view.failure = None;
@@ -1068,12 +1219,13 @@ impl Registry {
                 Cancellation::Local
             }
             // 还没发出去、或发了一半：到此为止，服务端那边什么都没有。
-            (Origin::Outgoing(outgoing), TransferPhase::Queued | TransferPhase::InProgress)
-                if outgoing.send.is_none() =>
-            {
+            (
+                Origin::Outgoing(outgoing),
+                TransferPhase::Queued | TransferPhase::InProgress | TransferPhase::Paused,
+            ) if outgoing.send.is_none() => {
                 record.view.phase = TransferPhase::Cancelled;
                 record.view.progress = 0.0;
-                record.settled = true;
+                record.settled = outgoing.upload.is_none();
                 record.not_before = None;
                 Cancellation::Local
             }

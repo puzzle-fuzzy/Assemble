@@ -115,8 +115,15 @@
       "interrupted": {
         "received": "已中断",
         "sent": "已中断"
+      },
+      "destinationChanged": {
+        "sent": "目标文件夹已变化，请重新选择文件上传"
+      },
+      "uploadExpired": {
+        "sent": "上传已到期或结束，请重新上传"
       }
-    }
+    },
+    "paused": "已暂停 · {{percent}}%"
   },
   "errors": {
     "CREDENTIAL_STORE_UNAVAILABLE": "系统钥匙串不可用，无法保存登录状态。",

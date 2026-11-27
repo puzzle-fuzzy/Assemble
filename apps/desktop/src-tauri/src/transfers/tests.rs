@@ -1616,7 +1616,12 @@ async fn a_drive_upload_that_does_not_fit_is_reported_and_a_smaller_one_still_fi
         .find(|view| view.name == "备份.zip")
         .unwrap();
     assert_eq!(refused.phase, TransferPhase::Failed);
-    // 腾出空间之后可以重发。
+    // 服务端确认旧请求已取消后，腾出空间才可显式建立一次新上传。
+    until("the refused upload cancellation to settle", || {
+        view_of(&f, &refused.id).retryable
+    })
+    .await;
+    let refused = view_of(&f, &refused.id);
     assert!(refused.retryable);
 
     f.state().queue_files(Destination::Drive, vec![small]);
@@ -1740,5 +1745,98 @@ async fn revoked_sessions_hide_history_until_the_same_account_returns_and_logout
     f.state().end_session();
     rebuild_shell(&mut f, &history, session);
     assert_eq!(f.state().snapshot().transfers.len(), 0);
+    f.finish().await;
+}
+
+#[tokio::test]
+async fn cloud_upload_can_pause_resume_missing_parts_and_cancel_without_creating_a_file() {
+    let f = fixture().await;
+    let bytes = payload(5 * 1024 * 1024 + 11);
+    let file = pick(&f.dir, "续传资料.bin", &bytes).await;
+    f.state().set_draft(vec![file.clone()]);
+    let id = f.state().queue_draft(Destination::Drive).remove(0);
+    f.state().begin_send(&id).unwrap();
+    let login = f.state().session_cancel();
+    let epoch = *f.state().session_changes().borrow();
+    let options = RequestOptions::new(&login);
+    let input = f
+        .state()
+        .client
+        .upload_prepare(&file, "root", &options)
+        .await
+        .unwrap();
+    let upload = f
+        .state()
+        .client
+        .upload_create(&input, &options)
+        .await
+        .unwrap();
+    let first = usize::try_from(assemble_protocol::uploads::PART_BYTES).unwrap();
+    f.state()
+        .client
+        .upload_part(&upload.id, 0, bytes[..first].to_vec(), &options)
+        .await
+        .unwrap();
+    f.state().transfer_session(epoch, &login, |r| {
+        r.remember_upload(&id, input.clone());
+        r.progress(&id, 0.3);
+    });
+    assert!(f.state().pause_upload(&id));
+    f.start_receiving();
+    tokio::time::sleep(Duration::from_millis(30)).await;
+    assert_eq!(view_of(&f, &id).phase, TransferPhase::Paused);
+    assert!(f.state().resume_upload(&id));
+    until("resumable cloud upload to complete", || {
+        view_of(&f, &id).phase == TransferPhase::Complete
+    })
+    .await;
+    let list = f.state().client.drive(&options).await.unwrap();
+    assert_eq!(list.items.len(), 1);
+    assert_eq!(on_the_drive(&f, &list.items[0].id).await, bytes);
+    f.state().end_session();
+    assert!(
+        f.state()
+            .transfer_session(epoch, &CancellationToken::new(), |r| r.drive_uploaded(&id))
+            .is_none()
+    );
+    assert_eq!(f.state().snapshot().transfers, []);
+    f.finish().await;
+    let f = fixture().await;
+    let file = pick(&f.dir, "取消资料.bin", &payload(100)).await;
+    let login = f.state().session_cancel();
+    let epoch = *f.state().session_changes().borrow();
+    let options = RequestOptions::new(&login);
+    f.state().set_draft(vec![file.clone()]);
+    let second = f.state().queue_draft(Destination::Drive).remove(0);
+    // 不启动第二次上传的 HTTP：已保存的稳定键也能安全取消迟到的初始化。
+    f.state().transfer_session(epoch, &login, |r| {
+        r.begin_send(&second);
+    });
+    let input = f
+        .state()
+        .client
+        .upload_prepare(&file, "root", &options)
+        .await
+        .unwrap();
+    f.state()
+        .transfer_session(epoch, &login, |r| r.remember_upload(&second, input.clone()));
+    assert!(f.state().pause_upload(&second));
+    cancel(&f.state(), &second).await;
+    uploads::abort(&f.state(), &second).await;
+    assert_eq!(view_of(&f, &second).phase, TransferPhase::Cancelled);
+    assert!(
+        matches!(f.state().client.upload_create(&input,&options).await,Err(ClientError::Http{remote_code:Some(code),..}) if code=="UPLOAD_CANCELLED")
+    );
+    assert_eq!(
+        f.state().client.drive(&options).await.unwrap().items.len(),
+        0
+    );
+    f.state().end_session();
+    assert!(
+        f.state()
+            .transfer_session(epoch, &CancellationToken::new(), |r| r.drive_uploaded(&id))
+            .is_none()
+    );
+    assert_eq!(f.state().snapshot().transfers, []);
     f.finish().await;
 }

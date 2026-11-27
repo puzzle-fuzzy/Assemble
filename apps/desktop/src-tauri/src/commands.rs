@@ -1253,6 +1253,60 @@ pub fn retry_transfer(app: AppHandle, transfer_id: String) -> Result<(), Command
     }
 }
 
+#[tauri::command]
+pub fn pause_transfer(
+    app: AppHandle,
+    window: tauri::WebviewWindow,
+    transfer_id: String,
+) -> Result<(), CommandError> {
+    let state = app.state::<AppState>();
+    if !matches!(
+        window.label(),
+        crate::state::MAIN_WINDOW | crate::send_panel::SEND_WINDOW
+    ) || state.device_id().is_none()
+    {
+        return Err(CommandError::local(
+            "FORBIDDEN",
+            "a signed-in transfer window is required",
+        ));
+    }
+    if state.pause_upload(&transfer_id) {
+        Ok(())
+    } else {
+        Err(CommandError::local(
+            "NOT_RETRYABLE",
+            "this upload cannot be paused",
+        ))
+    }
+}
+
+#[tauri::command]
+pub fn resume_transfer(
+    app: AppHandle,
+    window: tauri::WebviewWindow,
+    transfer_id: String,
+) -> Result<(), CommandError> {
+    let state = app.state::<AppState>();
+    if !matches!(
+        window.label(),
+        crate::state::MAIN_WINDOW | crate::send_panel::SEND_WINDOW
+    ) || state.device_id().is_none()
+    {
+        return Err(CommandError::local(
+            "FORBIDDEN",
+            "a signed-in transfer window is required",
+        ));
+    }
+    if state.resume_upload(&transfer_id) {
+        Ok(())
+    } else {
+        Err(CommandError::local(
+            "NOT_RETRYABLE",
+            "this upload cannot be resumed",
+        ))
+    }
+}
+
 /// 在文件的右键菜单里加入（或去掉）"用 Assemble 发送"。
 /// 只有 Windows 上的打包运行支持；别的地方调用会得到 `UNSUPPORTED`。
 #[tauri::command]

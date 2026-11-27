@@ -93,6 +93,17 @@ impl From<sqlx::Error> for ApiError {
     }
 }
 
+impl From<std::io::Error> for ApiError {
+    fn from(error: std::io::Error) -> Self {
+        tracing::warn!(%error, "a storage operation failed");
+        Self::new(
+            StatusCode::SERVICE_UNAVAILABLE,
+            codes::UNAVAILABLE,
+            "storage is temporarily unavailable",
+        )
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use axum::body::to_bytes;

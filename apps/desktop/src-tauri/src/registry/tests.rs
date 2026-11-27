@@ -855,3 +855,73 @@ fn files_queued_without_a_draft_end_up_where_they_are_told() {
             .all(|view| view.target == TransferTarget::Drive && view.peer == "云盘")
     );
 }
+
+#[test]
+fn resumable_upload_pause_retry_cancel_and_late_completion_are_truthful() {
+    let mut registry = Registry::default();
+    registry.set_draft(vec![file("资料.txt", 100, &"a".repeat(64))]);
+    let id = registry.queue_draft(Destination::Drive).remove(0);
+    registry.begin_send(&id).unwrap();
+    let input = assemble_protocol::uploads::Create {
+        request_id: "stable-key".into(),
+        name: "资料.txt".into(),
+        size: 100,
+        sha256: "a".repeat(64),
+        mime_type: None,
+        parent_id: "root".into(),
+        location: vec![],
+    };
+    assert!(registry.remember_upload(&id, input.clone()));
+    registry.progress(&id, 0.5);
+    assert!(view_of(&registry, &id).resumable);
+    assert!(registry.pause_upload(&id));
+    assert_eq!(registry.next_job(Instant::now()), Next::Nothing);
+    registry.retry_send(&id, Instant::now());
+    assert_eq!(view_of(&registry, &id).phase, TransferPhase::Paused);
+    assert!(registry.resume_upload(&id));
+    assert_eq!(
+        registry.begin_send(&id).unwrap().upload.as_deref(),
+        Some(&input)
+    );
+    assert!(nearly(view_of(&registry, &id).progress, 0.5));
+    registry.retry_send(&id, Instant::now());
+    assert!(nearly(view_of(&registry, &id).progress, 0.5));
+    assert_eq!(registry.cancel(&id), Cancellation::Local);
+    assert_eq!(
+        registry.next_job(Instant::now()),
+        Next::Work(Job::AbortUpload { id: id.clone() })
+    );
+    assert_eq!(registry.upload_to_abort(&id), Some(input.request_id));
+    assert!(registry.drive_uploaded(&id));
+    assert_eq!(view_of(&registry, &id).phase, TransferPhase::Complete);
+    assert_eq!(registry.next_job(Instant::now()), Next::Nothing);
+}
+#[test]
+fn paused_upload_history_has_no_source_or_replay_after_restart() {
+    let mut registry = Registry::default();
+    registry.set_draft(vec![file("资料.txt", 100, &"a".repeat(64))]);
+    let id = registry.queue_draft(Destination::Drive).remove(0);
+    registry.begin_send(&id);
+    registry.remember_upload(
+        &id,
+        assemble_protocol::uploads::Create {
+            request_id: "key".into(),
+            name: "资料.txt".into(),
+            size: 100,
+            sha256: "a".repeat(64),
+            mime_type: None,
+            parent_id: "root".into(),
+            location: vec![],
+        },
+    );
+    registry.pause_upload(&id);
+    let mut restored = restart(&registry);
+    let view = view_of(&restored, &id);
+    assert_eq!(view.failure, Some(TransferFailure::Interrupted));
+    assert!(!view.resumable);
+    assert!(!restored.resume_upload(&id));
+    let json = serde_json::to_string(&registry.views()).unwrap();
+    assert!(!json.contains("sha256"));
+    assert!(!json.contains("path"));
+    assert!(!json.contains("requestId"));
+}

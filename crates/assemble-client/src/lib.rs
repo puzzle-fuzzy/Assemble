@@ -24,6 +24,7 @@ pub mod preview;
 pub mod remote;
 pub mod remote_host;
 mod remote_secure;
+pub mod uploads;
 
 pub use assemble_protocol::origin::{OriginError, ServerOrigin};
 pub use client::{

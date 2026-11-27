@@ -141,6 +141,7 @@ export function isTransferPhase(value: unknown): value is TransferPhase {
   return (
     value === "queued" ||
     value === "inProgress" ||
+    value === "paused" ||
     value === "waiting" ||
     value === "complete" ||
     value === "failed" ||
@@ -162,6 +163,8 @@ export function isTransferFailure(value: unknown): value is TransferFailure {
     value === "rejected" ||
     value === "quotaExceeded" ||
     value === "vanished" ||
+    value === "destinationChanged" ||
+    value === "uploadExpired" ||
     value === "interrupted"
   );
 }
@@ -183,6 +186,7 @@ export function isTransferView(value: unknown): value is TransferView {
     (value.savedAs === null || typeof value.savedAs === "string") &&
     (value.failure === null || isTransferFailure(value.failure)) &&
     typeof value.retryable === "boolean" &&
+    (value.resumable === undefined || typeof value.resumable === "boolean") &&
     isTransferTarget(value.target)
   );
 }

@@ -23,6 +23,10 @@ pub async fn report(config: &Config, pool: &SqlitePool) -> Result<AdminStorage, 
     let content: i64 = sqlx::query_scalar("SELECT coalesce(sum(size), 0) FROM blobs")
         .fetch_one(&mut *tx)
         .await?;
+    let reserved: i64 =
+        sqlx::query_scalar("SELECT coalesce(sum(bytes),0) FROM upload_reservations")
+            .fetch_one(&mut *tx)
+            .await?;
     let trash: i64 = sqlx::query_scalar(
         "SELECT coalesce(sum(size),0) FROM drive_files WHERE trash_id IS NOT NULL",
     )
@@ -56,21 +60,26 @@ pub async fn report(config: &Config, pool: &SqlitePool) -> Result<AdminStorage, 
         })
         .collect::<Result<_, sqlx::Error>>()?;
     let directory = config.data_dir.clone();
-    let (database_bytes, disk_available_bytes) = tokio::task::spawn_blocking(move || {
-        (
-            database_size(&directory).ok(),
-            directory
-                .is_dir()
-                .then(|| fs4::available_space(&directory).ok())
-                .flatten(),
-        )
-    })
-    .await
-    .map_err(|error| sqlx::Error::Io(std::io::Error::other(error)))?;
+    let (database_bytes, disk_available_bytes, upload_temp_bytes) =
+        tokio::task::spawn_blocking(move || {
+            (
+                database_size(&directory).ok(),
+                directory
+                    .is_dir()
+                    .then(|| fs4::available_space(&directory).ok())
+                    .flatten(),
+                upload_temp_size(&directory.join("uploads")).ok(),
+            )
+        })
+        .await
+        .map_err(|error| sqlx::Error::Io(std::io::Error::other(error)))?;
     let content_bytes = bytes(content)?;
-    let budget_warning = u128::from(content_bytes) * 100
+    let reserved_bytes = bytes(reserved)?;
+    let budget_warning = u128::from(content_bytes.saturating_add(reserved_bytes)) * 100
         >= u128::from(config.storage_budget_bytes) * u128::from(config.storage_warn_percent);
     Ok(AdminStorage {
+        upload_reserved_bytes: Some(reserved_bytes),
+        upload_temp_bytes,
         trash_bytes: bytes(trash)?,
         reclaimable_bytes: Some(bytes(reclaimable)?),
         content_bytes,
@@ -82,6 +91,42 @@ pub async fn report(config: &Config, pool: &SqlitePool) -> Result<AdminStorage, 
         disk_warning: disk_available_bytes.is_some_and(|available| available < MIN_AVAILABLE_BYTES),
         top_accounts,
     })
+}
+
+/// 只扫描受控两层暂存目录，不跟随链接；出现异常或超出回执/分片硬上限则报未知。
+fn upload_temp_size(root: &Path) -> std::io::Result<u64> {
+    let mut total = 0_u64;
+    let mut seen = 0_usize;
+    let entries = match std::fs::read_dir(root) {
+        Ok(entries) => entries,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(0),
+        Err(e) => return Err(e),
+    };
+    for directory in entries {
+        seen += 1;
+        if seen > 500_000 {
+            return Err(std::io::Error::other("upload size scan exceeded its bound"));
+        }
+        let directory = directory?;
+        let metadata = directory.file_type()?;
+        if !metadata.is_dir() || metadata.is_symlink() {
+            return Err(std::io::Error::other("invalid upload directory"));
+        }
+        for file in std::fs::read_dir(directory.path())? {
+            seen += 1;
+            if seen > 500_000 {
+                return Err(std::io::Error::other("upload size scan exceeded its bound"));
+            }
+            let file = file?;
+            if !file.file_type()?.is_file() {
+                return Err(std::io::Error::other("invalid upload part"));
+            }
+            total = total
+                .checked_add(file.metadata()?.len())
+                .ok_or_else(|| std::io::Error::other("upload size overflow"))?;
+        }
+    }
+    Ok(total)
 }
 
 fn database_size(directory: &Path) -> std::io::Result<u64> {

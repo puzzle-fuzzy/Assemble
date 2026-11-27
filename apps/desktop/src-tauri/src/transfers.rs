@@ -115,6 +115,7 @@ pub async fn run<R: tauri::Runtime>(app: tauri::AppHandle<R>) {
             Job::Receive { id } => receive(&state, &id).await,
             Job::Send { id } => send(&state, &id).await,
             Job::Settle { id } => settle(&state, &id).await,
+            Job::AbortUpload { id } => uploads::abort(&state, &id).await,
         }
     }
 }
@@ -477,8 +478,12 @@ fn reported(failure: ReceiveFailure) -> FailReason {
 
 async fn send<R: tauri::Runtime>(state: &AppState<R>, id: &str) {
     // 先记下这一次登录：领取之后登录可能就换了，那时不该再发上一个账户的文件。
+    let epoch = *state.session_changes().borrow();
     let login = state.session_cancel();
-    let Some(outgoing) = state.begin_send(id) else {
+    let Some(outgoing) = state
+        .transfer_session(epoch, &login, |r| r.begin_send(id))
+        .flatten()
+    else {
         return;
     };
     let cancel = login.child_token();
@@ -492,28 +497,15 @@ async fn send<R: tauri::Runtime>(state: &AppState<R>, id: &str) {
             .send_to_device(&device.id, &outgoing.file, options, Some(&mut report))
             .await
             .map(Delivered::ToDevice),
-        Destination::Drive => state
-            .client
-            .drive_upload(
-                &outgoing.file.name(),
-                &outgoing.file,
-                options,
-                Some(&mut report),
-            )
-            .await
-            .map(|_| Delivered::ToDrive),
-        Destination::DriveFolder(parent) => state
-            .client
-            .drive_tree_upload(
-                parent,
-                &outgoing.file.name(),
-                &outgoing.file,
-                options,
-                Some(&mut report),
-            )
-            .await
-            .map(|_| Delivered::ToDrive),
+        Destination::Drive | Destination::DriveFolder(_) => {
+            uploads::send(state, id, &outgoing, epoch, &login, &cancel)
+                .await
+                .map(|()| Delivered::ToDrive)
+        }
     };
+    if login.is_cancelled() || *state.session_changes().borrow() != epoch {
+        return;
+    }
     let uploaded = match uploaded {
         Ok(uploaded) => uploaded,
         // 用户取消了：记录已经标好了。文件其实到没到服务端，由对账去确认。
@@ -521,9 +513,15 @@ async fn send<R: tauri::Runtime>(state: &AppState<R>, id: &str) {
         Err(error) if error.is_unauthorized() => return session::revoked(state),
         Err(error) => {
             match refusal(&error) {
-                Some(failure) => state.send_failed(id, failure),
+                Some(failure) => {
+                    state.transfer_session(epoch, &login, |r| r.send_failed(id, failure));
+                }
                 // 网络的事：过一会儿从头再发一遍。等不及可以取消。
-                None => state.retry_send(id),
+                None => {
+                    state.transfer_session(epoch, &login, |r| {
+                        r.retry_send(id, std::time::Instant::now());
+                    });
+                }
             }
             return;
         }
@@ -531,12 +529,14 @@ async fn send<R: tauri::Runtime>(state: &AppState<R>, id: &str) {
     match uploaded {
         // 存进云盘就完事了，没有"等对方接收"这一步。顺手把云盘的名单换新。
         Delivered::ToDrive => {
-            state.drive_uploaded(id);
+            state.transfer_session(epoch, &login, |r| r.drive_uploaded(id));
             refresh_drive(state).await;
         }
         Delivered::ToDevice(send) => {
             // 用户在上传途中按了取消的话，文件其实还是到了：去撤回。
-            if state.send_uploaded(id, &send) {
+            if state.transfer_session(epoch, &login, |r| r.send_uploaded(id, &send))
+                == Some(crate::registry::Updated::Withdraw)
+            {
                 withdraw(state, &send.id, &state.lifetime).await;
             }
         }
@@ -568,6 +568,20 @@ fn refusal(error: &ClientError) -> Option<TransferFailure> {
         } if remote_code.as_deref() == Some(codes::DEVICE_OFFLINE) => {
             Some(TransferFailure::DeviceOffline)
         }
+        ClientError::Http {
+            remote_code: Some(code),
+            ..
+        } if code == "UPLOAD_TARGET_CHANGED" => Some(TransferFailure::DestinationChanged),
+        ClientError::Http {
+            remote_code: Some(code),
+            ..
+        } if matches!(
+            code.as_str(),
+            "UPLOAD_EXPIRED" | "UPLOAD_CANCELLED" | "UPLOAD_FINISHED"
+        ) =>
+        {
+            Some(TransferFailure::UploadExpired)
+        }
         // 服务端明确拒绝：名字不合规、文件在挑选之后变了、发给自己。重试也不会变。
         ClientError::Http {
             status: 400..=499, ..
@@ -583,15 +597,18 @@ fn refusal(error: &ClientError) -> Option<TransferFailure> {
 
 /// 向服务端要一份云盘的名单。
 pub async fn refresh_drive<R: tauri::Runtime>(state: &AppState<R>) {
-    match state
-        .client
-        .drive(&RequestOptions::new(&state.lifetime))
-        .await
-    {
-        Ok(listing) => state.set_drive(Some(listing)),
-        Err(error) if error.is_unauthorized() => session::revoked(state),
-        // 暂时拿不到：界面上留着力所能及的那份旧的。
-        Err(error) => tracing::debug!(%error, "the drive could not be listed yet"),
+    let epoch = *state.session_changes().borrow();
+    let cancel = state.session_cancel();
+    let result = state.client.drive(&RequestOptions::new(&cancel)).await;
+    if cancel.is_cancelled() || *state.session_changes().borrow() != epoch {
+        return;
+    }
+    match result {
+        Ok(listing) => {
+            state.remember_drive(listing, epoch, &cancel);
+        }
+        Err(e) if e.is_unauthorized() => session::revoked(state),
+        Err(e) => tracing::debug!(code=?e,"the drive could not be listed yet"),
     }
 }
 
@@ -618,6 +635,9 @@ pub async fn withdraw<R: tauri::Runtime>(
 /// 用户要取消一条传输。
 pub async fn cancel<R: tauri::Runtime>(state: &AppState<R>, id: &str) -> Cancellation {
     let outcome = state.cancel_transfer(id);
+    if outcome == Cancellation::Local {
+        state.stop_transfer(id);
+    }
     if let Cancellation::OnServer(send_id) = &outcome {
         let cancel = state.session_cancel();
         withdraw(state, send_id, &cancel).await;
@@ -632,3 +652,5 @@ pub fn retry_send<R: tauri::Runtime>(state: &AppState<R>, id: &str) -> bool {
 
 #[cfg(test)]
 mod tests;
+
+mod uploads;
