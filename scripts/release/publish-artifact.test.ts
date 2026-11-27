@@ -139,3 +139,22 @@ test("维护检查不接受会被 JavaScript 自动滚日的时间", async () =>
     );
   }
 });
+
+test("失败检查和成功读取都关闭句柄，紧接着可原子替换 Windows 清单", async () => {
+  const { options } = await setup();
+  await mkdir(options.directory, { recursive: true });
+  const path = join(options.directory, "manifest.json");
+  for (let index = 0; index < 8; index++) {
+    await writeFile(
+      path,
+      '{"schemaVersion":1,"artifacts":[],"unexpected":true}',
+    );
+    await expect(checkReleases(options.directory)).rejects.toThrow(
+      "INVALID_RELEASE_MANIFEST",
+    );
+    await writeFile(path, '{"schemaVersion":1,"artifacts":[]}');
+    expect((await checkReleases(options.directory)).artifacts).toHaveLength(0);
+    await publishArtifact({ ...options, version: `0.1.${index}` });
+    expect((await checkReleases(options.directory)).artifacts).toHaveLength(1);
+  }
+});

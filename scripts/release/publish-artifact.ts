@@ -1,6 +1,5 @@
 // 维护者本地执行：先落盘和核验，再替换清单；服务端始终只读。
 import { createHash } from "node:crypto";
-import { createReadStream } from "node:fs";
 import {
   copyFile,
   link,
@@ -38,7 +37,17 @@ async function regular(path: string) {
 }
 async function digest(path: string) {
   const hash = createHash("sha256");
-  for await (const chunk of createReadStream(path)) hash.update(chunk);
+  const file = await open(path, "r");
+  try {
+    const buffer = Buffer.alloc(64 * 1024);
+    while (true) {
+      const { bytesRead } = await file.read(buffer);
+      if (!bytesRead) break;
+      hash.update(buffer.subarray(0, bytesRead));
+    }
+  } finally {
+    await file.close();
+  }
   return hash.digest("hex");
 }
 async function manifest(directory: string): Promise<Manifest> {
@@ -46,19 +55,32 @@ async function manifest(directory: string): Promise<Manifest> {
   try {
     if ((await regular(path)).size > MAX_MANIFEST_BYTES)
       throw new Error("RELEASE_MANIFEST_TOO_LARGE");
-    const chunks: Buffer[] = [];
-    let length = 0;
-    for await (const chunk of createReadStream(path)) {
-      length += chunk.length;
+    const file = await open(path, "r");
+    try {
+      const buffer = Buffer.alloc(MAX_MANIFEST_BYTES + 1);
+      let length = 0;
+      while (length < buffer.length) {
+        const { bytesRead } = await file.read(
+          buffer,
+          length,
+          buffer.length - length,
+        );
+        if (!bytesRead) break;
+        length += bytesRead;
+      }
       if (length > MAX_MANIFEST_BYTES)
         throw new Error("RELEASE_MANIFEST_TOO_LARGE");
-      chunks.push(chunk);
+      return parseManifest(
+        JSON.parse(
+          new TextDecoder("utf-8", { fatal: true }).decode(
+            buffer.subarray(0, length),
+          ),
+        ),
+      );
+    } finally {
+      // 流到达 EOF 不保证异步关闭已完成；Windows 下必须先关闭读句柄才能原子替换清单。
+      await file.close();
     }
-    return parseManifest(
-      JSON.parse(
-        new TextDecoder("utf-8", { fatal: true }).decode(Buffer.concat(chunks)),
-      ),
-    );
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT")
       return { schemaVersion: 1, artifacts: [] };
