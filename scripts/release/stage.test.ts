@@ -120,47 +120,60 @@ describe("做出发布目录", () => {
     ).toThrow("updater.key");
   });
 
-  test("Windows 的安装包和 Mac 应用包不是同一个版本就不做", () => {
-    const dir = mkdtempSync(join(tmpdir(), "assemble-stage-"));
-    try {
-      mkdirSync(join(dir, "installer"));
-      writeFileSync(join(dir, "installer/Assemble_0.1.115_x64-setup.exe"), "x");
-      const out = join(dir, "out");
-      expect(() =>
-        stage({
-          bundle: fakeBundle(dir, "0.1.116"),
-          windows: join(dir, "installer/Assemble_0.1.115_x64-setup.exe"),
-          out,
-        }),
-      ).toThrow("不是同一个版本");
-      // 认出版本不对就停，还没有动发布目录。
-      expect(existsSync(out)).toBe(false);
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
-  });
+  // 做发布目录这件事只在 macOS 上有意义（要读 Info.plist、打 tar 包），所以这两条也只在 macOS 上跑。
+  test.skipIf(process.platform !== "darwin")(
+    "Windows 的安装包和 Mac 应用包不是同一个版本就不做",
+    () => {
+      const dir = mkdtempSync(join(tmpdir(), "assemble-stage-"));
+      try {
+        mkdirSync(join(dir, "installer"));
+        writeFileSync(
+          join(dir, "installer/Assemble_0.1.115_x64-setup.exe"),
+          "x",
+        );
+        const out = join(dir, "out");
+        expect(() =>
+          stage({
+            bundle: fakeBundle(dir, "0.1.116"),
+            windows: join(dir, "installer/Assemble_0.1.115_x64-setup.exe"),
+            out,
+          }),
+        ).toThrow("不是同一个版本");
+        // 认出版本不对就停，还没有动发布目录。
+        expect(existsSync(out)).toBe(false);
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    },
+  );
 
-  test("发布目录里有东西就不往里放", () => {
-    const dir = mkdtempSync(join(tmpdir(), "assemble-stage-"));
-    try {
-      const out = join(dir, "out");
-      mkdirSync(out);
-      writeFileSync(join(out, "manifest.json"), "{}");
-      // 安装包的名字和版本都对得上，所以这一回拦在目录检查上。
-      mkdirSync(join(dir, "installer"));
-      writeFileSync(join(dir, "installer/Assemble_0.1.116_x64-setup.exe"), "x");
-      expect(() =>
-        stage({
-          bundle: fakeBundle(dir, "0.1.116"),
-          windows: join(dir, "installer/Assemble_0.1.116_x64-setup.exe"),
-          out,
-        }),
-      ).toThrow("不是空的");
-      expect(readdirSync(out)).toEqual(["manifest.json"]);
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
-  });
+  test.skipIf(process.platform !== "darwin")(
+    "发布目录里有东西就不往里放",
+    () => {
+      const dir = mkdtempSync(join(tmpdir(), "assemble-stage-"));
+      try {
+        const out = join(dir, "out");
+        mkdirSync(out);
+        writeFileSync(join(out, "manifest.json"), "{}");
+        // 安装包的名字和版本都对得上，所以这一回拦在目录检查上。
+        mkdirSync(join(dir, "installer"));
+        writeFileSync(
+          join(dir, "installer/Assemble_0.1.116_x64-setup.exe"),
+          "x",
+        );
+        expect(() =>
+          stage({
+            bundle: fakeBundle(dir, "0.1.116"),
+            windows: join(dir, "installer/Assemble_0.1.116_x64-setup.exe"),
+            out,
+          }),
+        ).toThrow("不是空的");
+        expect(readdirSync(out)).toEqual(["manifest.json"]);
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    },
+  );
 
   // 真的用发布用的那把钥匙签一次：只有那台 Mac 上有，持续集成上跳过。签的是一个临时的
   // 假应用包，签完就删，不发布任何东西。
