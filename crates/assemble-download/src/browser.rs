@@ -69,6 +69,18 @@ pub struct BrowserServer {
     stored: SecretString,
 }
 
+/// 把这一轮的桥接凭据放进去。上一回没来得及删的还留着时（崩溃、被强杀、换新版时没能正常
+/// 退出），直接改写它，macOS 会要人输登录钥匙串的密码，应用就停在启动上（2026-11-27 在这台
+/// Mac 上真的遇到了）。先删掉再新建：删除和新建都不用问人。
+fn replace_credential(
+    store: &dyn SecretStore,
+    key: &SecretKey,
+    stored: &SecretString,
+) -> Result<(), &'static str> {
+    store.delete(key).map_err(|_| KEYCHAIN_UNAVAILABLE)?;
+    store.put(key, stored).map_err(|_| KEYCHAIN_UNAVAILABLE)
+}
+
 impl BrowserServer {
     pub async fn start(
         manager: Arc<DownloadManager>,
@@ -90,7 +102,7 @@ impl BrowserServer {
         let stored =
             SecretString::new(serde_json::to_string(&endpoint).map_err(|_| NOT_CONNECTED)?);
         let key = key(app_id);
-        store.put(&key, &stored).map_err(|_| KEYCHAIN_UNAVAILABLE)?;
+        replace_credential(store.as_ref(), &key, &stored)?;
         let state = Arc::new(BridgeState {
             token: SecretString::new(token),
             manager,
@@ -368,6 +380,67 @@ mod tests {
     use assemble_protocol::downloads::{DownloadInput, DownloadKind};
     use assemble_store::secret::MemorySecretStore;
     use std::sync::atomic::{AtomicUsize, Ordering};
+
+    /// 记下调用先后的存储：要验的是"先删后写"，不是在旧凭据上改。
+    struct Recording {
+        inner: MemorySecretStore,
+        calls: Mutex<Vec<&'static str>>,
+    }
+
+    impl SecretStore for Recording {
+        fn put(&self, key: &SecretKey, value: &SecretString) -> assemble_store::secret::Result<()> {
+            self.calls.lock().unwrap().push("put");
+            self.inner.put(key, value)
+        }
+
+        fn get(&self, key: &SecretKey) -> assemble_store::secret::Result<Option<SecretString>> {
+            self.inner.get(key)
+        }
+
+        fn delete(&self, key: &SecretKey) -> assemble_store::secret::Result<()> {
+            self.calls.lock().unwrap().push("delete");
+            self.inner.delete(key)
+        }
+    }
+
+    #[tokio::test]
+    async fn a_leftover_bridge_credential_is_replaced_by_deleting_it_first() {
+        let folder = tempfile::tempdir().unwrap();
+        let store = Arc::new(Recording {
+            inner: MemorySecretStore::new(),
+            calls: Mutex::new(Vec::new()),
+        });
+        // 上一回没删掉的凭据：应用被强杀、崩溃，或者换新版时没能正常退出。
+        store
+            .put(
+                &key("test.leftover"),
+                &SecretString::new("{\"port\":1,\"token\":\"old\"}"),
+            )
+            .unwrap();
+        store.calls.lock().unwrap().clear();
+        let manager = DownloadManager::open(
+            folder.path().join("history.json"),
+            folder.path().to_owned(),
+            MediaTools::test_available(),
+            |_| {},
+        )
+        .unwrap();
+
+        let bridge = BrowserServer::start(manager, store.clone(), "test.leftover", || {})
+            .await
+            .unwrap();
+
+        assert_eq!(*store.calls.lock().unwrap(), vec!["delete", "put"]);
+        assert!(
+            !store
+                .get(&key("test.leftover"))
+                .unwrap()
+                .unwrap()
+                .expose()
+                .contains("old")
+        );
+        bridge.shutdown().await;
+    }
 
     #[tokio::test]
     async fn assistant_cancel_only_accepts_its_own_authenticated_task() {
