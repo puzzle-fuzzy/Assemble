@@ -117,13 +117,15 @@
         "sent": "已中断"
       },
       "destinationChanged": {
-        "sent": "目标文件夹已变化，请重新选择文件上传"
+        "sent": "目标文件夹已变化，请重新选择文件上传",
+        "received": "接收文件夹已改变或不可用，请重新选择接收位置后下载"
       },
       "uploadExpired": {
         "sent": "上传已到期或结束，请重新上传"
       }
     },
-    "paused": "已暂停 · {{percent}}%"
+    "paused": "已暂停 · {{percent}}%",
+    "sourceMissing": "找不到原文件，请重新选择相同文件后继续。"
   },
   "errors": {
     "CREDENTIAL_STORE_UNAVAILABLE": "系统钥匙串不可用，无法保存登录状态。",
@@ -152,7 +154,8 @@
     "PLANNER_INPUT": "有内容不合规则，没有保存。请检查标题（最多 200 个字）、时间和重复的截止日。",
     "UPDATE_NOT_READY": "新版本还没有下载好，稍后再试。",
     "UPDATE_INSTALL_FAILED": "新版本没能装上，稍后会再试一次。",
-    "GENERIC": "操作没有完成，请稍后重试。"
+    "GENERIC": "操作没有完成，请稍后重试。",
+    "SOURCE_MISMATCH": "请选择与原内容相同的文件。"
   },
   "notice": {
     "fixed": {
@@ -175,7 +178,9 @@
       "updateApplyFailed": "新版本没能装上，下一次启动时会再试一次。",
       "remoteCaptureFailed": "远程屏幕采集失败，请检查屏幕录制权限后重新连接。",
       "remoteInputFailed": "远程输入已停止，请检查辅助功能权限后重新连接。",
-      "remoteDisconnected": "远程连接中断，键鼠控制已停止，请重新连接。"
+      "remoteDisconnected": "远程连接中断，键鼠控制已停止，请重新连接。",
+      "recoveryRead": "无法读取传输恢复记录，请保留原文件并重新启动应用。",
+      "recoveryWrite": "无法保存传输恢复记录，请检查本机存储后重新启动应用。"
     },
     "fileTooLarge": "「{{name}}」超过 100 MB，发不出去。",
     "fileUnreadable": "「{{name}}」读不出来，可能已被移走或没有权限。",

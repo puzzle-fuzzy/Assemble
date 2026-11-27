@@ -123,7 +123,7 @@ impl TransferProgress {
 pub type ProgressCallback<'a> = &'a mut (dyn FnMut(TransferProgress) + Send);
 
 /// 一个准备发出去的本机文件：已经确认过大小与摘要。
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct OutgoingFile {
     pub path: PathBuf,
     pub size: u64,

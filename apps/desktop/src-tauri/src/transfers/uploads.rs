@@ -1,4 +1,4 @@
-//! 续传只持有当前进程内的源文件；重开应用的恢复由后续独立私有任务日志承担。
+//! 稳定上传意图先写私有恢复日志，再执行任何服务端副作用。
 use crate::{
     registry::{Destination, Outgoing},
     session,
@@ -28,10 +28,16 @@ pub(super) async fn send<R: tauri::Runtime>(
             Destination::DriveFolder(parent) => parent,
             Destination::Device(_) => return Err(ClientError::InvalidRequest),
         };
-        let input = state
+        let mut input = state
             .client
             .upload_prepare(&outgoing.file, parent, &options)
             .await?;
+        input.name = state
+            .transfer_session(epoch, login, |r| {
+                r.views().into_iter().find(|v| v.id == id).map(|v| v.name)
+            })
+            .flatten()
+            .ok_or(ClientError::Cancelled)?;
         if state.transfer_session(epoch, login, |r| r.remember_upload(id, input.clone()))
             != Some(true)
         {
@@ -58,6 +64,9 @@ pub(super) async fn send<R: tauri::Runtime>(
             .upload_continue(&input, &outgoing.file, &options, Some(&mut report))
             .await?;
     } else {
+        if state.transfer_session(epoch, login, |r| r.mark_legacy(id)) != Some(true) {
+            return Err(ClientError::Cancelled);
+        }
         match &outgoing.destination {
             Destination::Drive => {
                 state

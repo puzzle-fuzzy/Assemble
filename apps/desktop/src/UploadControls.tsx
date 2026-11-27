@@ -1,5 +1,5 @@
 // 云盘上传沿用现有传输行；按钮只传任务标识，不接收文件位置。
-import { Pause, Play } from "lucide-react";
+import { FolderOpen, Pause, Play } from "lucide-react";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { type Bridge, toBridgeError } from "@/lib/bridge";
@@ -42,6 +42,20 @@ export function UploadControls({
   }
   return (
     <>
+      {paused &&
+      transfer.failure === "fileUnreadable" &&
+      transfer.direction === "out" ? (
+        <Button
+          size="icon"
+          variant="outline"
+          disabled={disabled || pending}
+          aria-label={uiText("relocateTransferFor", { name: transfer.name })}
+          title={uiText("relocateTransferFor", { name: transfer.name })}
+          onClick={() => void act(() => source.relocateTransfer(transfer.id))}
+        >
+          <FolderOpen aria-hidden />
+        </Button>
+      ) : null}
       <Button
         size="icon"
         variant="outline"

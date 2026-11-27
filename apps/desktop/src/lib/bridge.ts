@@ -144,6 +144,7 @@ export interface Bridge {
   retryTransfer(transferId: string): Promise<void>;
   pauseTransfer(transferId: string): Promise<void>;
   resumeTransfer(transferId: string): Promise<void>;
+  relocateTransfer(transferId: string): Promise<void>;
   /** 在文件的右键菜单里加入（或去掉）"用 Assemble 发送"。只有 Windows 上的打包运行支持。 */
   setSendMenu(enabled: boolean): Promise<Snapshot>;
   /** 提示看过了，收起来。 */
@@ -361,6 +362,8 @@ export const bridge: Bridge = {
   cancelTransfer: (transferId) =>
     invoke<void>("cancel_transfer", { transferId }),
   retryTransfer: (transferId) => invoke<void>("retry_transfer", { transferId }),
+  relocateTransfer: (transferId) =>
+    invoke<void>("relocate_transfer", { transferId }),
   pauseTransfer: (transferId) => invoke<void>("pause_transfer", { transferId }),
   resumeTransfer: (transferId) =>
     invoke<void>("resume_transfer", { transferId }),

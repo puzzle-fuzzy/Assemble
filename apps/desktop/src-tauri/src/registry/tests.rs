@@ -925,3 +925,23 @@ fn paused_upload_history_has_no_source_or_replay_after_restart() {
     assert!(!json.contains("path"));
     assert!(!json.contains("requestId"));
 }
+
+#[test]
+fn a_completed_receipt_replaces_a_paused_source_error() {
+    let mut registry = Registry::default();
+    let id = registry
+        .queue(
+            Destination::Drive,
+            vec![file("source.bin", 3, &"a".repeat(64))],
+        )
+        .remove(0);
+    registry.begin_send(&id);
+    registry.source_missing(&id);
+    assert_eq!(
+        view_of(&registry, &id).failure,
+        Some(TransferFailure::FileUnreadable)
+    );
+    assert!(registry.drive_uploaded(&id));
+    assert_eq!(view_of(&registry, &id).failure, None);
+    assert_eq!(view_of(&registry, &id).phase, TransferPhase::Complete);
+}

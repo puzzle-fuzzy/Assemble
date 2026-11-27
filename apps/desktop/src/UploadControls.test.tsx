@@ -25,13 +25,57 @@ afterEach(async () => {
   await cleanup();
   setLanguage("zh-CN");
 });
+test("恢复下载使用相同控制，重新定位只接受任务标识并保留文件名", async () => {
+  const source = new FakeBridge(snapshot({ phase: "signedIn" }));
+  setLanguage("en");
+  const incoming = {
+    ...transfer,
+    direction: "in" as const,
+    phase: "paused" as const,
+  };
+  const view = await render(
+    <UploadControls source={source} transfer={incoming} onError={() => {}} />,
+  );
+  await click(button(view.host, `Resume transfer of ${transfer.name}`));
+  expect(source.calls).toEqual(["resumeTransfer:upload-one"]);
+  await cleanup();
+  setLanguage("zh-CN");
+  const missing = {
+    ...transfer,
+    phase: "paused" as const,
+    failure: "fileUnreadable" as const,
+  };
+  const next = await render(
+    <UploadControls source={source} transfer={missing} onError={() => {}} />,
+  );
+  await click(button(next.host, `重新选择原文件 ${transfer.name}`));
+  expect(source.calls[1]).toBe("relocateTransfer:upload-one");
+  expect(transferStatus(missing)).toContain("原文件");
+  setLanguage("en");
+  expect(transferStatus(missing)).toContain("Original file");
+  expect(
+    transferStatus({
+      ...incoming,
+      phase: "failed",
+      failure: "destinationChanged",
+    }),
+  ).toContain("receive folder");
+  setLanguage("zh-CN");
+  expect(
+    transferStatus({
+      ...incoming,
+      phase: "failed",
+      failure: "destinationChanged",
+    }),
+  ).toContain("接收文件夹");
+});
 test("暂停和继续只传任务标识，按钮名称包含原样文件名", async () => {
   setLanguage("zh-CN");
   const source = new FakeBridge(snapshot({ phase: "signedIn" }));
   const view = await render(
     <UploadControls source={source} transfer={transfer} onError={() => {}} />,
   );
-  await click(button(view.host, `暂停上传 ${transfer.name}`));
+  await click(button(view.host, `暂停传输 ${transfer.name}`));
   expect(source.calls).toEqual(["pauseTransfer:upload-one"]);
   await cleanup();
   setLanguage("en");
@@ -44,8 +88,8 @@ test("暂停和继续只传任务标识，按钮名称包含原样文件名", as
       withCancel
     />,
   );
-  await click(button(next.host, `Resume upload of ${transfer.name}`));
-  await click(button(next.host, `Cancel upload of ${transfer.name}`));
+  await click(button(next.host, `Resume transfer of ${transfer.name}`));
+  await click(button(next.host, `Cancel transfer of ${transfer.name}`));
   expect(source.calls).toEqual([
     "pauseTransfer:upload-one",
     "resumeTransfer:upload-one",

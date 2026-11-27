@@ -919,9 +919,11 @@ describe("用户文案", () => {
     respondWith = undefined;
     await bridge.pauseTransfer("out-one");
     await bridge.resumeTransfer("out-one");
+    await bridge.relocateTransfer("out-one");
     expect(calls).toEqual([
       { command: "pause_transfer", args: { transferId: "out-one" } },
       { command: "resume_transfer", args: { transferId: "out-one" } },
+      { command: "relocate_transfer", args: { transferId: "out-one" } },
     ]);
   });
   test("只按错误码给出固定文案，不回显技术细节", () => {

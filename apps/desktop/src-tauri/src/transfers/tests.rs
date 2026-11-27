@@ -1680,6 +1680,10 @@ fn rebuild_shell(fixture: &mut Fixture, history: &Path, session: SessionView) {
     app.state::<Shell>()
         .attach_transfer_history(history.to_owned())
         .unwrap();
+    let recovery = history.with_file_name("transfer-recovery.json");
+    if recovery.exists() {
+        app.state::<Shell>().attach_transfer_recovery(recovery);
+    }
     // 登录状态还没有核对前，文件名和本机位置都不会出现在可见状态里。
     assert_eq!(app.state::<Shell>().snapshot().transfers.len(), 0);
     app.state::<Shell>().set_session(session);
@@ -1838,5 +1842,243 @@ async fn cloud_upload_can_pause_resume_missing_parts_and_cancel_without_creating
             .is_none()
     );
     assert_eq!(f.state().snapshot().transfers, []);
+    f.finish().await;
+}
+
+fn attach_recovery(f: &Fixture) -> PathBuf {
+    let history = attach_history(f);
+    f.state()
+        .attach_transfer_recovery(history.with_file_name("transfer-recovery.json"));
+    let session = f.state().snapshot().session;
+    f.state().set_session(session);
+    history
+}
+
+#[tokio::test]
+async fn recovery_restart_keeps_upload_key_and_requires_matching_relocated_source() {
+    let mut f = fixture().await;
+    let history = attach_recovery(&f);
+    let bytes = payload(3 * 1024 * 1024 + 17);
+    let file = pick(&f.dir, "重开恢复.bin", &bytes).await;
+    let id = f
+        .state()
+        .queue_files(Destination::Drive, vec![file.clone()])
+        .remove(0);
+    let login = f.state().session_cancel();
+    let epoch = *f.state().session_changes().borrow();
+    let input = f
+        .state()
+        .client
+        .upload_prepare(&file, "root", &RequestOptions::new(&login))
+        .await
+        .unwrap();
+    let upload = f
+        .state()
+        .client
+        .upload_create(&input, &RequestOptions::new(&login))
+        .await
+        .unwrap();
+    f.state()
+        .client
+        .upload_part(
+            &upload.id,
+            0,
+            bytes[..2 * 1024 * 1024].to_vec(),
+            &RequestOptions::new(&login),
+        )
+        .await
+        .unwrap();
+    f.state().transfer_session(epoch, &login, |r| {
+        r.begin_send(&id);
+        r.remember_upload(&id, input.clone());
+        r.progress(&id, 0.5);
+        r.pause_upload(&id);
+    });
+    let session = f.state().snapshot().session;
+    let relocated = file.path.with_file_name("已经改名.bin");
+    tokio::fs::rename(&file.path, &relocated).await.unwrap();
+    rebuild_shell(&mut f, &history, session);
+    f.start_receiving();
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    assert_eq!(view_of(&f, &id).phase, TransferPhase::Paused);
+    assert!(f.state().resume_upload(&id));
+    until(
+        "missing source to pause without cancelling its original server intent",
+        || view_of(&f, &id).failure == Some(TransferFailure::FileUnreadable),
+    )
+    .await;
+    let login = f.state().session_cancel();
+    let epoch = *f.state().session_changes().borrow();
+    let wrong = pick(&f.dir, "错误.bin", b"wrong").await;
+    assert_eq!(
+        f.state()
+            .transfer_session(epoch, &login, |r| r.relocate_source(&id, wrong)),
+        Some(false)
+    );
+    let matching = OutgoingFile::open(&relocated, &login).await.unwrap();
+    assert_eq!(
+        f.state()
+            .transfer_session(epoch, &login, |r| r.relocate_source(&id, matching)),
+        Some(true)
+    );
+    assert!(f.state().resume_upload(&id));
+    until("the original upload to finish after restart", || {
+        view_of(&f, &id).phase == TransferPhase::Complete
+    })
+    .await;
+    let files = f
+        .state()
+        .client
+        .drive(&RequestOptions::new(&login))
+        .await
+        .unwrap();
+    assert_eq!(files.items.len(), 1);
+    assert_eq!(on_the_drive(&f, &files.items[0].id).await, bytes);
+    assert_eq!(
+        f.state()
+            .client
+            .upload_create(&input, &RequestOptions::new(&login))
+            .await
+            .unwrap()
+            .id,
+        upload.id
+    );
+    let snapshot = serde_json::to_string(&f.state().snapshot()).unwrap();
+    assert!(!snapshot.contains("sha256"));
+    assert!(!snapshot.contains("已经改名"));
+    assert!(!snapshot.contains("requestId"));
+    f.finish().await;
+}
+
+#[tokio::test]
+async fn recovery_restart_preserves_download_parts_and_never_auto_resumes_or_duplicates_publish() {
+    let mut f = fixture().await;
+    let history = attach_recovery(&f);
+    let bytes = payload(2 * 1024 * 1024 + 13);
+    let source = pick(&f.dir, "取回恢复.bin", &bytes).await;
+    let login = f.state().session_cancel();
+    let epoch = *f.state().session_changes().borrow();
+    let remote = f
+        .state()
+        .client
+        .drive_upload(&source.name(), &source, TransferOptions::new(&login), None)
+        .await
+        .unwrap();
+    let id = f.state().fetch_from_drive(&remote);
+    let inbox = assemble_device::resolve(None, &f.dir.path().join("Downloads"))
+        .await
+        .unwrap();
+    let mut cp = assemble_device::resume::Checkpoint::create(
+        &inbox.directory,
+        &remote.name,
+        remote.size,
+        &remote.sha256,
+    )
+    .await
+    .unwrap();
+    cp.append(&bytes[..1024 * 1024]).await.unwrap();
+    f.state().transfer_session(epoch, &login, |r| {
+        r.begin_receive(&id);
+        r.remember_download(&id, cp.clone());
+        r.pause_upload(&id);
+    });
+    let session = f.state().snapshot().session;
+    rebuild_shell(&mut f, &history, session);
+    f.start_receiving();
+    tokio::time::sleep(Duration::from_millis(70)).await;
+    assert_eq!(view_of(&f, &id).phase, TransferPhase::Paused);
+    assert!(view_of(&f, &id).progress > 0.3);
+    cp.verify().await.unwrap();
+    assert!(!inbox.directory.join(&remote.name).exists());
+    assert!(f.state().resume_upload(&id));
+    until("the resumed download to publish verified bytes", || {
+        view_of(&f, &id).phase == TransferPhase::Complete
+    })
+    .await;
+    assert_eq!(
+        tokio::fs::read(inbox.directory.join(&remote.name))
+            .await
+            .unwrap(),
+        bytes
+    );
+    until("the confirmed checkpoint cleanup", || {
+        !inbox.directory.join(&cp.staging).exists()
+    })
+    .await;
+    let session = f.state().snapshot().session;
+    rebuild_shell(&mut f, &history, session);
+    assert_eq!(view_of(&f, &id).phase, TransferPhase::Complete);
+    assert_eq!(std::fs::read_dir(inbox.directory).unwrap().count(), 1);
+    f.finish().await;
+}
+
+#[tokio::test]
+async fn recovery_write_failure_blocks_work_but_never_keeps_account_data_visible_after_logout() {
+    let f = fixture().await;
+    let history = attach_recovery(&f);
+    let journal = history.with_file_name("transfer-recovery.json");
+    let file = pick(&f.dir, "等待保存.bin", b"abc").await;
+    let id = f
+        .state()
+        .queue_files(Destination::Drive, vec![file])
+        .remove(0);
+    let backup = journal.with_extension("backup");
+    std::fs::rename(&journal, &backup).unwrap();
+    std::fs::create_dir(&journal).unwrap();
+    let login = f.state().session_cancel();
+    let epoch = *f.state().session_changes().borrow();
+    assert!(
+        f.state()
+            .transfer_session(epoch, &login, |r| r.begin_send(&id))
+            .is_none()
+    );
+    assert_eq!(f.state().next_job(), Next::Nothing);
+    assert!(f.state().snapshot().notice.is_some());
+    f.state().end_session();
+    assert_eq!(f.state().snapshot().transfers, []);
+    assert!(backup.is_file());
+    f.finish().await;
+}
+
+#[tokio::test]
+async fn relocated_source_keeps_queued_name_before_initialization() {
+    let f = fixture().await;
+    let file = pick(&f.dir, "原名.bin", b"same original bytes").await;
+    let relocated = file.path.with_file_name("已经改名.bin");
+    tokio::fs::rename(&file.path, &relocated).await.unwrap();
+    let login = f.state().session_cancel();
+    let epoch = *f.state().session_changes().borrow();
+    // 尚未初始化的排队意图也保留原名，重新定位只改变本机源路径。
+    let second = f
+        .state()
+        .transfer_session(epoch, &login, |r| {
+            let id = r.queue(Destination::Drive, vec![file.clone()]).remove(0);
+            r.begin_send(&id);
+            r.source_missing(&id);
+            id
+        })
+        .unwrap();
+    f.start_receiving();
+    let matching = OutgoingFile::open(&relocated, &login).await.unwrap();
+    assert_eq!(
+        f.state()
+            .transfer_session(epoch, &login, |r| r.relocate_source(&second, matching)),
+        Some(true)
+    );
+    assert!(f.state().resume_upload(&second));
+    until(
+        "a relocated uninitialized intent to retain its original name",
+        || view_of(&f, &second).phase == TransferPhase::Complete,
+    )
+    .await;
+    let files = f
+        .state()
+        .client
+        .drive(&RequestOptions::new(&login))
+        .await
+        .unwrap();
+    assert_eq!(files.items.len(), 1);
+    assert!(files.items.iter().all(|entry| entry.name == file.name()));
+
     f.finish().await;
 }

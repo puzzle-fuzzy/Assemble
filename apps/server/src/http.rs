@@ -102,6 +102,26 @@ pub enum ServeError {
     Server(std::io::Error),
 }
 
+fn drive_file_routes() -> Router<Shared> {
+    Router::new()
+        .route(
+            "/v1/drive/files/{id}",
+            get(crate::drive::metadata)
+                .patch(crate::drive::rename)
+                .delete(crate::drive::remove),
+        )
+        .route("/v1/drive/files/{id}/content", get(crate::drive::content))
+        .layer(axum::middleware::from_fn(private_drive))
+}
+
+async fn private_drive(request: axum::extract::Request, next: axum::middleware::Next) -> Response {
+    let mut response = next.run(request).await;
+    response
+        .headers_mut()
+        .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    response
+}
+
 /// 组装全部路由。
 pub fn router(state: Shared) -> Router {
     let browser_routes = Router::new()
@@ -163,11 +183,7 @@ pub fn router(state: Shared) -> Router {
             "/v1/drive/files",
             post(crate::drive::upload).get(crate::drive::list),
         )
-        .route("/v1/drive/files/{id}/content", get(crate::drive::content))
-        .route(
-            "/v1/drive/files/{id}",
-            patch(crate::drive::rename).delete(crate::drive::remove),
-        )
+        .merge(drive_file_routes())
         // 日程规划：日程、提醒与通知。改动带着版本号，新建可以带幂等键。
         .route("/v1/planner", get(crate::planner::planner))
         .route("/v1/schedules", post(crate::planner::schedules::create))
@@ -318,10 +334,30 @@ pub async fn serve_until(
     result
 }
 
-/// 把磁盘上的一个文件当作下载交出去：可以只取一段，文件名与类型按记录里说的。
-///
-/// 发送与云盘的内容都从这里出去，所以两边的下载行为完全一样：
-/// 分段、条件请求、不嗅探类型、以附件的形式保存。
+/// 不可变内容以摘要提供强验证值；调用入口必须先检查当前访问权限。
+pub(crate) async fn verified_file_response(
+    path: &std::path::Path,
+    name: &str,
+    mime: Option<&str>,
+    sha256: &str,
+    headers: &axum::http::HeaderMap,
+) -> Response {
+    let etag = format!("\"{sha256}\"");
+    let mut headers = headers.clone();
+    if let Some(condition) = headers.remove(header::IF_RANGE)
+        && condition.as_bytes() != etag.as_bytes()
+    {
+        // 强验证不匹配（包括弱验证值）时只能返回整个表示。
+        headers.remove(header::RANGE);
+    }
+    let mut response = file_response(path, name, mime, &headers).await;
+    if let Ok(value) = HeaderValue::from_str(&etag) {
+        response.headers_mut().insert(header::ETAG, value);
+    }
+    response
+}
+
+/// 发送与云盘共用分段响应、不嗅探类型及附件文件名。
 pub(crate) async fn file_response(
     path: &std::path::Path,
     name: &str,

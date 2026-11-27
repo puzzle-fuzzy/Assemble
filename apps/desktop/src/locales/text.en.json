@@ -123,13 +123,15 @@
         "sent": "Interrupted"
       },
       "destinationChanged": {
-        "sent": "The destination folder changed. Select the file and upload again."
+        "sent": "The destination folder changed. Select the file and upload again.",
+        "received": "The receive folder changed or is unavailable. Choose a folder and download again."
       },
       "uploadExpired": {
         "sent": "This upload expired or ended. Upload the file again."
       }
     },
-    "paused": "Paused · {{percent}}%"
+    "paused": "Paused · {{percent}}%",
+    "sourceMissing": "Original file unavailable. Locate the same file to continue."
   },
   "errors": {
     "CREDENTIAL_STORE_UNAVAILABLE": "The system keychain is unavailable. Your sign-in could not be saved.",
@@ -158,7 +160,8 @@
     "PLANNER_INPUT": "Some details are invalid and were not saved. Check the title (up to 200 characters), times, and repeat end date.",
     "UPDATE_NOT_READY": "The new version has not been downloaded yet. Try again later.",
     "UPDATE_INSTALL_FAILED": "The new version could not be installed. It will be retried later.",
-    "GENERIC": "The action could not be completed. Try again later."
+    "GENERIC": "The action could not be completed. Try again later.",
+    "SOURCE_MISMATCH": "Select a file with the same contents as the original."
   },
   "notice": {
     "fixed": {
@@ -181,7 +184,9 @@
       "updateApplyFailed": "The new version could not be installed. It will be tried again at the next launch.",
       "remoteCaptureFailed": "Remote screen capture stopped. Check screen recording permission and connect again.",
       "remoteInputFailed": "Remote input stopped. Check Accessibility permission and connect again.",
-      "remoteDisconnected": "The remote connection was interrupted. Input control has stopped. Connect again."
+      "remoteDisconnected": "The remote connection was interrupted. Input control has stopped. Connect again.",
+      "recoveryRead": "Transfer recovery records could not be read. Keep the original records and restart the app.",
+      "recoveryWrite": "Transfer recovery records could not be saved. Check local storage and restart the app."
     },
     "fileTooLarge": "“{{name}}” exceeds 100 MB and cannot be sent.",
     "fileUnreadable": "“{{name}}” cannot be read. It may have been moved, or you may not have permission.",

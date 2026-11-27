@@ -192,7 +192,7 @@ pub struct Draft {
 }
 
 /// 发到哪里去：一台设备，或者云盘。
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Destination {
     Device(DeviceView),
     Drive,
@@ -221,7 +221,7 @@ impl Destination {
 pub const DRIVE_NAME: &str = "云盘";
 
 /// 这台设备要发出去的一个文件。
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Outgoing {
     pub destination: Destination,
     /// 发出去时用的名字、长度与摘要都从这里来。
@@ -232,7 +232,7 @@ pub struct Outgoing {
 }
 
 /// 一条记录是怎么来的。
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum Origin {
     /// 别的设备发来的。重新接收时要核对它的长度与摘要。
     Incoming(SendRecord),
@@ -252,13 +252,14 @@ pub enum Delivery {
 }
 
 /// 一条传输记录：界面看到的 [`TransferView`]，加上只有本机用得上的那部分。
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct TransferRecord {
     pub view: TransferView,
     pub origin: Origin,
     /// 已经试了几次。只用来决定下一次隔多久再试。
     pub attempts: u32,
     /// 下一次可以动手的时间；`None` 表示随时可以。
+    #[serde(skip)]
     pub not_before: Option<Instant>,
     /// 服务端已经知道结局：回执确认过了，或者结局本来就是服务端说的。
     pub settled: bool,
@@ -268,9 +269,20 @@ pub struct TransferRecord {
     pub handle: Option<i32>,
     /// 记录首次出现的时间，只保存在本机历史里。
     pub recorded_at: Timestamp,
+    #[serde(default)]
+    pub download: Option<assemble_device::resume::Checkpoint>,
+    #[serde(default)]
+    pub legacy: bool,
 }
 
 impl TransferRecord {
+    fn cloud(&self) -> bool {
+        !self.legacy
+            && (matches!(self.origin, Origin::FromDrive(_))
+                || self
+                    .outgoing()
+                    .is_some_and(|o| !matches!(o.destination, Destination::Device(_))))
+    }
     fn needs_upload_abort(&self) -> bool {
         !self.settled
             && matches!(
@@ -302,6 +314,8 @@ impl TransferRecord {
             saved_path: None,
             handle: None,
             recorded_at: send.created_at,
+            download: None,
+            legacy: false,
         }
     }
 
@@ -333,6 +347,8 @@ impl TransferRecord {
             saved_path: None,
             handle: None,
             recorded_at: Timestamp::now(),
+            download: None,
+            legacy: false,
         }
     }
 
@@ -361,6 +377,8 @@ impl TransferRecord {
             saved_path: None,
             handle: None,
             recorded_at: Timestamp::now(),
+            download: None,
+            legacy: false,
         }
     }
 
@@ -540,6 +558,9 @@ pub enum Job {
     AbortUpload {
         id: String,
     },
+    CleanupDownload {
+        id: String,
+    },
 }
 
 /// 后台任务现在有没有事可做。
@@ -586,6 +607,19 @@ pub(crate) fn pick(records: &[TransferRecord], now: Instant) -> Next {
         let wait = wait_of(record);
         if wait.is_zero() {
             return Next::Work(Job::AbortUpload {
+                id: record.id().to_owned(),
+            });
+        }
+        soonest = soonest.min(wait);
+    }
+    for record in records
+        .iter()
+        .rev()
+        .filter(|r| r.download.is_some() && !r.view.phase.is_active())
+    {
+        let wait = wait_of(record);
+        if wait.is_zero() {
+            return Next::Work(Job::CleanupDownload {
                 id: record.id().to_owned(),
             });
         }
@@ -653,7 +687,185 @@ impl Default for Registry {
     }
 }
 
+fn valid_recovery(record: &TransferRecord) -> bool {
+    use assemble_protocol::primitives::is_sha256_hex;
+    if record.view.size > 100_000_000 || record.view.target != TransferTarget::Drive {
+        return false;
+    }
+    match &record.origin {
+        Origin::Outgoing(o) => {
+            record.view.direction == Direction::Out
+                && o.send.is_none()
+                && o.file.path.is_absolute()
+                && o.file.size == record.view.size
+                && is_sha256_hex(&o.file.sha256)
+                && record.download.is_none()
+                && o.upload
+                    .as_ref()
+                    .is_none_or(|u| u.valid() && u.size == o.file.size && u.sha256 == o.file.sha256)
+        }
+        Origin::FromDrive(f) => {
+            record.view.direction == Direction::In
+                && record.view.id == format!("drive-{}", f.id)
+                && f.size == record.view.size
+                && is_sha256_hex(&f.sha256)
+                && record.download.as_ref().is_none_or(|c| {
+                    c.directory.is_absolute() && c.size == f.size && c.sha256 == f.sha256
+                })
+        }
+        _ => false,
+    }
+}
+
 impl Registry {
+    /// 恢复队列独立于历史；只导出云盘意图和仍待清理的检查点。
+    pub fn mark_legacy(&mut self, id: &str) -> bool {
+        if let Some(r) = self.record(id)
+            && r.view.phase == TransferPhase::InProgress
+            && r.download.is_none()
+            && r.outgoing().is_none_or(|o| o.upload.is_none())
+        {
+            r.legacy = true;
+            return true;
+        }
+        false
+    }
+    pub fn recovery(&self) -> Vec<TransferRecord> {
+        self.transfers
+            .iter()
+            .filter(|r| {
+                r.cloud()
+                    && (r.view.phase.is_active() || r.needs_upload_abort() || r.download.is_some())
+            })
+            .cloned()
+            .collect()
+    }
+    pub fn detach_recovery(&mut self) {
+        for record in &mut self.transfers {
+            if !matches!(record.origin, Origin::FromDrive(_))
+                && record
+                    .outgoing()
+                    .is_none_or(|o| matches!(o.destination, Destination::Device(_)))
+            {
+                continue;
+            }
+            if record.view.phase.is_active() {
+                record.view.phase = TransferPhase::Failed;
+                record.view.failure = Some(TransferFailure::Interrupted);
+                record.view.progress = 0.0;
+            }
+            record.origin = Origin::History { send: None };
+            record.download = None;
+            record.settled = true;
+            record.not_before = None;
+        }
+    }
+    pub fn restore_recovery(&mut self, records: Vec<TransferRecord>) -> bool {
+        let mut ids = std::collections::HashSet::new();
+        if records.len() > MAX_TRANSFERS
+            || records.iter().any(|r| {
+                !r.cloud()
+                    || r.view.id.is_empty()
+                    || r.view.id.len() > 200
+                    || !ids.insert(r.id())
+                    || !valid_recovery(r)
+            })
+        {
+            return false;
+        }
+        for mut record in records {
+            self.transfers.retain(|r| r.id() != record.id());
+            if record.view.phase.is_active() {
+                record.view.phase = TransferPhase::Paused;
+                if record.view.failure != Some(TransferFailure::FileUnreadable) {
+                    record.view.failure = None;
+                }
+            }
+            record.not_before = None;
+            record.handle = None;
+            if record.view.phase != TransferPhase::Complete {
+                record.saved_path = None;
+            }
+            self.push(record);
+        }
+        true
+    }
+    pub fn download_checkpoint(&mut self, id: &str) -> Option<assemble_device::resume::Checkpoint> {
+        self.record(id)?.download.clone()
+    }
+    pub fn remember_download(
+        &mut self,
+        id: &str,
+        checkpoint: assemble_device::resume::Checkpoint,
+    ) -> bool {
+        let Some(record) = self.record(id) else {
+            return false;
+        };
+        if !matches!(record.origin, Origin::FromDrive(_))
+            || record.view.phase != TransferPhase::InProgress
+        {
+            return false;
+        }
+        record.view.progress = if checkpoint.size == 0 {
+            0.0
+        } else {
+            f64::from(u32::try_from(checkpoint.offset()).unwrap_or(u32::MAX))
+                / f64::from(u32::try_from(checkpoint.size).unwrap_or(u32::MAX))
+                * 0.99
+        };
+        record.download = Some(checkpoint);
+        true
+    }
+    pub fn download_cleaned(&mut self, id: &str) {
+        if let Some(r) = self.record(id) {
+            r.download = None;
+            r.not_before = None;
+        }
+    }
+    pub fn retry_download_cleanup(&mut self, id: &str) {
+        if let Some(r) = self.record(id) {
+            r.attempts = r.attempts.saturating_add(1);
+            r.not_before = Some(Instant::now() + backoff(r.attempts));
+        }
+    }
+    pub fn source_missing(&mut self, id: &str) {
+        if let Some(r) = self.record(id)
+            && r.view.phase == TransferPhase::InProgress
+            && r.cloud()
+        {
+            r.view.phase = TransferPhase::Paused;
+            r.view.failure = Some(TransferFailure::FileUnreadable);
+            r.not_before = None;
+        }
+    }
+    pub fn can_relocate_source(&mut self, id: &str) -> bool {
+        self.record(id).is_some_and(|r| {
+            r.view.phase == TransferPhase::Paused
+                && r.outgoing()
+                    .is_some_and(|o| !matches!(o.destination, Destination::Device(_)))
+        })
+    }
+    pub fn relocate_source(&mut self, id: &str, file: OutgoingFile) -> bool {
+        let Some(record) = self.record(id) else {
+            return false;
+        };
+        if record.view.phase != TransferPhase::Paused {
+            return false;
+        }
+        let Origin::Outgoing(outgoing) = &mut record.origin else {
+            return false;
+        };
+        if matches!(outgoing.destination, Destination::Device(_))
+            || outgoing.file.size != file.size
+            || outgoing.file.sha256 != file.sha256
+        {
+            return false;
+        }
+        // 文件名和原请求保持一致，选择器只修复源路径。
+        outgoing.file.path = file.path;
+        record.view.failure = None;
+        true
+    }
     pub fn may_send(&mut self, id: &str) -> bool {
         self.record(id)
             .is_some_and(|r| r.view.phase == TransferPhase::InProgress && r.outgoing().is_some())
@@ -684,7 +896,7 @@ impl Registry {
         if !matches!(
             record.view.phase,
             TransferPhase::Queued | TransferPhase::InProgress
-        ) || record.outgoing().is_none_or(|o| o.upload.is_none())
+        ) || !record.cloud()
         {
             return false;
         }
@@ -696,12 +908,11 @@ impl Registry {
         let Some(record) = self.record(id) else {
             return false;
         };
-        if record.view.phase != TransferPhase::Paused
-            || record.outgoing().is_none_or(|o| o.upload.is_none())
-        {
+        if record.view.phase != TransferPhase::Paused || !record.cloud() {
             return false;
         }
         record.view.phase = TransferPhase::Queued;
+        record.view.failure = None;
         record.not_before = None;
         true
     }
@@ -752,7 +963,7 @@ impl Registry {
             .map(|record| {
                 let mut view = record.view.clone();
                 view.retryable = record.can_retry();
-                view.resumable = record.outgoing().is_some_and(|o| o.upload.is_some())
+                view.resumable = record.cloud()
                     && matches!(
                         view.phase,
                         TransferPhase::Queued | TransferPhase::InProgress | TransferPhase::Paused
@@ -797,10 +1008,11 @@ impl Registry {
         self.transfers.insert(0, record);
         // 太多了就丢掉最旧的、已经结束的记录。
         if self.transfers.len() > MAX_TRANSFERS
-            && let Some(index) = self
-                .transfers
-                .iter()
-                .rposition(|record| !record.view.phase.is_active() && !record.needs_upload_abort())
+            && let Some(index) = self.transfers.iter().rposition(|record| {
+                !record.view.phase.is_active()
+                    && !record.needs_upload_abort()
+                    && record.download.is_none()
+            })
         {
             self.transfers.remove(index);
         }
@@ -903,7 +1115,9 @@ impl Registry {
             return None;
         }
         record.view.phase = TransferPhase::InProgress;
-        record.view.progress = 0.0;
+        if record.download.is_none() {
+            record.view.progress = 0.0;
+        }
         record.not_before = None;
         record.delivery()
     }
@@ -922,7 +1136,12 @@ impl Registry {
     /// 收到的文件已经存好，回执还没发。
     pub fn receive_completed(&mut self, id: &str, name: &str, path: PathBuf, handle: i32) {
         if let Some(record) = self.record(id)
-            && record.view.phase == TransferPhase::InProgress
+            && (record.view.phase == TransferPhase::InProgress
+                || (matches!(record.origin, Origin::FromDrive(_))
+                    && matches!(
+                        record.view.phase,
+                        TransferPhase::Paused | TransferPhase::Cancelled
+                    )))
         {
             record.view.phase = TransferPhase::Complete;
             // 名字被改写或加了序号时，如实告诉用户文件实际叫什么。
@@ -958,7 +1177,7 @@ impl Registry {
             && record.view.phase == TransferPhase::InProgress
         {
             record.view.phase = TransferPhase::Queued;
-            if record.outgoing().is_none_or(|o| o.upload.is_none()) {
+            if record.download.is_none() {
                 record.view.progress = 0.0;
             }
             record.attempts += 1;
@@ -1104,6 +1323,7 @@ impl Registry {
             return false;
         }
         record.view.phase = TransferPhase::Complete;
+        record.view.failure = None;
         record.view.progress = 1.0;
         record.settled = true;
         record.not_before = None;
@@ -1201,7 +1421,10 @@ impl Registry {
         };
         match (&record.origin, record.view.phase) {
             // 从云盘取回的：停下就行，不欠谁一个交代。
-            (Origin::FromDrive(_), TransferPhase::Queued | TransferPhase::InProgress) => {
+            (
+                Origin::FromDrive(_),
+                TransferPhase::Queued | TransferPhase::InProgress | TransferPhase::Paused,
+            ) => {
                 record.view.phase = TransferPhase::Cancelled;
                 record.view.progress = 0.0;
                 record.settled = true;

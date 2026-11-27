@@ -8,8 +8,11 @@ description = "本机落盘的边界：接收目录、文件名收敛、同名�
 
 [dependencies]
 assemble-transfer.workspace = true
+getrandom.workspace = true
+serde.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
+tokio-util.workspace = true
 
 # 右键菜单写在注册表里；只有 Windows 上才有注册表。
 [target.'cfg(windows)'.dependencies]
@@ -19,7 +22,6 @@ winreg = "0.56"
 assemble-protocol.workspace = true
 serde_json.workspace = true
 tempfile.workspace = true
-tokio-util.workspace = true
 
 [lints]
 workspace = true

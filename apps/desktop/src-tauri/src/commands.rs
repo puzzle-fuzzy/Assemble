@@ -1307,6 +1307,58 @@ pub fn resume_transfer(
     }
 }
 
+/// 只收任务标识；路径来自系统选择器，内容必须匹配原始意图。
+#[tauri::command]
+pub async fn relocate_transfer(
+    app: AppHandle,
+    window: tauri::WebviewWindow,
+    transfer_id: String,
+) -> Result<(), CommandError> {
+    let state = app.state::<AppState>();
+    if !matches!(
+        window.label(),
+        crate::state::MAIN_WINDOW | crate::send_panel::SEND_WINDOW
+    ) || state.device_id().is_none()
+    {
+        return Err(CommandError::local(
+            "FORBIDDEN",
+            "a signed-in transfer window is required",
+        ));
+    }
+    let epoch = *state.session_changes().borrow();
+    let cancel = state.session_cancel();
+    if state.transfer_session(epoch, &cancel, |r| r.can_relocate_source(&transfer_id)) != Some(true)
+    {
+        return Err(CommandError::local(
+            "NOT_RETRYABLE",
+            "this source cannot be relocated",
+        ));
+    }
+    let (chosen, answer) = tokio::sync::oneshot::channel();
+    app.dialog()
+        .file()
+        .set_parent(&window)
+        .pick_file(move |file| {
+            let _ = chosen.send(file.and_then(|f| f.as_path().map(std::path::Path::to_path_buf)));
+        });
+    let Some(path) = answer.await.ok().flatten() else {
+        return Ok(());
+    };
+    let file = assemble_client::OutgoingFile::open(&path, &cancel)
+        .await
+        .map_err(|_| CommandError::local("SOURCE_MISMATCH", "the original file is required"))?;
+    if state.transfer_session(epoch, &cancel, |r| r.relocate_source(&transfer_id, file))
+        == Some(true)
+    {
+        Ok(())
+    } else {
+        Err(CommandError::local(
+            "SOURCE_MISMATCH",
+            "the selected file does not match the original",
+        ))
+    }
+}
+
 /// 在文件的右键菜单里加入（或去掉）"用 Assemble 发送"。
 /// 只有 Windows 上的打包运行支持；别的地方调用会得到 `UNSUPPORTED`。
 #[tauri::command]

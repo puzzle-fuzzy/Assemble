@@ -30,8 +30,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::planner::{Compose, PlannerView};
 use crate::registry::{
-    Cancellation, Delivery, Destination, DraftView, Next, Registry, TransferFailure, TransferView,
-    Updated,
+    Cancellation, Destination, DraftView, Next, Registry, TransferFailure, TransferView, Updated,
 };
 
 /// 一次进行中的登录尝试。
@@ -562,6 +561,7 @@ pub struct AppState<R: tauri::Runtime = tauri::Wry> {
     pub trash_queries: crate::drive_tree::Queries,
     pub remote_runtime: crate::remote::Runtime,
     transfer_history: Mutex<crate::transfer_history::HistoryStore>,
+    recovery: Mutex<crate::transfer_recovery::RecoveryStore>,
     system_inbox: Mutex<crate::system_notifications::Inbox>,
     app: AppHandle<R>,
     pub client: Client,
@@ -608,6 +608,7 @@ impl<R: tauri::Runtime> AppState<R> {
         );
         Self {
             transfer_history: Mutex::new(crate::transfer_history::HistoryStore::new(&origin)),
+            recovery: Mutex::new(crate::transfer_recovery::RecoveryStore::new(&origin)),
             file_previews: crate::drive_preview::Previews::default(),
             drive_queries: crate::drive_tree::Queries::default(),
             trash_queries: crate::drive_tree::Queries::default(),
@@ -732,14 +733,24 @@ impl<R: tauri::Runtime> AppState<R> {
             .transfer_history
             .lock()
             .unwrap_or_else(PoisonError::into_inner);
+        let mut recovery = self.recovery.lock().unwrap_or_else(PoisonError::into_inner);
         let ((), snapshot) = revise(
             &self.view,
             |view| {
-                if let SessionView::SignedIn { account, .. } = &session {
+                if let SessionView::SignedIn { account, device } = &session {
                     if history.restore(&account.id, &mut view.registry).is_err() {
                         tracing::warn!("the transfer history could not be restored");
                     }
+                    if recovery
+                        .restore(&account.id, &device.id, &mut view.registry)
+                        .is_err()
+                    {
+                        view.notice = Some(Notice::error(
+                            "无法读取传输恢复记录，请保留原文件并重新启动应用。",
+                        ));
+                    }
                 } else {
+                    recovery.detach();
                     history.detach();
                     view.registry.clear();
                 }
@@ -747,6 +758,7 @@ impl<R: tauri::Runtime> AppState<R> {
             },
             || launch_at_login,
         );
+        drop(recovery);
         drop(history);
         if let Some(snapshot) = snapshot {
             let _ = self
@@ -755,6 +767,19 @@ impl<R: tauri::Runtime> AppState<R> {
         }
     }
 
+    pub fn attach_transfer_recovery(&self, path: PathBuf) {
+        if self
+            .recovery
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .attach(path)
+            .is_err()
+        {
+            self.set_notice(Some(Notice::error(
+                "无法读取传输恢复记录，请保留原文件并重新启动应用。",
+            )));
+        }
+    }
     pub fn attach_transfer_history(
         &self,
         path: PathBuf,
@@ -790,8 +815,16 @@ impl<R: tauri::Runtime> AppState<R> {
             .transfer_history
             .lock()
             .unwrap_or_else(PoisonError::into_inner);
+        let mut recovery = self.recovery.lock().unwrap_or_else(PoisonError::into_inner);
         let view = self.view.lock().unwrap_or_else(PoisonError::into_inner);
+        recovery.persist(&view.registry)?;
         history.persist(&view.registry)
+    }
+    pub fn protected_staging(&self) -> Option<Vec<(PathBuf, String)>> {
+        self.recovery
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .protected_staging()
     }
 
     pub fn clear_transfer_history(&self) -> Result<(), assemble_store::json::StoreError> {
@@ -934,6 +967,10 @@ impl<R: tauri::Runtime> AppState<R> {
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .detach();
+        self.recovery
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .detach();
         self.session_cancel
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
@@ -997,10 +1034,18 @@ impl<R: tauri::Runtime> AppState<R> {
             .transfer_history
             .lock()
             .unwrap_or_else(PoisonError::into_inner);
+        let mut recovery = self.recovery.lock().unwrap_or_else(PoisonError::into_inner);
         let (result, snapshot) = revise(
             &self.view,
             |view| {
+                let before = view.registry.clone();
                 let result = change(&mut view.registry);
+                if recovery.active() && recovery.persist(&view.registry).is_err() {
+                    view.registry = before;
+                    view.notice = Some(Notice::error(
+                        "无法保存传输恢复记录，请检查本机存储后重新启动应用。",
+                    ));
+                }
                 if history.persist(&view.registry).is_err() {
                     tracing::warn!("the transfer history could not be saved");
                 }
@@ -1008,6 +1053,7 @@ impl<R: tauri::Runtime> AppState<R> {
             },
             || launch_at_login,
         );
+        drop(recovery);
         drop(history);
         // 没有窗口时什么都不做。
         if let Some(snapshot) = snapshot {
@@ -1032,7 +1078,16 @@ impl<R: tauri::Runtime> AppState<R> {
             }
         });
         self.transfers_changed.notify_one();
-        result
+        if self
+            .recovery
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .ready()
+        {
+            result
+        } else {
+            None
+        }
     }
     pub fn pause_upload(&self, id: &str) -> bool {
         let paused = self.registry(|registry| registry.pause_upload(id));
@@ -1084,6 +1139,14 @@ impl<R: tauri::Runtime> AppState<R> {
 
     /// 后台任务该做的下一件事。
     pub fn next_job(&self) -> Next {
+        if !self
+            .recovery
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .ready()
+        {
+            return Next::Nothing;
+        }
         self.registry(|registry| registry.next_job(Instant::now()))
     }
 
@@ -1093,7 +1156,8 @@ impl<R: tauri::Runtime> AppState<R> {
     }
 
     /// 领取一个排着队的文件去收：别的设备发来的，或者云盘里的。
-    pub fn begin_receive(&self, id: &str) -> Option<Delivery> {
+    #[cfg(test)]
+    pub fn begin_receive(&self, id: &str) -> Option<crate::registry::Delivery> {
         self.registry(|registry| registry.begin_receive(id))
     }
 

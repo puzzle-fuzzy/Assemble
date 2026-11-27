@@ -129,6 +129,8 @@ impl Registry {
                 // 系统通知的句柄只在本次进程里有效，不能沿用旧进程的编号。
                 handle: None,
                 recorded_at: entry.recorded_at,
+                download: None,
+                legacy: false,
             });
         }
         result.next_local = result.next_local.max(history.next_local.min(u64::MAX - 1));

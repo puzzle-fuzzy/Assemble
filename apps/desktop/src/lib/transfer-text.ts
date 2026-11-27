@@ -54,6 +54,8 @@ export function transferStatus(transfer: TransferView): string {
     case "inProgress":
       return text("transfer.progress", { state: state("running"), percent });
     case "paused":
+      if (transfer.failure === "fileUnreadable")
+        return text("transfer.sourceMissing");
       return text("transfer.paused", { percent });
     case "waiting":
       // 只有发给设备的文件才有"等对方接收"这一步。

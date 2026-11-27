@@ -1527,3 +1527,94 @@ fn progress_fractions_are_bounded() {
     assert_eq!(TRANSFER_STALL, Duration::from_secs(60));
     assert_eq!(DEFAULT_TIMEOUT, Duration::from_secs(15));
 }
+
+#[tokio::test]
+async fn bounded_download_ranges_validate_real_http_before_releasing_bytes() {
+    use assemble_protocol::{drive::DriveFile, primitives::Timestamp};
+    let sha = "a".repeat(64);
+    let file = DriveFile {
+        id: "file-range".into(),
+        name: "资料.bin".into(),
+        size: 6,
+        sha256: sha.clone(),
+        mime_type: None,
+        created_at: Timestamp::now(),
+    };
+    for (status, etag, range, body, valid) in [
+        (
+            StatusCode::PARTIAL_CONTENT,
+            format!("\"{sha}\""),
+            "bytes 3-5/6",
+            "def",
+            true,
+        ),
+        (
+            StatusCode::OK,
+            format!("\"{sha}\""),
+            "bytes 3-5/6",
+            "abcdef",
+            false,
+        ),
+        (
+            StatusCode::PARTIAL_CONTENT,
+            format!("W/\"{sha}\""),
+            "bytes 3-5/6",
+            "def",
+            false,
+        ),
+        (
+            StatusCode::PARTIAL_CONTENT,
+            format!("\"{sha}\""),
+            "bytes 0-2/6",
+            "abc",
+            false,
+        ),
+        (
+            StatusCode::PARTIAL_CONTENT,
+            format!("\"{sha}\""),
+            "bytes 3-5/6",
+            "de",
+            false,
+        ),
+        (
+            StatusCode::PARTIAL_CONTENT,
+            format!("\"{sha}\""),
+            "bytes 3-5/6",
+            "defg",
+            false,
+        ),
+        (
+            StatusCode::RANGE_NOT_SATISFIABLE,
+            format!("\"{sha}\""),
+            "bytes */6",
+            "",
+            false,
+        ),
+    ] {
+        let server = Server::start(with(move |_| {
+            Response::builder()
+                .status(status)
+                .header(header::ETAG, &etag)
+                .header(header::CONTENT_RANGE, range)
+                .body(Body::from(body))
+                .unwrap()
+        }))
+        .await;
+        let client = server.client();
+        let cancel = CancellationToken::new();
+        let answer = client
+            .drive_chunk(&file, 3, &RequestOptions::new(&cancel))
+            .await;
+        if valid {
+            assert_eq!(answer.unwrap(), Some(b"def".to_vec()));
+        } else {
+            assert!(answer.is_err());
+        }
+        let requests = server.requests(1).await;
+        assert_eq!(requests[0].header("range"), Some("bytes=3-5"));
+        assert_eq!(
+            requests[0].header("if-range"),
+            Some(format!("\"{sha}\"").as_str())
+        );
+    }
+}

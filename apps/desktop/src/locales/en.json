@@ -140,7 +140,8 @@
   "mainNavigation": "Main navigation",
   "accountMenu": "Account menu",
   "openNavigationMenu": "Open navigation menu",
-  "pauseUploadFor": "Pause upload of {{name}}",
-  "resumeUploadFor": "Resume upload of {{name}}",
-  "cancelUploadFor": "Cancel upload of {{name}}"
+  "pauseUploadFor": "Pause transfer of {{name}}",
+  "resumeUploadFor": "Resume transfer of {{name}}",
+  "cancelUploadFor": "Cancel transfer of {{name}}",
+  "relocateTransferFor": "Locate original file {{name}}"
 }

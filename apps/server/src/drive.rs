@@ -364,13 +364,25 @@ pub async fn content(
     request: Request,
 ) -> Result<Response, ApiError> {
     let row = load(&state.pool, &identity.account_id, &id).await?;
-    Ok(http::file_response(
+    Ok(http::verified_file_response(
         &state.blobs.path_for(&row.sha256),
         &row.name,
         row.mime_type.as_deref(),
+        &row.sha256,
         request.headers(),
     )
     .await)
+}
+
+/// 恢复下载和发布前重新确认活动文件及当前权限。
+pub async fn metadata(
+    State(state): State<Shared>,
+    identity: Identity,
+    Path(id): Path<String>,
+) -> Result<Json<DriveFile>, ApiError> {
+    Ok(Json(
+        load(&state.pool, &identity.account_id, &id).await?.view(),
+    ))
 }
 
 /// `PATCH /v1/drive/files/{id}`：改名字。

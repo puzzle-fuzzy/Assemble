@@ -17,6 +17,7 @@
 
 pub mod inbox;
 pub mod receive;
+pub mod resume;
 pub mod send_menu;
 
 pub use inbox::{Inbox, ReceiveFailure, Received, accept, resolve, sweep_staging};

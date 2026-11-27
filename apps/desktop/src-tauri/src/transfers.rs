@@ -116,6 +116,7 @@ pub async fn run<R: tauri::Runtime>(app: tauri::AppHandle<R>) {
             Job::Send { id } => send(&state, &id).await,
             Job::Settle { id } => settle(&state, &id).await,
             Job::AbortUpload { id } => uploads::abort(&state, &id).await,
+            Job::CleanupDownload { id } => cloud_downloads::cleanup(&state, &id).await,
         }
     }
 }
@@ -147,6 +148,9 @@ async fn sweep<R: tauri::Runtime>(state: &AppState<R>) {
         folders.push(configured.clone());
     }
     for folder in folders {
+        if let Some(protected) = state.protected_staging() {
+            let _ = assemble_device::resume::sweep(&folder, &protected).await;
+        }
         match sweep_staging(&folder).await {
             Ok(0) => {}
             Ok(count) => tracing::info!(
@@ -222,12 +226,21 @@ enum Outcome {
 async fn receive<R: tauri::Runtime>(state: &AppState<R>, id: &str) {
     // 先记下这一次登录：领取之后登录可能就换了，那时不该再收上一个账户的文件。
     let login = state.session_cancel();
-    let Some(delivery) = state.begin_receive(id) else {
+    let epoch = *state.session_changes().borrow();
+    let Some(delivery) = state
+        .transfer_session(epoch, &login, |r| r.begin_receive(id))
+        .flatten()
+    else {
         return;
     };
     let claim = claim(&delivery);
     let cancel = login.child_token();
     let _tracked = state.track_transfer(id, cancel.clone());
+
+    if let Delivery::FromDrive(file) = &delivery {
+        cloud_downloads::receive(state, id, file, epoch, &login, &cancel).await;
+        return;
+    }
 
     match pull(state, &claim, &cancel).await {
         Outcome::Saved {
@@ -310,6 +323,13 @@ async fn pull<R: tauri::Runtime>(
     claim: &Claim,
     cancel: &CancellationToken,
 ) -> Outcome {
+    let epoch = *state.session_changes().borrow();
+    let login = state.session_cancel();
+    let transfer_id = if claim.on_drive {
+        format!("drive-{}", claim.id)
+    } else {
+        claim.id.clone()
+    };
     // 连默认目录都准备不出来：是这台电脑的问题。
     let Ok(inbox) = resolve(
         state.settings().receive_directory.as_deref(),
@@ -322,7 +342,9 @@ async fn pull<R: tauri::Runtime>(
 
     for attempt in 0..2 {
         let mut report = |progress: TransferProgress| {
-            state.transfer_progress(&claim.id, progress.fraction());
+            state.transfer_session(epoch, &login, |r| {
+                r.progress(&transfer_id, progress.fraction());
+            });
         };
         let options = TransferOptions::new(cancel);
         let fetched = if claim.on_drive {
@@ -511,6 +533,12 @@ async fn send<R: tauri::Runtime>(state: &AppState<R>, id: &str) {
         // 用户取消了：记录已经标好了。文件其实到没到服务端，由对账去确认。
         Err(ClientError::Cancelled) => return,
         Err(error) if error.is_unauthorized() => return session::revoked(state),
+        Err(ClientError::LocalSource)
+            if !matches!(outgoing.destination, Destination::Device(_)) =>
+        {
+            state.transfer_session(epoch, &login, |r| r.source_missing(id));
+            return;
+        }
         Err(error) => {
             match refusal(&error) {
                 Some(failure) => {
@@ -653,4 +681,5 @@ pub fn retry_send<R: tauri::Runtime>(state: &AppState<R>, id: &str) -> bool {
 #[cfg(test)]
 mod tests;
 
+mod cloud_downloads;
 mod uploads;

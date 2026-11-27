@@ -26,6 +26,7 @@ mod session;
 mod state;
 mod system_notifications;
 mod transfer_history;
+mod transfer_recovery;
 mod transfers;
 mod tray;
 mod update;
@@ -235,6 +236,7 @@ fn handlers() -> impl Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool + Send + Sync +
         commands::close_send_panel,
         commands::cancel_transfer,
         commands::retry_transfer,
+        commands::relocate_transfer,
         commands::pause_transfer,
         commands::resume_transfer,
         commands::open_main,
@@ -308,6 +310,9 @@ fn start(
         notifier,
     ));
     let downloads_handle = handle.clone();
+    handle
+        .state::<AppState>()
+        .attach_transfer_recovery(handle.path().app_data_dir()?.join("transfer-recovery.json"));
     handle
         .state::<AppState>()
         .attach_transfer_history(handle.path().app_data_dir()?.join("transfers.json"))?;

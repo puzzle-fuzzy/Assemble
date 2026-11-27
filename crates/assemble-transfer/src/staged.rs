@@ -64,6 +64,28 @@ pub struct SealedStaging {
 }
 
 impl SealedStaging {
+    /// 恢复任务必须拒绝不支持原子无覆盖发布的文件系统，不能退回检查后改名。
+    pub async fn publish_strict(mut self) -> Result<PublishOutcome, TransferError> {
+        let outcome = match fs::hard_link(&self.path, &self.destination) {
+            Ok(()) => PublishOutcome::Published,
+            Err(error) if error.kind() == ErrorKind::AlreadyExists => {
+                if !existing_file_matches(&self.destination, self.size, &self.sha256).await? {
+                    return Err(TransferError::FileExists);
+                }
+                PublishOutcome::AlreadyPresent
+            }
+            Err(error) => return Err(error.into()),
+        };
+        match fs::remove_file(&self.path) {
+            Ok(()) => self.cleanup = false,
+            Err(error) if error.kind() == ErrorKind::NotFound => self.cleanup = false,
+            // 目标已经原子发布；清理暂存名失败不能把真实完成说成失败。
+            Err(error) => {
+                tracing::warn!(kind=?error.kind(),"staging name left behind after strict publish");
+            }
+        }
+        Ok(outcome)
+    }
     /// 最终要出现的目标位置。
     pub fn destination(&self) -> &Path {
         &self.destination

@@ -140,7 +140,8 @@
   "mainNavigation": "主功能",
   "accountMenu": "账户菜单",
   "openNavigationMenu": "打开功能菜单",
-  "pauseUploadFor": "暂停上传 {{name}}",
-  "resumeUploadFor": "继续上传 {{name}}",
-  "cancelUploadFor": "取消上传 {{name}}"
+  "pauseUploadFor": "暂停传输 {{name}}",
+  "resumeUploadFor": "继续传输 {{name}}",
+  "cancelUploadFor": "取消传输 {{name}}",
+  "relocateTransferFor": "重新选择原文件 {{name}}"
 }

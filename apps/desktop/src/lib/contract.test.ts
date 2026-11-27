@@ -170,7 +170,13 @@ describe("状态契约样本", () => {
       "quotaExceeded",
     ];
     for (const transfer of transfers) {
-      expect(transfer.failure !== null).toBe(transfer.phase === "failed");
+      if (transfer.phase === "paused") {
+        expect(
+          transfer.failure === null || transfer.failure === "fileUnreadable",
+        ).toBe(true);
+      } else {
+        expect(transfer.failure !== null).toBe(transfer.phase === "failed");
+      }
       expect(transfer.retryable).toBe(
         transfer.phase === "failed" &&
           transfer.direction === "out" &&

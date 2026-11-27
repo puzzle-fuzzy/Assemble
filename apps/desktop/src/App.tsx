@@ -1323,6 +1323,9 @@ function TransferRow({
           ) : null}
         </div>
       </div>
+      <span role="status" className="sr-only">
+        {transfer.phase === "complete" ? `${transfer.name}: ${status}` : ""}
+      </span>
       {["inProgress", "queued", "paused"].includes(transfer.phase) ? (
         <Progress
           aria-label={uiText("transferProgressFor", { value0: transfer.name })}
