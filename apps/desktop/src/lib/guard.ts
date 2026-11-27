@@ -310,6 +310,7 @@ export function isSessionView(value: unknown): value is SessionView {
 
 import { isSystemNotifications } from "@assemble/ui/lib/system-notifications";
 import { isDownloadsView } from "./downloads";
+import { isRemoteView } from "./remote";
 
 export function isSnapshot(value: unknown): value is Snapshot {
   if (!isRecord(value)) return false;
@@ -318,6 +319,7 @@ export function isSnapshot(value: unknown): value is Snapshot {
     isRecord(service) &&
     isSystemNotifications(value.systemNotifications) &&
     isDownloadsView(value.downloads) &&
+    isRemoteView(value.remote) &&
     isServiceTarget(service.target) &&
     (service.reachable === null || typeof service.reachable === "boolean") &&
     isStreamState(service.stream) &&

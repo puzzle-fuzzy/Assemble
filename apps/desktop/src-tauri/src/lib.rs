@@ -16,6 +16,7 @@ mod launch;
 mod notify;
 mod planner;
 mod registry;
+mod remote;
 mod runtime;
 mod send_menu;
 mod send_panel;
@@ -94,6 +95,7 @@ pub fn run() -> Result<(), StartupError> {
                     // 关窗口只是收起；真正退出走托盘菜单。
                     MAIN_WINDOW => {
                         api.prevent_close();
+                        remote::close_window(window.app_handle());
                         let _ = window.hide();
                     }
                     // 发送面板关了就真的关掉；挑好却没发的文件不再留着。
@@ -122,6 +124,7 @@ fn context<R: tauri::Runtime>() -> tauri::Context<R> {
 /// 先停入口，再等待下载和原生宿主连接收尾，最后删除本实例的临时桥接凭据。
 fn stop(app: &tauri::AppHandle) {
     app.state::<AppState>().lifetime.cancel();
+    tauri::async_runtime::block_on(app.state::<AppState>().remote_runtime.stop(None));
     let bridge = app.try_state::<Option<assemble_download::browser::BrowserServer>>();
     if let Some(bridge) = bridge.as_ref().and_then(|state| state.inner().as_ref()) {
         bridge.cancel();
@@ -141,6 +144,12 @@ fn stop(app: &tauri::AppHandle) {
 // 命令清单单独集中，启动函数只保留生命周期编排。
 fn handlers() -> impl Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool + Send + Sync + 'static {
     tauri::generate_handler![
+        commands::remote_request,
+        commands::remote_approve,
+        commands::remote_end,
+        commands::remote_poll,
+        commands::remote_inputs,
+        commands::remote_fullscreen,
         commands::memo_list,
         commands::memo_get,
         commands::memo_create,
@@ -427,6 +436,7 @@ impl Write for SinkWriter<'_> {
 
 fn init_logging(sink: Sink) {
     use tracing_subscriber::EnvFilter;
+    use tracing_subscriber::prelude::*;
 
     let default_level = if cfg!(debug_assertions) {
         "debug"
@@ -437,16 +447,53 @@ fn init_logging(sink: Sink) {
         EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(default_level));
     // 同时写标准错误和一个限大小的本机文件。两边都不记录任何凭据——这是各处写日志时
     // 守的规矩。不带颜色：文件里留着那串转义码没法读。
-    let _ = tracing_subscriber::fmt()
-        .with_env_filter(filter)
-        .with_ansi(false)
-        .with_writer(sink)
+    // enigo 的 debug 日志会逐字打印输入；即使环境显式要求 trace 也不能记录它。
+    let _ = tracing_subscriber::registry()
+        .with(filter)
+        .with(tracing_subscriber::filter::filter_fn(|meta| {
+            allowed_log_target(meta.target())
+        }))
+        .with(
+            tracing_subscriber::fmt::layer()
+                .with_ansi(false)
+                .with_writer(sink),
+        )
         .try_init();
+}
+
+fn allowed_log_target(target: &str) -> bool {
+    target != "enigo" && !target.starts_with("enigo::")
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn remote_input_library_logs_are_filtered_even_at_trace() {
+        use tracing_subscriber::prelude::*;
+        let dir = tempfile::tempdir().unwrap();
+        let sink = Sink::default();
+        sink.attach(LogFile::open(dir.path(), "desktop.log"));
+        let subscriber = tracing_subscriber::registry()
+            .with(tracing_subscriber::EnvFilter::new("trace"))
+            .with(tracing_subscriber::filter::filter_fn(|meta| {
+                allowed_log_target(meta.target())
+            }))
+            .with(
+                tracing_subscriber::fmt::layer()
+                    .with_ansi(false)
+                    .with_writer(sink),
+            );
+        tracing::subscriber::with_default(subscriber, || {
+            tracing::debug!(target:"enigo::win::win_impl","synthetic-input-must-not-appear");
+            tracing::info!(target:"enigo","synthetic-input-must-not-appear");
+            tracing::info!(target:"assemble_desktop_lib","normal-diagnostic");
+        });
+        let logged = std::fs::read_to_string(dir.path().join("desktop.log")).unwrap();
+        assert!(!logged.contains("synthetic-input"));
+        assert!(logged.contains("normal-diagnostic"));
+    }
 
     #[test]
     fn what_reaches_stderr_also_reaches_the_file_once_it_is_attached() {

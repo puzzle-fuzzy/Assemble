@@ -50,7 +50,7 @@ impl Client {
         options: &RequestOptions<'_>,
     ) -> Result<T, ClientError> {
         let response = self
-            .media_request(method, path, query, body, options)
+            .json_request(method, path, query, body, options)
             .await?;
         let bytes = bounded_body(response, 8 * 1024 * 1024, options).await?;
         serde_json::from_slice(&bytes).map_err(|_| ClientError::InvalidResponse)
@@ -381,7 +381,7 @@ impl Client {
             return Err(ClientError::InvalidRequest);
         }
         let response = self
-            .media_request(
+            .json_request(
                 Method::GET,
                 &format!("/v1/media/assets/{}/content", segment(asset_id)?),
                 vec![("variant", variant.into())],
@@ -426,7 +426,7 @@ impl Client {
     }
 }
 
-async fn bounded_body(
+pub(crate) async fn bounded_body(
     mut response: reqwest::Response,
     maximum: usize,
     options: &RequestOptions<'_>,

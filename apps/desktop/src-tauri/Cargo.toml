@@ -22,6 +22,7 @@ assemble-schedule.workspace = true
 chrono.workspace = true
 assemble-device.workspace = true
 assemble-protocol.workspace = true
+assemble-remote = { workspace = true, features = ["native"] }
 assemble-store.workspace = true
 assemble-transfer.workspace = true
 futures-util.workspace = true
@@ -43,6 +44,8 @@ tracing.workspace = true
 tracing-subscriber.workspace = true
 
 [dev-dependencies]
+reqwest = { workspace = true, features = ["cookies", "form"] }
+sha2.workspace = true
 # 接收流水线与自动更新的测试对着真实的服务端跑：服务端库与 Tauri 的模拟应用只在这时用。
 assemble-server.workspace = true
 # 自动更新的测试用自己的一对钥匙给更新包签名。

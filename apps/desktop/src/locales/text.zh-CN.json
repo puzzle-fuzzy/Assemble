@@ -94,13 +94,28 @@
         "received": "已取消",
         "sent": "已取消"
       },
-      "deviceOffline": { "sent": "那台设备刚刚下线了" },
-      "tooLarge": { "sent": "超过 100 MB" },
-      "fileUnreadable": { "sent": "文件读不出来，可能已被移走或改动" },
-      "rejected": { "sent": "服务端拒绝了这次发送，请重新选择文件" },
-      "quotaExceeded": { "sent": "云盘空间不够" },
-      "vanished": { "received": "云盘里已经没有这个文件了" },
-      "interrupted": { "received": "已中断", "sent": "已中断" }
+      "deviceOffline": {
+        "sent": "那台设备刚刚下线了"
+      },
+      "tooLarge": {
+        "sent": "超过 100 MB"
+      },
+      "fileUnreadable": {
+        "sent": "文件读不出来，可能已被移走或改动"
+      },
+      "rejected": {
+        "sent": "服务端拒绝了这次发送，请重新选择文件"
+      },
+      "quotaExceeded": {
+        "sent": "云盘空间不够"
+      },
+      "vanished": {
+        "received": "云盘里已经没有这个文件了"
+      },
+      "interrupted": {
+        "received": "已中断",
+        "sent": "已中断"
+      }
     }
   },
   "errors": {
@@ -150,7 +165,9 @@
       "signInToUpload": "请先登录，再往云盘里存文件。",
       "receiveFolderFallback": "原来设置的接收文件夹不可用，这个文件已存到默认位置。",
       "launchAtLoginFailed": "暂时无法完成开机启动的设置，请稍后重试。",
-      "updateApplyFailed": "新版本没能装上，下一次启动时会再试一次。"
+      "updateApplyFailed": "新版本没能装上，下一次启动时会再试一次。",
+      "remoteCaptureFailed": "远程屏幕采集失败，请检查屏幕录制权限后重新连接。",
+      "remoteInputFailed": "远程输入已停止，请检查辅助功能权限后重新连接。"
     },
     "fileTooLarge": "「{{name}}」超过 100 MB，发不出去。",
     "fileUnreadable": "「{{name}}」读不出来，可能已被移走或没有权限。",

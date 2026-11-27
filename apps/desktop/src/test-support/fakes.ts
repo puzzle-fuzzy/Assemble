@@ -180,6 +180,7 @@ export function snapshot(overrides: Overrides = {}): Snapshot {
   return {
     service: service(),
     systemNotifications: { items: [], available: true },
+    remote: { sessions: [] },
     downloads: {
       assistantAllowed: true,
       browserTaskId: null,

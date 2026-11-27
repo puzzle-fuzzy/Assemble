@@ -11,6 +11,7 @@ import memoSamples from "../../contract/memos.json";
 type InvokeCall = { command: string; args: Record<string, unknown> };
 
 const STATE: Snapshot = {
+  remote: { sessions: [] },
   systemNotifications: { items: [], available: true },
   downloads: {
     assistantAllowed: true,
@@ -74,12 +75,54 @@ const {
   bridge,
   mediaBridge,
   memoBridge,
+  remoteBridge,
   run,
   toBridgeError,
 } = await import("@/lib/bridge");
 const { messageFor } = await import("@/lib/messages");
 
 describe("桥接", () => {
+  test("远程具名命令核验响应，不向界面暴露凭据或路径", async () => {
+    const session = {
+      id: "remote-1",
+      controllerId: "controller",
+      controllerName: "Windows",
+      hostId: "host",
+      hostName: "Mac",
+      phase: "pending",
+      createdAt: "2026-11-27T00:00:00Z",
+    };
+    respondWith = session;
+    await remoteBridge.request("host");
+    expect(calls.at(-1)).toEqual({
+      command: "remote_request",
+      args: { hostId: "host" },
+    });
+    await remoteBridge.approve("remote-1");
+    expect(calls.at(-1)?.command).toBe("remote_approve");
+    respondWith = { session, frame: null, inputs: [] };
+    await remoteBridge.poll("remote-1", 0);
+    expect(calls.at(-1)).toEqual({
+      command: "remote_poll",
+      args: { id: "remote-1", frameAfter: 0 },
+    });
+    respondWith = {
+      session,
+      frame: { jpeg: "https://untrusted.test" },
+      inputs: [],
+    };
+    await expect(remoteBridge.poll("remote-1", 0)).rejects.toMatchObject({
+      code: "INVALID_STATE",
+    });
+    await remoteBridge.inputs("remote-1", [
+      { sequence: 1, input: { type: "releaseAll" } },
+    ]);
+    expect(calls.at(-1)?.command).toBe("remote_inputs");
+    await remoteBridge.end("remote-1");
+    expect(calls.at(-1)?.command).toBe("remote_end");
+    await remoteBridge.fullscreen(false);
+    expect(calls.at(-1)?.command).toBe("remote_fullscreen");
+  });
   test("备忘录契约与具名桥接：复制只传标识，失败响应与取消不交给页面", async () => {
     expect(isMemo(memoSamples.memo)).toBe(true);
     expect(isMemoList(memoSamples.listing)).toBe(true);

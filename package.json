@@ -32,7 +32,7 @@
     "rust:fmt:write": "cargo fmt --all",
     "rust:clippy": "cargo clippy --workspace --all-targets -- -D warnings",
     "rust:test": "cargo test --workspace --no-fail-fast",
-    "rust:clippy:windows": "cargo clippy -p assemble-protocol -p assemble-transfer -p assemble-store -p assemble-device -p assemble-schedule --target x86_64-pc-windows-msvc --all-targets -- -D warnings",
+    "rust:clippy:windows": "cargo clippy -p assemble-protocol -p assemble-transfer -p assemble-store -p assemble-device -p assemble-schedule -p assemble-remote --features assemble-remote/native --target x86_64-pc-windows-msvc --all-targets -- -D warnings",
     "verify": "bun scripts/verify/run.ts",
     "admin:dev": "bun run --filter @assemble/admin dev",
     "ui:server": "bun run --filter @assemble/ui build:server",

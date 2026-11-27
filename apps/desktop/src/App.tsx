@@ -53,6 +53,7 @@ import {
   type MediaBridge,
   mediaBridge,
   memoBridge,
+  remoteBridge,
   toBridgeError,
 } from "@/lib/bridge";
 import { formatBuildInfo } from "@/lib/build-info";
@@ -66,6 +67,8 @@ import { memoText } from "@/lib/memo-i18n";
 import type { MemoBridge } from "@/lib/memos";
 import { messageFor } from "@/lib/messages";
 import { noticeText } from "@/lib/notice-text";
+import type { RemoteBridge } from "@/lib/remote";
+import { remoteText } from "@/lib/remote-i18n";
 import {
   formatSize,
   formatSpace,
@@ -83,6 +86,7 @@ import type {
 } from "@/lib/types";
 import { updateStatus } from "@/lib/update-text";
 import { cn } from "@/lib/utils";
+import { RemoteBanner, RemotePage } from "@/RemotePage";
 
 const MemosPage = lazy(() =>
   import("@/MemosPage").then((module) => ({ default: module.MemosPage })),
@@ -101,6 +105,7 @@ export interface AppProps {
   bridge?: Bridge;
   mediaBridge?: MediaBridge;
   memoBridge?: MemoBridge;
+  remoteBridge?: RemoteBridge;
 }
 
 const LOGIN_TIMEOUT_MESSAGE = "等待浏览器登录超时，请重试。";
@@ -109,6 +114,7 @@ export function App({
   bridge: source = bridge,
   mediaBridge: mediaSource = mediaBridge,
   memoBridge: memoSource = memoBridge,
+  remoteBridge: remoteSource = remoteBridge,
 }: AppProps) {
   useDesktopTranslation();
   const { resolvedTheme } = useDisplayPreferences();
@@ -316,6 +322,17 @@ export function App({
                   <AlertDescription>{loadError}</AlertDescription>
                 </Alert>
               ) : null}
+              <RemoteBanner
+                key={accountId ?? "remote-signedOut"}
+                source={remoteSource}
+                view={snapshot?.remote ?? { sessions: [] }}
+                ownId={
+                  snapshot?.session.phase === "signedIn"
+                    ? snapshot.session.device.id
+                    : null
+                }
+                onOpen={() => navigate("remote")}
+              />
               {snapshot?.notice ? (
                 <NoticeLine
                   notice={snapshot.notice}
@@ -432,6 +449,28 @@ export function App({
                   onError={setActionError}
                 />
               </section>
+              {section === "remote" && phase === "signedIn" ? (
+                <section id="view-remote" aria-label={remoteText("title")}>
+                  <RemotePage
+                    key={accountId ?? "signedOut"}
+                    source={remoteSource}
+                    view={snapshot?.remote ?? { sessions: [] }}
+                    devices={snapshot?.devices ?? []}
+                    ownId={
+                      snapshot?.session.phase === "signedIn"
+                        ? snapshot.session.device.id
+                        : null
+                    }
+                    onSendFiles={() => {
+                      void source
+                        .startSend()
+                        .catch((error: unknown) =>
+                          toast.error(messageFor(toBridgeError(error))),
+                        );
+                    }}
+                  />
+                </section>
+              ) : null}
               {section === "memos" ? (
                 <section id="view-memos" aria-label={memoText("title")}>
                   <Suspense

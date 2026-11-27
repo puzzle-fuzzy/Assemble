@@ -32,6 +32,7 @@ use crate::web::LoginThrottle;
 /// 所有请求处理器共享的状态。
 #[derive(Debug)]
 pub struct AppState {
+    pub remote: crate::remote::RemoteSessions,
     pub pool: SqlitePool,
     pub config: Arc<Config>,
     /// 谁在线。只在内存里：服务端重启后所有设备都算离线。
@@ -55,6 +56,7 @@ pub struct AppState {
 impl AppState {
     pub fn new(pool: SqlitePool, config: Config) -> Self {
         Self {
+            remote: crate::remote::RemoteSessions::default(),
             media: Arc::new(crate::media::jobs::Runtime::new(config.media.clone())),
             storage_monitor: crate::storage::Monitor::default(),
             dht: Arc::new(crate::dht::runtime::Runtime::default()),
@@ -110,6 +112,7 @@ pub fn router(state: Shared) -> Router {
         .merge(crate::admin::routes())
         .merge(crate::media::routes())
         .merge(crate::memos::routes())
+        .merge(crate::remote::routes())
         // 桌面端自动更新：清单和更新包，谁都能读
         .merge(crate::updates::routes())
         .merge(crate::admin_assets::routes(&state.config.admin_assets_dir))

@@ -62,6 +62,7 @@ pub fn start(state: Shared, stop: CancellationToken) {
 
 /// 跑一轮。服务端启动时也调一次，把上次运行留下的尾巴处理掉。
 pub async fn run_once(state: &Shared) -> Result<Report, sqlx::Error> {
+    state.remote.prune();
     let mut report = Report::default();
     let pool = &state.pool;
     let now = Timestamp::now().as_millis();

@@ -97,7 +97,12 @@ pub(crate) enum Decision {
 
 /// 现在有没有事不能被打断：用户挑好了文件还没发、有文件正在排队或收发、有网络下载在跑。
 pub(crate) fn busy(snapshot: &Snapshot) -> bool {
-    snapshot.draft.is_some()
+    snapshot
+        .remote
+        .sessions
+        .iter()
+        .any(|session| session.phase != assemble_protocol::remote::RemotePhase::Ended)
+        || snapshot.draft.is_some()
         || snapshot.transfers.iter().any(|transfer| {
             matches!(
                 transfer.phase,
@@ -617,6 +622,23 @@ mod tests {
         snapshot.transfers = Vec::new();
         snapshot.draft = samples[10].draft.clone();
         assert!(busy(&snapshot));
+    }
+
+    #[test]
+    fn remote_sessions_prevent_idle_restart() {
+        let samples: Vec<Snapshot> =
+            serde_json::from_str(include_str!("../../contract/snapshots.json")).unwrap();
+        for mut sample in samples
+            .into_iter()
+            .filter(|s| !s.remote.sessions.is_empty())
+        {
+            sample.draft = None;
+            sample.transfers.clear();
+            sample.downloads.tasks.clear();
+            assert!(busy(&sample));
+            sample.remote.sessions.clear();
+            assert!(!busy(&sample));
+        }
     }
 
     #[test]

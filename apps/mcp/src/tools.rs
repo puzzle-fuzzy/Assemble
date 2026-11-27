@@ -37,6 +37,26 @@ const MOST_DAYS: u32 = 31;
 /// 没说看几天时的默认值。
 const DEFAULT_DAYS: u32 = 7;
 
+/// 助手只列出可选电脑，实际连接和批准仍由桌面端的人操作。
+pub async fn remote_devices(call: &Call<'_>) -> Result<String, Failure> {
+    let devices = call
+        .client()
+        .devices(&call.options())
+        .await
+        .map_err(|e| explain(&e))?;
+    let desktops: Vec<_> = devices
+        .into_iter()
+        .filter(|d| {
+            matches!(
+                d.platform,
+                assemble_protocol::primitives::Platform::Windows
+                    | assemble_protocol::primitives::Platform::Macos
+            )
+        })
+        .collect();
+    serde_json::to_string(&desktops).map_err(|_| Failure::Other("远程设备名单无法编码。".into()))
+}
+
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct MemoListInput {

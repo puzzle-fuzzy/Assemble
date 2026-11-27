@@ -772,7 +772,7 @@ impl Client {
 
     // ---- 发送管线 ----
 
-    pub(crate) async fn media_request(
+    pub(crate) async fn json_request(
         &self,
         method: Method,
         path: &str,

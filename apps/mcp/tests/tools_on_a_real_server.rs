@@ -73,6 +73,17 @@ impl World {
     }
 }
 
+#[tokio::test]
+async fn remote_device_tool_lists_only_the_current_accounts_desktops() {
+    let mut world = world().await;
+    let listing = tools::remote_devices(&world.call()).await.unwrap();
+    let devices: Vec<assemble_protocol::device::Device> = serde_json::from_str(&listing).unwrap();
+    assert_eq!(devices.len(), 1);
+    assert_eq!(devices[0].id, world.signed_in.device.id);
+    assert!(!listing.contains("token"));
+    world.server.stop().await;
+}
+
 fn input(value: serde_json::Value) -> ScheduleInput {
     serde_json::from_value(value).unwrap()
 }

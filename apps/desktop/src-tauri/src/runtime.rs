@@ -34,6 +34,7 @@ const SHORT_TIMEOUT: Duration = Duration::from_secs(6);
 
 /// 启动后台循环。
 pub fn start(app: &AppHandle) {
+    crate::remote::start(app);
     let health = app.clone();
     tauri::async_runtime::spawn(async move { watch_health(health).await });
     let events = app.clone();

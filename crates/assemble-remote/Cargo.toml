@@ -1,0 +1,27 @@
+[package]
+name = "assemble-remote"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+description = "远程桌面的输入边界、坐标和本机采集适配"
+
+[[example]]
+name = "capture"
+required-features = ["native"]
+
+[features]
+native = ["dep:enigo", "dep:xcap", "dep:image", "dep:base64"]
+
+[dependencies]
+assemble-protocol.workspace = true
+thiserror.workspace = true
+base64 = { workspace = true, optional = true }
+image = { workspace = true, optional = true }
+
+[target.'cfg(any(target_os = "windows", target_os = "macos"))'.dependencies]
+enigo = { version = "=0.6.1", optional = true }
+xcap = { version = "=0.9.10", optional = true }
+
+[lints]
+workspace = true

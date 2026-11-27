@@ -61,6 +61,8 @@
 
 ## 服务端
 
+远程桌面新增 `assemble-protocol::remote` 与 `assemble-remote`：前者只放协议，后者放独立输入规则及可选的 xcap/enigo 原生适配。服务端 `remote` 仅保留同账户会话、最新 JPEG 和有界输入，所有接口逐次核验双方设备；桌面 `remote` 编排明确批准、采集线程和退出收尾。快照仅包含会话元数据，图像由主窗口的具名轮询命令获取，凭据始终留在 Rust。方案和边界见[决策 0017](decisions/0017-remote-desktop-first-batch.md)。
+
 ### 启动与配置
 
 没有配置文件，全部来自环境变量（业务配置用 `ASSEMBLE_`，邮件与 OAuth 使用 `SMTP_*`、`GITHUB_*`）。没有配置文件、必须显式给出数据目录与对外地址，是因为猜错它们的后果比启动失败更糟。
@@ -448,7 +450,7 @@ target/release/assemble-mcp print-config zcode --name "ZCode 的助手"
 
 真实启动抓到过自动化测试没暴露的缺陷——比如服务端启动十秒后自己退出、给离线设备发大文件时发送方只看到"连不上服务"。所以涉及应用壳、服务端或生命周期的改动，要真的把它们跑起来。
 
-仓库是公开的，每次推送由持续集成在 macOS 与 Windows 上各跑一遍 `bun run verify`（`.github/workflows/verify.yml`）。Windows 那一栏是服务端、客户端、助手入口与桌面应用壳唯一的 Windows 环境：五个基础库之外，它们的 Windows 目标在这台 Mac 上检查不了。2026-11-24 它跑起来的第一天，两个平台加起来抓到了十几处只在那边才有的问题，逐条记在决策 0002 的"从真实启动中学到的"里。
+仓库是公开的，每次推送由持续集成在 macOS 与 Windows 上各跑一遍 `bun run verify`（`.github/workflows/verify.yml`）。Windows 那一栏是服务端、客户端、助手入口与桌面应用壳唯一的 Windows 环境：六个基础库之外，它们的 Windows 目标在这台 Mac 上检查不了。2026-11-24 它跑起来的第一天，两个平台加起来抓到了十几处只在那边才有的问题，逐条记在决策 0002 的"从真实启动中学到的"里。
 
 ## DHT 管理端观测
 

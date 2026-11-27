@@ -242,6 +242,7 @@ export interface ServiceView {
 }
 
 export interface Snapshot {
+  remote: import("./remote").RemoteView;
   systemNotifications: import("@assemble/ui/lib/system-notifications").SystemNotifications;
   downloads: import("./downloads").DownloadsView;
   service: ServiceView;

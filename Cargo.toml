@@ -16,6 +16,7 @@ assemble-device = { path = "crates/assemble-device" }
 assemble-dht = { path = "crates/assemble-dht" }
 assemble-download = { path = "crates/assemble-download" }
 assemble-protocol = { path = "crates/assemble-protocol" }
+assemble-remote = { path = "crates/assemble-remote" }
 assemble-schedule = { path = "crates/assemble-schedule" }
 assemble-server = { path = "apps/server" }
 assemble-store = { path = "crates/assemble-store" }

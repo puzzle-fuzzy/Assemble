@@ -18,6 +18,7 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 
 import { isSnapshot, isUpdateView } from "@/lib/guard";
 import { isMemo, isMemoList, type MemoBridge } from "@/lib/memos";
+import { isRemotePoll, isRemoteSession, type RemoteBridge } from "@/lib/remote";
 import type {
   LaunchState,
   ReminderContent,
@@ -364,6 +365,19 @@ export const memoBridge: MemoBridge = {
     await run(() => invoke<void>("memo_copy", { id }));
     signal?.throwIfAborted();
   },
+};
+
+export const remoteBridge: RemoteBridge = {
+  request: (hostId) =>
+    mediaInvoke("remote_request", { hostId }, isRemoteSession),
+  approve: (id) => mediaInvoke("remote_approve", { id }, isRemoteSession),
+  end: (id) => run(() => invoke<void>("remote_end", { id })),
+  poll: (id, frameAfter) =>
+    mediaInvoke("remote_poll", { id, frameAfter }, isRemotePoll),
+  inputs: (id, events) =>
+    run(() => invoke<void>("remote_inputs", { id, events })),
+  fullscreen: (enabled) =>
+    run(() => invoke<void>("remote_fullscreen", { enabled })),
 };
 
 async function mediaInvoke<T>(

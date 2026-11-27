@@ -314,6 +314,8 @@ impl UpdateView {
 #[serde(rename_all = "camelCase")]
 pub struct Snapshot {
     #[serde(default)]
+    pub remote: assemble_protocol::remote::RemoteView,
+    #[serde(default)]
     pub system_notifications: assemble_protocol::system_notifications::SystemNotifications,
     pub downloads: assemble_protocol::downloads::DownloadsView,
     pub service: ServiceView,
@@ -444,6 +446,7 @@ pub struct Stored {
 /// 界面能看到的那部分状态。改动都经过 [`AppState::update`]。
 #[derive(Debug, Clone, PartialEq)]
 pub struct View {
+    remote: assemble_protocol::remote::RemoteView,
     downloads: assemble_protocol::downloads::DownloadsView,
     service: ServiceView,
     session: SessionView,
@@ -494,6 +497,7 @@ impl View {
     /// 这份状态交给界面的样子。`launch_at_login` 由调用方提供：它要问系统，不该在持锁时问。
     fn snapshot(&self, launch_at_login: LaunchState) -> Snapshot {
         Snapshot {
+            remote: self.remote.clone(),
             system_notifications:
                 assemble_protocol::system_notifications::SystemNotifications::default(),
             downloads: self.downloads.clone(),
@@ -517,6 +521,7 @@ impl View {
 
     fn initial(origin: &ServerOrigin) -> Self {
         Self {
+            remote: assemble_protocol::remote::RemoteView::default(),
             downloads: assemble_protocol::downloads::DownloadsView::default(),
             service: ServiceView {
                 target: ServiceTarget::for_origin(origin),
@@ -544,6 +549,7 @@ impl View {
 }
 
 pub struct AppState<R: tauri::Runtime = tauri::Wry> {
+    pub remote_runtime: crate::remote::Runtime,
     transfer_history: Mutex<crate::transfer_history::HistoryStore>,
     system_inbox: Mutex<crate::system_notifications::Inbox>,
     app: AppHandle<R>,
@@ -591,6 +597,7 @@ impl<R: tauri::Runtime> AppState<R> {
         );
         Self {
             transfer_history: Mutex::new(crate::transfer_history::HistoryStore::new(&origin)),
+            remote_runtime: crate::remote::Runtime::default(),
             system_inbox: Mutex::new(crate::system_notifications::Inbox::default()),
             app,
             client,
@@ -695,6 +702,10 @@ impl<R: tauri::Runtime> AppState<R> {
 
     pub fn set_reachable(&self, reachable: bool) {
         self.update(|view| view.service.reachable = Some(reachable));
+    }
+
+    pub fn set_remote(&self, remote: assemble_protocol::remote::RemoteView) {
+        self.update(|view| view.remote = remote);
     }
 
     pub fn set_stream(&self, stream: StreamState) {
@@ -900,6 +911,8 @@ impl<R: tauri::Runtime> AppState<R> {
 
     /// 结束登录会话：后台任务停下来，与账户有关的状态清空。
     pub fn end_session(&self) {
+        self.remote_runtime.cancel_all();
+        self.set_remote(assemble_protocol::remote::RemoteView::default());
         self.transfer_history
             .lock()
             .unwrap_or_else(PoisonError::into_inner)

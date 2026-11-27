@@ -15,6 +15,135 @@ use crate::session;
 use crate::state::{AppState, LaunchState, launch_state};
 use crate::tray;
 
+fn remote_window(
+    window: &tauri::WebviewWindow,
+    state: &AppState,
+) -> Result<MediaCall, CommandError> {
+    if window.label() != crate::state::MAIN_WINDOW || state.device_id().is_none() {
+        return Err(CommandError::local(
+            "FORBIDDEN",
+            "remote desktop requires the signed-in main window",
+        ));
+    }
+    Ok(MediaCall::new(state))
+}
+
+#[tauri::command]
+pub fn remote_fullscreen(
+    app: AppHandle,
+    window: tauri::WebviewWindow,
+    enabled: bool,
+) -> Result<(), CommandError> {
+    if window.label() != crate::state::MAIN_WINDOW {
+        return Err(CommandError::local(
+            "FORBIDDEN",
+            "fullscreen requires the main window",
+        ));
+    }
+    if enabled {
+        remote_window(&window, &app.state::<AppState>())?;
+    }
+    window
+        .set_fullscreen(enabled)
+        .map_err(|_| CommandError::local("WINDOW_UNAVAILABLE", "fullscreen could not be changed"))
+}
+
+#[tauri::command]
+pub async fn remote_request(
+    app: AppHandle,
+    window: tauri::WebviewWindow,
+    host_id: String,
+) -> Result<assemble_protocol::remote::RemoteSession, CommandError> {
+    let state = app.state::<AppState>();
+    let call = remote_window(&window, &state)?;
+    call.finish(
+        &state,
+        state
+            .client
+            .remote_request(
+                &assemble_protocol::remote::RemoteRequest { host_id },
+                &crate::remote::options(&call.cancel),
+            )
+            .await,
+    )
+}
+#[tauri::command]
+pub async fn remote_approve(
+    app: AppHandle,
+    window: tauri::WebviewWindow,
+    id: String,
+) -> Result<assemble_protocol::remote::RemoteSession, CommandError> {
+    let state = app.state::<AppState>();
+    let call = remote_window(&window, &state)?;
+    let result = crate::remote::approve(&app, id).await;
+    if call.cancel.is_cancelled() {
+        return Err(CommandError::local("CANCELLED", "account session changed"));
+    }
+    result
+}
+#[tauri::command]
+pub async fn remote_end(
+    app: AppHandle,
+    window: tauri::WebviewWindow,
+    id: String,
+) -> Result<(), CommandError> {
+    let state = app.state::<AppState>();
+    let call = remote_window(&window, &state)?;
+    state.remote_runtime.stop(Some(&id)).await;
+    call.finish(
+        &state,
+        state
+            .client
+            .remote_end(&id, &crate::remote::options(&call.cancel))
+            .await,
+    )
+}
+#[tauri::command]
+pub async fn remote_poll(
+    app: AppHandle,
+    window: tauri::WebviewWindow,
+    id: String,
+    frame_after: u32,
+) -> Result<assemble_protocol::remote::RemotePoll, CommandError> {
+    let state = app.state::<AppState>();
+    let call = remote_window(&window, &state)?;
+    let result = call.finish(
+        &state,
+        state
+            .client
+            .remote_poll(&id, 0, frame_after, &crate::remote::options(&call.cancel))
+            .await,
+    )?;
+    if state.device_id().as_deref() != Some(result.session.controller_id.as_str()) {
+        return Err(CommandError::local(
+            "FORBIDDEN",
+            "only the controller may view frames",
+        ));
+    }
+    Ok(result)
+}
+#[tauri::command]
+pub async fn remote_inputs(
+    app: AppHandle,
+    window: tauri::WebviewWindow,
+    id: String,
+    events: Vec<assemble_protocol::remote::SequencedInput>,
+) -> Result<(), CommandError> {
+    let state = app.state::<AppState>();
+    let call = remote_window(&window, &state)?;
+    call.finish(
+        &state,
+        state
+            .client
+            .remote_inputs(
+                &id,
+                &assemble_protocol::remote::RemoteBatch { events },
+                &crate::remote::options(&call.cancel),
+            )
+            .await,
+    )
+}
+
 #[derive(Debug, Clone, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CommandError {

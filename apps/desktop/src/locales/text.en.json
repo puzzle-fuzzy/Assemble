@@ -100,17 +100,28 @@
         "received": "Cancelled",
         "sent": "Cancelled"
       },
-      "deviceOffline": { "sent": "The other device just went offline" },
-      "tooLarge": { "sent": "The file exceeds 100 MB" },
+      "deviceOffline": {
+        "sent": "The other device just went offline"
+      },
+      "tooLarge": {
+        "sent": "The file exceeds 100 MB"
+      },
       "fileUnreadable": {
         "sent": "The file cannot be read; it may have been moved or changed"
       },
       "rejected": {
         "sent": "The server rejected this transfer; select the file again"
       },
-      "quotaExceeded": { "sent": "There is not enough cloud storage" },
-      "vanished": { "received": "This file is no longer in the cloud drive" },
-      "interrupted": { "received": "Interrupted", "sent": "Interrupted" }
+      "quotaExceeded": {
+        "sent": "There is not enough cloud storage"
+      },
+      "vanished": {
+        "received": "This file is no longer in the cloud drive"
+      },
+      "interrupted": {
+        "received": "Interrupted",
+        "sent": "Interrupted"
+      }
     }
   },
   "errors": {
@@ -160,7 +171,9 @@
       "signInToUpload": "Sign in before uploading files to the cloud drive.",
       "receiveFolderFallback": "The receive folder is unavailable. This file was saved to the default location.",
       "launchAtLoginFailed": "Launch at login could not be changed. Try again later.",
-      "updateApplyFailed": "The new version could not be installed. It will be tried again at the next launch."
+      "updateApplyFailed": "The new version could not be installed. It will be tried again at the next launch.",
+      "remoteCaptureFailed": "Remote screen capture stopped. Check screen recording permission and connect again.",
+      "remoteInputFailed": "Remote input stopped. Check Accessibility permission and connect again."
     },
     "fileTooLarge": "“{{name}}” exceeds 100 MB and cannot be sent.",
     "fileUnreadable": "“{{name}}” cannot be read. It may have been moved, or you may not have permission.",

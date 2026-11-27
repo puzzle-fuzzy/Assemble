@@ -1,5 +1,9 @@
 # 开发约定
 
+## 代码导航与工具
+
+CodeGraph 可用时，跨模块修改优先用它查符号、调用和影响范围，再以源码与测试确认。用户 2026-11-27 明确授权：缺少索引时，可自行运行 `codegraph init`、`codegraph index`，不必再次询问。按任务收益选工具；存在更合适的专用 MCP 或 API 时及时切换，例如微信开发者工具优先用其 MCP，避免固守通用 computer-use。
+
 ## 这个仓库是什么
 
 Assemble 是一个全新的、自带服务端的项目，用来完全替换 jarvis：服务端、桌面端与给助手用的对话入口都在这个仓库里，Rust 负责业务规则，Tauri 2 只做窗口与系统集成。优先级是文件传输与日程规划。
@@ -40,7 +44,7 @@ Assemble 是一个全新的、自带服务端的项目，用来完全替换 jarv
 
 ## 验证
 
-- 提交前运行 `bun run verify`。它覆盖 Biome、类型检查、界面与工具脚本的测试、前端构建、Rust 格式、静态检查与全部 Rust 测试（含服务端）。装了 Windows 的 Rust 目标时（`rust-toolchain.toml` 里列了它），它还会给能在本机上检查的五个基础库做一次针对 Windows 目标的静态检查。
+- 提交前运行 `bun run verify`。它覆盖 Biome、类型检查、界面与工具脚本的测试、前端构建、Rust 格式、静态检查与全部 Rust 测试（含服务端）。装了 Windows 的 Rust 目标时（`rust-toolchain.toml` 里列了它），它还会给能在本机上检查的六个基础库做一次针对 Windows 目标的静态检查。
 - **iOS 应用**的核心包用 `bun run ios:test` 测（Swift，只在装了 Xcode 的 Mac 上）。`bun run ios:simulate` 在模拟器里对着一次性的本机服务端把配对登录、名单、到点通知、点开定位整条路走一遍，也只在 Mac 上；它驱动的是模拟器里的界面，不动人的鼠标键盘。
 - **工具链钉在 `rust-toolchain.toml`**，工作区的 `rust-version` 与 `deploy/Dockerfile` 里的基础镜像和它一致；升级时三处一起改。稳定版每六周更新一次，新版本会带来新的检查，钉住之后验证只会在有人主动升级时才可能变红。不要在流程里另外安装"最新的稳定版"。
 - **仓库是公开的**：<https://github.com/puzzle-fuzzy/Assemble>。每次推送，持续集成在 macOS 与 Windows 上各跑一遍 `bun run verify`，并构建服务端镜像；打标签或手动触发时产出安装包。推完去看结果：<https://github.com/puzzle-fuzzy/Assemble/actions>。
