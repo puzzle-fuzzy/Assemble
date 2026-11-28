@@ -7,13 +7,23 @@ use assemble_dht::{
 };
 use assemble_store::secret::SecretString;
 use futures_util::{StreamExt, stream::FuturesUnordered};
-use std::{collections::HashSet, path::Path, sync::Arc, time::Duration};
+use std::{
+    collections::{HashMap, HashSet},
+    net::SocketAddr,
+    path::Path,
+    sync::Arc,
+    time::{Duration, Instant},
+};
 use tokio::sync::{Mutex, mpsc};
 use tokio_util::sync::CancellationToken;
 
 pub(crate) struct Discovery {
     engine: Mutex<Option<Engine>>,
     handle: Handle,
+    resolving: tokio::sync::Semaphore,
+    recent: std::sync::Mutex<HashMap<InfoHash, (Instant, Vec<SocketAddr>)>>,
+    #[cfg(any(test, feature = "test-fixtures"))]
+    metadata_seeds: Vec<SocketAddr>,
     pub allowlist_url: String,
 }
 impl Discovery {
@@ -52,9 +62,85 @@ impl Discovery {
         .map_err(|_| DownloadError::Network)?;
         Ok(Arc::new(Self {
             handle: engine.handle.clone(),
+            resolving: tokio::sync::Semaphore::new(2),
+            recent: std::sync::Mutex::new(HashMap::new()),
+            #[cfg(any(test, feature = "test-fixtures"))]
+            metadata_seeds: Vec::new(),
             engine: Mutex::new(Some(engine)),
             allowlist_url,
         }))
+    }
+    #[cfg(any(test, feature = "test-fixtures"))]
+    pub async fn for_test(root: &Path, metadata_seeds: Vec<SocketAddr>) -> Result<Arc<Self>> {
+        tokio::fs::create_dir_all(root)
+            .await
+            .map_err(|_| DownloadError::Storage)?;
+        let path = root.join("fixture-peers.txt");
+        tokio::fs::write(
+            &path,
+            format!("{}fixture4:127.0.0.1-127.0.0.1\n", public_ranges()),
+        )
+        .await
+        .map_err(|_| DownloadError::Storage)?;
+        let engine = Engine::start(
+            "127.0.0.1:0".parse().map_err(|_| DownloadError::Network)?,
+            false,
+            Vec::new(),
+        )
+        .await
+        .map_err(|_| DownloadError::Network)?;
+        Ok(Arc::new(Self {
+            handle: engine.handle.clone(),
+            resolving: tokio::sync::Semaphore::new(2),
+            engine: Mutex::new(Some(engine)),
+            recent: std::sync::Mutex::new(HashMap::new()),
+            metadata_seeds,
+            allowlist_url: url::Url::from_file_path(path)
+                .map_err(|()| DownloadError::Storage)?
+                .into(),
+        }))
+    }
+    fn cached(&self, hash: InfoHash) -> Vec<SocketAddr> {
+        let mut recent = self
+            .recent
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        recent.retain(|_, (at, _)| at.elapsed() < Duration::from_secs(600));
+        recent.get(&hash).map_or_default(|(_, peers)| peers.clone())
+    }
+    fn remember(&self, hash: InfoHash, peers: Vec<SocketAddr>) {
+        let mut recent = self
+            .recent
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if !recent.contains_key(&hash)
+            && recent.len() >= 128
+            && let Some(old) = recent
+                .iter()
+                .min_by_key(|(_, (at, _))| *at)
+                .map(|(hash, _)| *hash)
+        {
+            recent.remove(&old);
+        }
+        recent.insert(hash, (Instant::now(), peers));
+    }
+    /// 解析时已完成握手的节点必须衔接到下载。服务重启没有缓存时，重新走安全元数据发现。
+    pub async fn confirmed_peers(
+        &self,
+        source: &SecretString,
+        options: &engine::Options,
+        cancel: &CancellationToken,
+    ) -> Result<Vec<SocketAddr>> {
+        let hash = librqbit::Magnet::parse(source.expose())
+            .map_err(|_| DownloadError::InvalidSource)?
+            .as_id20()
+            .ok_or(DownloadError::Unsupported)?
+            .0;
+        let peers = self.cached(hash);
+        if !peers.is_empty() {
+            return Ok(peers);
+        }
+        Ok(self.prepare(source.clone(), options, cancel).await?.peers)
     }
     pub async fn shutdown(&self) {
         if let Some(engine) = self.engine.lock().await.take() {
@@ -72,7 +158,7 @@ impl Discovery {
             .await
             .map_err(|_| DownloadError::Network)?;
         let deadline = tokio::time::Instant::now() + Duration::from_secs(4);
-        let mut peers = Vec::new();
+        let mut peers = self.cached(hash);
         loop {
             tokio::select! {
                 ()=cancel.cancelled()=>return Err(DownloadError::Cancelled),
@@ -88,6 +174,7 @@ impl Discovery {
         options: &engine::Options,
         cancel: &CancellationToken,
     ) -> Result<engine::Prepared> {
+        let _slot = tokio::select! {()=cancel.cancelled()=>return Err(DownloadError::Cancelled),slot=self.resolving.acquire()=>slot.map_err(|_|DownloadError::Cancelled)?};
         let hash = librqbit::Magnet::parse(source.expose())
             .map_err(|_| DownloadError::InvalidSource)?
             .as_id20()
@@ -101,6 +188,11 @@ impl Discovery {
         )
         .await
         .map_err(|_| DownloadError::MetadataUnavailable)??;
+        #[cfg(any(test, feature = "test-fixtures"))]
+        let initial = initial
+            .into_iter()
+            .chain(self.metadata_seeds.iter().copied())
+            .collect::<Vec<_>>();
         tracing::info!(
             initial_peers = initial.len(),
             "hosted magnet discovery started"
@@ -119,10 +211,13 @@ impl Discovery {
                 let Some(peer) = pending.pop_front() else {
                     break;
                 };
-                if !assemble_dht::public_address(peer) || !tried.insert(peer) {
+                if (!options.local_test && !assemble_dht::public_address(peer))
+                    || !tried.insert(peer)
+                {
                     continue;
                 }
-                workers.push(wire::fetch_raw(hash, peer, true, hints.clone()));
+                let hints = hints.clone();
+                workers.push(async move { (peer, read_info(hash, peer, hints, options).await) });
             }
             tokio::select! {
                 ()=cancel.cancelled()=>return Err(DownloadError::Cancelled),
@@ -130,12 +225,14 @@ impl Discovery {
                     tracing::info!(tried_peers=tried.len(),elapsed_ms=started.elapsed().as_millis(),"hosted magnet metadata timed out");
                     return Err(DownloadError::MetadataUnavailable);
                 },
-                Some(reply)=workers.next(),if !workers.is_empty()=>{
+                Some((peer,reply))=workers.next(),if !workers.is_empty()=>{
                     if let Ok((_,raw))=reply {
                         let mut encoded=b"d4:info".to_vec();encoded.extend_from_slice(&raw);encoded.push(b'e');
                         let (metadata,files,title)=engine::describe(&encoded)?;
+                        let peers=crate::magnet::trackers::bounded_peers(std::iter::once(peer).chain(tried.iter().copied()).collect()).into_iter().take(64).collect::<Vec<_>>();
+                        self.remember(hash,peers.clone());
                         tracing::info!(tried_peers=tried.len(),elapsed_ms=started.elapsed().as_millis(),"hosted magnet metadata resolved");
-                        return Ok(engine::Prepared{source,metadata,files,title,peers:tried.into_iter().collect(),remote:None});
+                        return Ok(engine::Prepared{source,metadata,files,title,peers,remote:None});
                     }
                 },
                 Some(peer)=hinted.recv()=>{if pending.len()<128 {pending.push_back(peer);}},
@@ -143,6 +240,22 @@ impl Discovery {
             }
         }
     }
+}
+
+async fn read_info(
+    hash: InfoHash,
+    peer: SocketAddr,
+    hints: mpsc::Sender<SocketAddr>,
+    options: &engine::Options,
+) -> std::result::Result<(assemble_dht::metadata::Metadata, Vec<u8>), wire::Failure> {
+    #[cfg(any(test, feature = "test-fixtures"))]
+    if options.local_test {
+        return wire::fetch_raw_for_test(hash, peer, true, hints).await;
+    }
+    if options.local_test {
+        return Err(wire::Failure::Connection);
+    }
+    wire::fetch_raw(hash, peer, true, hints).await
 }
 
 // 使用正向列表：映射 IPv4、回环、内网、保留与文档范围都不进入 BT 数据连接。

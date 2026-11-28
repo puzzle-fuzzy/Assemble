@@ -7,7 +7,7 @@ publish.workspace = true
 description = "本机 M3U8、抖音视频与磁力下载核心"
 
 [features]
-test-fixtures = []
+test-fixtures = ["assemble-dht/test-fixtures"]
 
 [dependencies]
 assemble-client.workspace = true
@@ -38,6 +38,7 @@ tracing.workspace = true
 url.workspace = true
 
 [dev-dependencies]
+assemble-dht = { workspace = true, features = ["test-fixtures"] }
 axum.workspace = true
 sha1.workspace = true
 tracing-subscriber.workspace = true

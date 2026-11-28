@@ -58,7 +58,28 @@ pub async fn fetch_raw(
     pex: bool,
     hints: mpsc::Sender<SocketAddr>,
 ) -> Result<(Metadata, Vec<u8>), Failure> {
-    if !public_address(peer) {
+    fetch_raw_inner(hash, peer, pex, hints, false).await
+}
+
+/// 仅供真实回环协议测试；生产构建没有绕过公网边界的入口。
+#[cfg(any(test, feature = "test-fixtures"))]
+pub async fn fetch_raw_for_test(
+    hash: InfoHash,
+    peer: SocketAddr,
+    pex: bool,
+    hints: mpsc::Sender<SocketAddr>,
+) -> Result<(Metadata, Vec<u8>), Failure> {
+    fetch_raw_inner(hash, peer, pex, hints, true).await
+}
+
+async fn fetch_raw_inner(
+    hash: InfoHash,
+    peer: SocketAddr,
+    pex: bool,
+    hints: mpsc::Sender<SocketAddr>,
+    local_test: bool,
+) -> Result<(Metadata, Vec<u8>), Failure> {
+    if !local_test && !public_address(peer) {
         return Err(Failure::Connection);
     }
     tokio::time::timeout(Duration::from_secs(15), async {

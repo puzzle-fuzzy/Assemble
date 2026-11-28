@@ -151,7 +151,11 @@ async fn real_metadata_selection_pause_lease_restart_and_verified_https() {
             .state
             .magnets
             .service
-            .set(Service::for_test(vec![peer]))
+            .set(
+                Service::for_test_discovery(&data.path().join("discovery-fixture"), vec![peer])
+                    .await
+                    .unwrap()
+            )
             .is_ok()
     );
     let (alice, token, owner) = user(&server, "alice").await;
@@ -302,7 +306,11 @@ async fn real_metadata_selection_pause_lease_restart_and_verified_https() {
             .state
             .magnets
             .service
-            .set(Service::for_test(vec![peer]))
+            .set(
+                Service::for_test_discovery(&data.path().join("discovery-fixture"), vec![peer])
+                    .await
+                    .unwrap()
+            )
             .is_ok()
     );
     let alice = Client::new(server.origin.clone()).unwrap();

@@ -544,7 +544,7 @@ impl MagnetManager {
         &self,
         id: &str,
         source: SecretString,
-        mut peers: Vec<std::net::SocketAddr>,
+        peers: Vec<std::net::SocketAddr>,
         cancel: &CancellationToken,
     ) -> Result<PathBuf> {
         let _slot = tokio::select! {()=cancel.cancelled()=>return Err(DownloadError::Cancelled),slot=self.slots.acquire()=>slot.map_err(|_|DownloadError::Cancelled)?};
@@ -572,24 +572,27 @@ impl MagnetManager {
                 record.view.magnet_network.unwrap_or_default(),
             )
             .await?;
-            let (trackers, initial) = engine::connection_options(&source, &options, cancel).await?;
-            peers.extend(initial);
-            let peers = trackers::bounded_peers(peers);
+            let (trackers, peers) =
+                engine::download_connections(&source, &options, cancel, peers).await?;
             let engine = engine::session(data.clone(), cancel.child_token(), &options).await?;
             let outcome=async {
             self.update(id,DownloadPhase::Verifying,record.view.received_bytes,0);
             let added=tokio::select! {()=cancel.cancelled()=>return Err(DownloadError::Cancelled),result=engine.add_torrent(AddTorrent::from_bytes(record.metadata.clone()),Some(AddTorrentOptions {output_folder:Some(data.to_str().ok_or(DownloadError::Storage)?.to_owned()),only_files:Some(record.selected.iter().map(|f|usize::try_from(f.id).map_err(|_|DownloadError::InvalidSource)).collect::<Result<Vec<_>>>()?),overwrite:true,initial_peers:Some(peers),trackers:Some(trackers),..AddTorrentOptions::default()}))=>result.map_err(|_|DownloadError::Network)?};
             let handle=added.into_handle().ok_or(DownloadError::Network)?;
+            let mut diagnostics=engine::Diagnostics::new();
             let mut last_bytes=0;let mut previous=Instant::now();let mut last_persist=Instant::now();
             loop {
                 if cancel.is_cancelled() {return Err(DownloadError::Cancelled);}
                 let stats=handle.stats();
+                diagnostics.observe(options.discovery.is_some(),&stats);
                 if stats.error.is_some() || matches!(stats.state,TorrentStatsState::Error) {return Err(DownloadError::Network);}
                 let phase=if matches!(stats.state,TorrentStatsState::Initializing {..}) {DownloadPhase::Verifying}else{DownloadPhase::Downloading};
                 let bytes: u64=record.selected.iter().map(|f|stats.file_progress.get(usize::try_from(f.id).unwrap_or(usize::MAX)).copied().unwrap_or(0).min(f.size)).sum();
                 let millis=previous.elapsed().as_millis().max(1);
-                let speed=u64::try_from(u128::from(bytes.saturating_sub(last_bytes))*1000/millis).unwrap_or(u64::MAX);
-                self.update(id,phase,bytes,speed);last_bytes=bytes;previous=Instant::now();
+                // 缓存重新校验会增加进度，但不能算成本轮网络下载速度。
+                let fetched=stats.live.as_ref().map_or(0,|live|live.snapshot.fetched_bytes);
+                let speed=u64::try_from(u128::from(fetched.saturating_sub(last_bytes))*1000/millis).unwrap_or(u64::MAX);
+                self.update(id,phase,bytes,speed);last_bytes=fetched;previous=Instant::now();
                 if stats.finished {break;}
                 if last_persist.elapsed()>=Duration::from_secs(2) {self.persist(&self.lock())?;last_persist=Instant::now();}
                 if last_persist.elapsed()>=Duration::from_secs(1) {crate::space::ensure_room(&record.folder,0)?;}

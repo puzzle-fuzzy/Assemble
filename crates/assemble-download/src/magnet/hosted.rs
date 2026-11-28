@@ -57,6 +57,22 @@ impl Service {
             resolving: Semaphore::new(2),
         })
     }
+    /// 只把种子用于元数据握手；下载必须使用生产发现链路传下来的节点。
+    #[cfg(any(test, feature = "test-fixtures"))]
+    pub async fn for_test_discovery(
+        root: &std::path::Path,
+        peers: Vec<std::net::SocketAddr>,
+    ) -> Result<Arc<Self>> {
+        Ok(Arc::new(Self {
+            options: engine::Options {
+                discovery: Some(crate::hosted::Discovery::for_test(root, peers).await?),
+                local_test: true,
+                ..engine::Options::default()
+            },
+            slots: Arc::new(Semaphore::new(4)),
+            resolving: Semaphore::new(2),
+        }))
+    }
     pub async fn resolve(&self, source: &str, cancel: &CancellationToken) -> Result<Torrent> {
         let _slot = tokio::select! {()=cancel.cancelled()=>return Err(DownloadError::Cancelled),slot=self.resolving.acquire()=>slot.map_err(|_|DownloadError::Cancelled)?};
         let prepared = engine::prepare(source, cancel, &self.options()).await?;

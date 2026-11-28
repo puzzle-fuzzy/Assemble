@@ -144,6 +144,51 @@ pub(crate) async fn connection_options(
     udp.dedup();
     Ok((udp, peers))
 }
+pub(crate) async fn download_connections(
+    source: &SecretString,
+    options: &Options,
+    cancel: &CancellationToken,
+    mut peers: Vec<SocketAddr>,
+) -> Result<(Vec<String>, Vec<SocketAddr>)> {
+    let (trackers, initial) = connection_options(source, options, cancel).await?;
+    peers.extend(initial);
+    if let Some(discovery) = &options.discovery {
+        let mut known = discovery.confirmed_peers(source, options, cancel).await?;
+        tracing::info!(
+            initial_peers = known.len(),
+            "hosted magnet payload nodes ready"
+        );
+        known.append(&mut peers);
+        peers = known;
+    }
+    Ok((trackers, trackers::bounded_peers(peers)))
+}
+
+pub(super) struct Diagnostics(std::time::Instant);
+impl Diagnostics {
+    pub fn new() -> Self {
+        Self(std::time::Instant::now())
+    }
+    pub fn observe(&mut self, hosted: bool, stats: &librqbit::TorrentStats) {
+        if !hosted || self.0.elapsed() < std::time::Duration::from_secs(10) {
+            return;
+        }
+        self.0 = std::time::Instant::now();
+        if let Some(live) = &stats.live {
+            let peers = &live.snapshot.peer_stats;
+            tracing::info!(
+                live_peers = peers.live,
+                connecting_peers = peers.connecting,
+                dead_peers = peers.dead,
+                fetched_bytes = live.snapshot.fetched_bytes,
+                checked_bytes = stats.progress_bytes,
+                uploaded_bytes = stats.uploaded_bytes,
+                "hosted magnet payload progress"
+            );
+        }
+    }
+}
+
 pub(crate) async fn session(
     folder: PathBuf,
     cancel: CancellationToken,
