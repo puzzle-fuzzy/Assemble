@@ -110,6 +110,7 @@ mod tests {
                 "email_actions",
                 "email_rate_limits",
                 "github_identities",
+                "hosted_magnets",
                 "login_events",
                 "media_asset_variants",
                 "media_assets",

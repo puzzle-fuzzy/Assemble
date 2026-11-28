@@ -264,11 +264,6 @@ export const bridge: Bridge = {
     const preview = requireDownloadPreview(
       await invoke<unknown>("download_prepare", { input }),
     );
-    if (input.magnetNetwork === "direct" && preview.magnetNetwork !== "direct")
-      throw new BridgeError(
-        "DOWNLOAD_ROUTE_UNAVAILABLE",
-        "The desktop did not confirm direct routing",
-      );
     return preview;
   },
   downloadImportHls: async (baseUrl, pageUrl) => {

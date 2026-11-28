@@ -34,7 +34,7 @@
     "warningTitle": "Storage capacity needs attention",
     "budgetWarning": "Stored content and upload reservations have reached the warning threshold ({{percent}}%).",
     "diskWarning": "Available disk space is below 2 GiB.",
-    "uploadReserved": "Upload reservations",
+    "uploadReserved": "Transfer cache reservations",
     "uploadTemp": "Upload temporary files"
   }
 }

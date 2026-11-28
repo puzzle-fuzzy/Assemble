@@ -30,6 +30,7 @@ pub mod github;
 pub mod http;
 pub mod identity_templates;
 pub mod identity_web;
+pub mod magnets;
 pub mod mail;
 pub mod maintenance;
 pub mod media;

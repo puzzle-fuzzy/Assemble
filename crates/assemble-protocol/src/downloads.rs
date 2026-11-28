@@ -76,6 +76,7 @@ pub struct DownloadPreview {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum DownloadPhase {
+    Receiving,
     Queued,
     Downloading,
     Muxing,
@@ -91,7 +92,7 @@ impl DownloadPhase {
     pub fn active(self) -> bool {
         matches!(
             self,
-            Self::Queued | Self::Downloading | Self::Muxing | Self::Verifying
+            Self::Queued | Self::Downloading | Self::Receiving | Self::Muxing | Self::Verifying
         )
     }
 }

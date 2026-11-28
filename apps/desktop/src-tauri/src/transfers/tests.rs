@@ -1536,6 +1536,11 @@ async fn a_drive_file_fetched_here_lands_in_the_inbox_like_any_other_delivery() 
     assert_eq!(view.name, "合同.pdf");
     // 通知登记过了，点它找得回文件；没有回执要补。
     assert_eq!(f.state().saved_file_for_handle(1), Some(saved));
+    // 文件发布与恢复检查点清理由不同的队列步骤确认，不能拿发布瞬间当作清理完成。
+    until("the download checkpoint cleanup to finish", || {
+        f.state().next_job() == Next::Nothing
+    })
+    .await;
     assert_eq!(f.state().next_job(), Next::Nothing);
 
     // 再取一次：不覆盖先前那份；旧清理未确认时，新意图使用另一个本机标识。

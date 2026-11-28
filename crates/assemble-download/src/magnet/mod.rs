@@ -2,13 +2,15 @@
 mod credentials;
 #[cfg(test)]
 mod diagnostics;
-mod engine;
+pub(crate) mod engine;
 mod files;
+pub(crate) mod hosted;
+pub(crate) mod remote;
 mod route;
 #[cfg(test)]
 mod tests;
 mod tracker_pool;
-mod trackers;
+pub(crate) mod trackers;
 
 use crate::{DownloadError, Result, random_id};
 use assemble_protocol::downloads::{
@@ -36,6 +38,8 @@ use tokio_util::sync::CancellationToken;
 
 #[derive(Clone, Serialize, Deserialize)]
 struct Record {
+    #[serde(default)]
+    remote: Option<remote::RemoteRecord>,
     view: DownloadTask,
     folder: PathBuf,
     metadata: Vec<u8>,
@@ -64,6 +68,7 @@ struct State {
     running: HashMap<String, Running>,
     handles: Vec<JoinHandle<()>>,
     preparing: Option<CancellationToken>,
+    cleaned: std::collections::HashSet<String>,
 }
 
 struct Preparation<'a>(&'a MagnetManager);
@@ -102,19 +107,21 @@ fn key(id: &str) -> SecretKey {
 }
 
 impl MagnetManager {
-    pub(crate) fn open(
+    pub(crate) fn open_client(
         history: PathBuf,
         slots: Arc<Semaphore>,
+        server: Option<assemble_client::Client>,
+        store: Option<Arc<dyn SecretStore>>,
         changed: Arc<dyn Fn(Vec<DownloadTask>) + Send + Sync>,
     ) -> Result<Arc<Self>> {
-        let pool = tracker_pool::Pool::open(history.with_extension("trackers.json"));
         Self::open_with(
             history,
             slots,
             changed,
-            system_store(),
+            store.or_else(system_store),
             engine::Options {
-                pool: Some(pool),
+                server,
+                require_server: true,
                 ..engine::Options::default()
             },
         )
@@ -161,6 +168,7 @@ impl MagnetManager {
                 running: HashMap::new(),
                 handles: Vec::new(),
                 preparing: None,
+                cleaned: std::collections::HashSet::new(),
             }),
             history,
             slots,
@@ -218,15 +226,25 @@ impl MagnetManager {
             state.preparing = Some(cancel.clone());
         }
         let _preparation = Preparation(self);
-        let options = route::options(&self.options, network).await?;
-        let result = engine::prepare(value, &cancel, &options).await;
-        let prepared = result?;
+        let prepared = if let Some(client) = &self.options.server {
+            remote::prepare(client, value, &cancel).await?
+        } else {
+            if self.options.require_server {
+                return Err(DownloadError::ServerUnavailable);
+            }
+            let options = route::options(&self.options, network).await?;
+            engine::prepare(value, &cancel, &options).await?
+        };
         let view = DownloadPreview {
-            magnet_network: Some(network),
+            magnet_network: self.options.server.is_none().then_some(network),
             id: random_id()?,
             kind: DownloadKind::Magnet,
             title: prepared.title.clone(),
-            source_host: "BitTorrent".into(),
+            source_host: if self.options.server.is_some() {
+                "Assemble".into()
+            } else {
+                "BitTorrent".into()
+            },
             duration_seconds: None,
             variants: vec![DownloadVariant {
                 id: "magnet".into(),
@@ -303,6 +321,7 @@ impl MagnetManager {
         self.reserve_record().await?;
         credentials::put(store.as_ref(), &id, &engine.source)?;
         let record = Record {
+            remote: engine.remote,
             view: DownloadTask {
                 magnet_network: view.magnet_network,
                 id: id.clone(),
@@ -310,7 +329,11 @@ impl MagnetManager {
                 kind: DownloadKind::Magnet,
                 title: view.title,
                 file_name: None,
-                source_host: "BitTorrent".into(),
+                source_host: if self.options.server.is_some() {
+                    "Assemble".into()
+                } else {
+                    "BitTorrent".into()
+                },
                 phase: DownloadPhase::Queued,
                 received_bytes: 0,
                 total_bytes: Some(size),
@@ -423,6 +446,11 @@ impl MagnetManager {
                 .find(|r| r.view.id == id)
                 .cloned()
                 .ok_or(DownloadError::Expired)?;
+            if let Some(client) = &self.options.server {
+                let mut cancelled = record.clone();
+                cancelled.view.phase = DownloadPhase::Cancelled;
+                remote::cleanup(self, client, id, &cancelled).await?;
+            }
             files::remove_cache(&record.folder, id).await?;
             if let Some(store) = &self.store {
                 credentials::delete(store.as_ref(), id)?;
@@ -536,16 +564,19 @@ impl MagnetManager {
                 .saturating_sub(record.view.received_bytes)
                 .saturating_add(record.view.total_bytes.unwrap_or(0)),
         )?;
-        let options = route::options(
-            &self.options,
-            record.view.magnet_network.unwrap_or_default(),
-        )
-        .await?;
-        let (trackers, initial) = engine::connection_options(&source, &options, cancel).await?;
-        peers.extend(initial);
-        let peers = trackers::bounded_peers(peers);
-        let engine = engine::session(data.clone(), cancel.child_token(), &options).await?;
-        let outcome=async {
+        if let Some(client) = &self.options.server {
+            remote::receive(self, client, id, &record, &data, cancel).await?;
+        } else {
+            let options = route::options(
+                &self.options,
+                record.view.magnet_network.unwrap_or_default(),
+            )
+            .await?;
+            let (trackers, initial) = engine::connection_options(&source, &options, cancel).await?;
+            peers.extend(initial);
+            let peers = trackers::bounded_peers(peers);
+            let engine = engine::session(data.clone(), cancel.child_token(), &options).await?;
+            let outcome=async {
             self.update(id,DownloadPhase::Verifying,record.view.received_bytes,0);
             let added=tokio::select! {()=cancel.cancelled()=>return Err(DownloadError::Cancelled),result=engine.add_torrent(AddTorrent::from_bytes(record.metadata.clone()),Some(AddTorrentOptions {output_folder:Some(data.to_str().ok_or(DownloadError::Storage)?.to_owned()),only_files:Some(record.selected.iter().map(|f|usize::try_from(f.id).map_err(|_|DownloadError::InvalidSource)).collect::<Result<Vec<_>>>()?),overwrite:true,initial_peers:Some(peers),trackers:Some(trackers),..AddTorrentOptions::default()}))=>result.map_err(|_|DownloadError::Network)?};
             let handle=added.into_handle().ok_or(DownloadError::Network)?;
@@ -566,9 +597,10 @@ impl MagnetManager {
             }
             Ok(())
         }.await;
-        // 先停止所有节点连接，再发布文件或回执暂停，完成后不进入做种。
-        engine.stop().await;
-        outcome?;
+            // 先停止所有节点连接，再发布文件或回执暂停，完成后不进入做种。
+            engine.stop().await;
+            outcome?;
+        }
         if cancel.is_cancelled() {
             return Err(DownloadError::Cancelled);
         }
@@ -699,14 +731,22 @@ impl MagnetManager {
         self.cleanup(&oldest).await?;
         let mut state = self.lock();
         state.records.retain(|r| r.view.id != oldest);
+        state.cleaned.remove(&oldest);
         self.persist(&state)
     }
     async fn cleanup(&self, id: &str) -> Result<()> {
+        if self.lock().cleaned.contains(id) {
+            return Ok(());
+        }
         let record = self.record(id)?;
+        if let Some(client) = &self.options.server {
+            remote::cleanup(self, client, id, &record).await?;
+        }
         files::remove_cache(&record.folder, id).await?;
         if let Some(store) = &self.store {
             credentials::delete(store.as_ref(), id)?;
         }
+        self.lock().cleaned.insert(id.into());
         Ok(())
     }
     pub(crate) async fn sweep_completed(&self) {
@@ -722,7 +762,9 @@ impl MagnetManager {
     pub(crate) async fn shutdown(&self) {
         self.lifetime.cancel();
         self.cancel_preparation();
-        if let Some(pool) = &self.options.pool {
+        if !self.options.pool_shared
+            && let Some(pool) = &self.options.pool
+        {
             pool.shutdown().await;
         }
         let _operations = self.operations.lock().await;

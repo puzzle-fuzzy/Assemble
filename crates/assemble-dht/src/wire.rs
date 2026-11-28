@@ -46,12 +46,24 @@ pub async fn fetch(
     pex: bool,
     hints: mpsc::Sender<SocketAddr>,
 ) -> Result<Metadata, Failure> {
+    fetch_raw(hash, peer, pex, hints)
+        .await
+        .map(|(metadata, _)| metadata)
+}
+
+/// 托管下载复用原始、已校验的 info；观测接口仍只返回安全投影。
+pub async fn fetch_raw(
+    hash: InfoHash,
+    peer: SocketAddr,
+    pex: bool,
+    hints: mpsc::Sender<SocketAddr>,
+) -> Result<(Metadata, Vec<u8>), Failure> {
     if !public_address(peer) {
         return Err(Failure::Connection);
     }
     tokio::time::timeout(Duration::from_secs(15), async {
         let mut stream = TcpStream::connect(peer).await?;
-        exchange(&mut stream, hash, pex, &hints).await
+        exchange_raw(&mut stream, hash, pex, &hints).await
     })
     .await
     .map_err(|_| Failure::Timeout)?
@@ -85,12 +97,24 @@ async fn request(stream: &mut TcpStream, extension: u8, piece: usize) -> Result<
     .await
 }
 
+#[cfg(test)]
 async fn exchange(
     stream: &mut TcpStream,
     hash: InfoHash,
     pex: bool,
     hints: &mpsc::Sender<SocketAddr>,
 ) -> Result<Metadata, Failure> {
+    exchange_raw(stream, hash, pex, hints)
+        .await
+        .map(|(metadata, _)| metadata)
+}
+
+async fn exchange_raw(
+    stream: &mut TcpStream,
+    hash: InfoHash,
+    pex: bool,
+    hints: &mpsc::Sender<SocketAddr>,
+) -> Result<(Metadata, Vec<u8>), Failure> {
     handshake(stream, hash, pex).await?;
     let mut extension = None;
     let mut size = None;
@@ -166,14 +190,18 @@ async fn exchange(
                 || (size.is_none() && contiguous == piece + 1 && data.len() < BLOCK);
             if complete {
                 let raw = pieces[..contiguous].concat();
-                return metadata::parse(&raw, &hash).map_err(|_| Failure::Validation);
+                return metadata::parse(&raw, &hash)
+                    .map(|metadata| (metadata, raw))
+                    .map_err(|_| Failure::Validation);
             }
             // 省略 size 的 peer 也只能在固定分片与总字节预算内串行请求。
             if contiguous == piece + 1 {
                 if size.is_none() {
                     let raw = pieces[..contiguous].concat();
                     if bencode::decode(&raw).is_ok() {
-                        return metadata::parse(&raw, &hash).map_err(|_| Failure::Validation);
+                        return metadata::parse(&raw, &hash)
+                            .map(|metadata| (metadata, raw))
+                            .map_err(|_| Failure::Validation);
                     }
                 }
                 if contiguous >= pieces.len() {

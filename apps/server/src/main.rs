@@ -121,6 +121,15 @@ fn init_logging() {
     use tracing_subscriber::EnvFilter;
 
     let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
+    // BT 依赖的诊断可能包含原始网址；即使调高全局日志也不回显用户来源。
+    let filter = filter
+        .add_directive("librqbit=off".parse().expect("fixed log filter"))
+        .add_directive("librqbit_dht=off".parse().expect("fixed log filter"))
+        .add_directive(
+            "librqbit_tracker_comms=off"
+                .parse()
+                .expect("fixed log filter"),
+        );
     let json = std::env::var("ASSEMBLE_LOG_FORMAT").is_ok_and(|value| value == "json");
     let builder = tracing_subscriber::fmt()
         .with_env_filter(filter)

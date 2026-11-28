@@ -237,7 +237,7 @@ async fn create(
     }
     // 分片和合并短暂共存；已有预留按两倍保守保留，不依赖声明摘要猜测去重。
     let reserved: i64 =
-        sqlx::query_scalar("SELECT coalesce(sum(bytes),0) FROM upload_reservations")
+        sqlx::query_scalar("SELECT (SELECT coalesce(sum(bytes),0) FROM upload_reservations)+(SELECT coalesce(sum(reserved_bytes),0) FROM hosted_magnets)")
             .fetch_one(&state.pool)
             .await?;
     state

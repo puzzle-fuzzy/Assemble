@@ -19,6 +19,7 @@ path = "src/main.rs"
 [dependencies]
 assemble-protocol.workspace = true
 assemble-dht.workspace = true
+assemble-download.workspace = true
 assemble-schedule.workspace = true
 assemble-store.workspace = true
 assemble-transfer.workspace = true
@@ -62,6 +63,8 @@ url.workspace = true
 
 # 测试里要用另一把钥匙给更新包签名，看服务端认不认。
 [dev-dependencies]
+assemble-download = { workspace = true, features = ["test-fixtures"] }
+librqbit.workspace = true
 minisign = "0.10.0"
 assemble-client.workspace = true
 # 只有示例 `fake_device` 用到：替身收文件时走与桌面端相同的落盘规则。

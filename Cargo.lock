@@ -354,10 +354,13 @@ dependencies = [
 name = "assemble-download"
 version = "0.1.0"
 dependencies = [
+ "assemble-client",
  "assemble-device",
+ "assemble-dht",
  "assemble-protocol",
  "assemble-store",
  "axum",
+ "base64 0.23.1",
  "fs4",
  "futures-util",
  "getrandom 0.4.3",
@@ -465,6 +468,7 @@ dependencies = [
  "assemble-client",
  "assemble-device",
  "assemble-dht",
+ "assemble-download",
  "assemble-protocol",
  "assemble-schedule",
  "assemble-store",
@@ -482,6 +486,7 @@ dependencies = [
  "getrandom 0.4.3",
  "image",
  "lettre",
+ "librqbit",
  "minisign",
  "minisign-verify",
  "qrcodegen",

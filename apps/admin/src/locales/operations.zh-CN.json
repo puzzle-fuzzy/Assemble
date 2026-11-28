@@ -34,7 +34,7 @@
     "warningTitle": "存储空间需要关注",
     "budgetWarning": "文件内容与上传预留已达到预警线（{{percent}}%）。",
     "diskWarning": "磁盘可用空间低于 2 GiB。",
-    "uploadReserved": "上传预留",
+    "uploadReserved": "传输缓存预留",
     "uploadTemp": "上传暂存"
   }
 }

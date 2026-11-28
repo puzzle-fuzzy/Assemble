@@ -12,22 +12,29 @@ use std::{net::SocketAddr, num::NonZeroU32, path::PathBuf, sync::Arc};
 use tokio_util::sync::CancellationToken;
 use url::Url;
 
-pub(super) const MAX_FILES: usize = 10_000;
-pub(super) const MAX_TOTAL: u64 = 1024 * 1024 * 1024 * 1024;
-pub(super) const MAX_SELECTED: u64 = 100 * 1024 * 1024 * 1024;
-pub(super) const UPLOAD_BPS: u32 = 256 * 1024;
+pub(crate) const MAX_FILES: usize = 10_000;
+pub(crate) const MAX_TOTAL: u64 = 1024 * 1024 * 1024 * 1024;
+pub(crate) const MAX_SELECTED: u64 = 100 * 1024 * 1024 * 1024;
+pub(crate) const UPLOAD_BPS: u32 = 256 * 1024;
 
 #[derive(Clone, Default)]
-pub(super) struct Options {
+pub(crate) struct Options {
+    pub server: Option<assemble_client::Client>,
+    pub require_server: bool,
+    pub discovery: Option<Arc<crate::hosted::Discovery>>,
     pub local_test: bool,
     pub network: crate::network::Network,
     pub pool: Option<Arc<tracker_pool::Pool>>,
+    pub pool_shared: bool,
+    #[cfg(any(test, feature = "test-fixtures"))]
+    pub test_peers: Vec<SocketAddr>,
     pub bind_device_name: Option<String>,
     #[cfg(test)]
     pub download_bps: Option<NonZeroU32>,
 }
 #[derive(Clone)]
-pub(super) struct Prepared {
+pub(crate) struct Prepared {
+    pub remote: Option<super::remote::RemoteRecord>,
     pub source: SecretString,
     pub metadata: Vec<u8>,
     pub files: Vec<DownloadFile>,
@@ -35,7 +42,7 @@ pub(super) struct Prepared {
     pub peers: Vec<SocketAddr>,
 }
 
-pub(super) fn source(value: &str) -> Result<SecretString> {
+pub(crate) fn source(value: &str) -> Result<SecretString> {
     if value.len() > 16384 || value.chars().any(char::is_control) {
         return Err(DownloadError::InvalidSource);
     }
@@ -50,13 +57,19 @@ pub(super) fn source(value: &str) -> Result<SecretString> {
     Ok(SecretString::new(value.trim()))
 }
 
-pub(super) async fn connection_options(
+pub(crate) async fn connection_options(
     source: &SecretString,
     options: &Options,
     cancel: &CancellationToken,
 ) -> Result<(Vec<String>, Vec<SocketAddr>)> {
+    if options.require_server {
+        return Err(DownloadError::ServerUnavailable);
+    }
     let url = Url::parse(source.expose()).map_err(|_| DownloadError::InvalidSource)?;
     let mut candidates = Vec::new();
+    #[cfg(any(test, feature = "test-fixtures"))]
+    let mut peers = options.test_peers.clone();
+    #[cfg(not(any(test, feature = "test-fixtures")))]
     let mut peers = Vec::new();
     for (key, value) in url.query_pairs() {
         match key.as_ref() {
@@ -111,9 +124,8 @@ pub(super) async fn connection_options(
     for endpoint in endpoints.into_iter().flatten() {
         if endpoint.url.scheme() == "udp" {
             udp.extend(endpoint.udp_urls()?);
-        } else {
-            http.push(endpoint);
         }
+        http.push(endpoint);
     }
     let hash = librqbit::Magnet::parse(source.expose())
         .map_err(|_| DownloadError::InvalidSource)?
@@ -121,6 +133,9 @@ pub(super) async fn connection_options(
         .ok_or(DownloadError::Unsupported)?;
     // HTTPS 通过固定地址的客户端短时找节点；引擎持续使用固定公网 IP 的 UDP Tracker。
     peers.extend(trackers::bootstrap(http, &hash.0, cancel).await);
+    if let Some(discovery) = &options.discovery {
+        peers.extend(discovery.peers(hash.0, cancel).await?);
+    }
     if cancel.is_cancelled() {
         return Err(DownloadError::Cancelled);
     }
@@ -129,12 +144,15 @@ pub(super) async fn connection_options(
     udp.dedup();
     Ok((udp, peers))
 }
-pub(super) async fn session(
+pub(crate) async fn session(
     folder: PathBuf,
     cancel: CancellationToken,
     options: &Options,
 ) -> Result<Arc<Session>> {
-    let bootstrap = if options.local_test {
+    if options.require_server {
+        return Err(DownloadError::ServerUnavailable);
+    }
+    let bootstrap = if options.local_test || options.discovery.is_some() {
         Vec::new()
     } else {
         tokio::select! {
@@ -146,7 +164,7 @@ pub(super) async fn session(
         folder,
         SessionOptions {
             bind_device_name: options.bind_device_name.clone(),
-            dht: if options.local_test {
+            dht: if options.local_test || options.discovery.is_some() {
                 None
             } else {
                 Some(DhtSessionConfig {
@@ -161,6 +179,7 @@ pub(super) async fn session(
             cancellation_token: Some(cancel),
             peer_limit: Some(64),
             disable_local_service_discovery: true,
+            allowlist_url: options.discovery.as_ref().map(|d| d.allowlist_url.clone()),
             ratelimits: librqbit::limits::LimitsConfig {
                 upload_bps: NonZeroU32::new(UPLOAD_BPS),
                 #[cfg(test)]
@@ -175,7 +194,7 @@ pub(super) async fn session(
     .map_err(|_| DownloadError::Network)
 }
 
-pub(super) fn describe(bytes: &[u8]) -> Result<(Vec<u8>, Vec<DownloadFile>, String)> {
+pub(crate) fn describe(bytes: &[u8]) -> Result<(Vec<u8>, Vec<DownloadFile>, String)> {
     if bytes.len() as u64 > MAX_METADATA {
         return Err(DownloadError::Limit);
     }
@@ -229,12 +248,15 @@ pub(super) fn describe(bytes: &[u8]) -> Result<(Vec<u8>, Vec<DownloadFile>, Stri
     Ok((clean, files, title))
 }
 
-pub(super) async fn prepare(
+pub(crate) async fn prepare(
     value: &str,
     cancel: &CancellationToken,
     options: &Options,
 ) -> Result<Prepared> {
     let source = source(value)?;
+    if let Some(discovery) = &options.discovery {
+        return discovery.prepare(source, options, cancel).await;
+    }
     let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(90);
     let (trackers, peers) =
         tokio::time::timeout_at(deadline, connection_options(&source, options, cancel))
@@ -259,7 +281,7 @@ pub(super) async fn prepare(
     let result = tokio::select! {
         ()=cancel.cancelled()=>Err(DownloadError::Cancelled),
         result=tokio::time::timeout_at(deadline,engine.add_torrent(AddTorrent::from_url(magnet.as_str()),Some(AddTorrentOptions { list_only:true,trackers:Some(trackers),initial_peers:Some(peers),..AddTorrentOptions::default() }))) => match result {
-            Ok(Ok(AddTorrentResponse::ListOnly(value))) => describe(&value.torrent_bytes).map(|(metadata,files,title)|Prepared { source,metadata,files,title,peers:value.seen_peers }),
+            Ok(Ok(AddTorrentResponse::ListOnly(value))) => describe(&value.torrent_bytes).map(|(metadata,files,title)|Prepared { source,metadata,files,title,peers:value.seen_peers,remote:None }),
             _=>Err(DownloadError::MetadataUnavailable),
         }
     };
@@ -267,7 +289,7 @@ pub(super) async fn prepare(
     result
 }
 
-pub(super) fn check_identity(source: &SecretString, bytes: &[u8]) -> Result<()> {
+pub(crate) fn check_identity(source: &SecretString, bytes: &[u8]) -> Result<()> {
     let magnet =
         librqbit::Magnet::parse(source.expose()).map_err(|_| DownloadError::InvalidSource)?;
     let torrent = librqbit::torrent_from_bytes(bytes).map_err(|_| DownloadError::InvalidMedia)?;

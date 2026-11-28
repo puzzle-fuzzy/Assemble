@@ -68,6 +68,7 @@ struct State {
     jobs: HashMap<String, Job>,
     cancels: HashMap<String, CancellationToken>,
     handles: Vec<JoinHandle<()>>,
+    maintenance_started: bool,
     emitted: Instant,
 }
 
@@ -89,6 +90,42 @@ impl DownloadManager {
         history_path: PathBuf,
         folder: PathBuf,
         tools: MediaTools,
+        changed: impl Fn(DownloadsView) + Send + Sync + 'static,
+    ) -> Result<Arc<Self>> {
+        Self::open_inner(history_path, folder, tools, None, None, changed)
+    }
+    /// 磁力经已登录的第一方客户端托管；本机不会因此创建 BT 会话。
+    pub fn open_with_server(
+        history_path: PathBuf,
+        folder: PathBuf,
+        tools: MediaTools,
+        server: assemble_client::Client,
+        changed: impl Fn(DownloadsView) + Send + Sync + 'static,
+    ) -> Result<Arc<Self>> {
+        Self::open_inner(history_path, folder, tools, Some(server), None, changed)
+    }
+    #[cfg(feature = "test-fixtures")]
+    pub fn for_test_server(
+        history: PathBuf,
+        folder: PathBuf,
+        server: assemble_client::Client,
+        store: Arc<dyn assemble_store::secret::SecretStore>,
+    ) -> Result<Arc<Self>> {
+        Self::open_inner(
+            history,
+            folder,
+            MediaTools::discover(),
+            Some(server),
+            Some(store),
+            |_| {},
+        )
+    }
+    fn open_inner(
+        history_path: PathBuf,
+        folder: PathBuf,
+        tools: MediaTools,
+        server: Option<assemble_client::Client>,
+        store: Option<Arc<dyn assemble_store::secret::SecretStore>>,
         changed: impl Fn(DownloadsView) + Send + Sync + 'static,
     ) -> Result<Arc<Self>> {
         let mut history = read_json::<History>(&history_path)
@@ -116,15 +153,18 @@ impl DownloadManager {
             jobs: HashMap::new(),
             cancels: HashMap::new(),
             handles: Vec::new(),
+            maintenance_started: false,
             emitted: Instant::now(),
         }));
         let changed: Arc<dyn Fn(DownloadsView) + Send + Sync> = Arc::new(changed);
         let callback = Arc::clone(&changed);
         let current = Arc::clone(&state);
         let available = tools.available();
-        let magnet = crate::magnet::MagnetManager::open(
+        let magnet = crate::magnet::MagnetManager::open_client(
             history_path.with_extension("magnet.json"),
             Arc::clone(&slots),
+            server,
+            store,
             Arc::new(move |tasks| {
                 let view = {
                     let state = current
@@ -147,6 +187,20 @@ impl DownloadManager {
             changed,
         });
         Ok(manager)
+    }
+
+    /// 只重试已完成任务的清理回执，不自动恢复任何下载。由壳在异步运行时调用一次。
+    pub fn start_maintenance(self: &Arc<Self>) {
+        let mut state = self.lock();
+        if state.maintenance_started {
+            return;
+        }
+        state.maintenance_started = true;
+        let weak = Arc::downgrade(self);
+        let cancel = self.lifetime.clone();
+        state.handles.push(tokio::spawn(async move{loop{tokio::select!{()=cancel.cancelled()=>break,()=tokio::time::sleep(Duration::from_secs(60))=>{}}
+            let Some(manager)=weak.upgrade()else{break;};manager.magnet.sweep_completed().await;
+        }}));
     }
 
     /// 清掉上次崩溃留下的暂存目录。返回清掉了几个。
@@ -961,7 +1015,7 @@ fn download_view(state: &State, available: bool, magnet: Vec<DownloadTask>) -> D
         .collect();
     tasks.sort_by_key(|a| std::cmp::Reverse(a.created_at.as_millis()));
     DownloadsView {
-        direct_bt_available: cfg!(target_os = "macos"),
+        direct_bt_available: false,
         assistant_allowed: state.assistant_allowed,
         browser_task_id: state.browser_task_id.clone(),
         folder_name: state

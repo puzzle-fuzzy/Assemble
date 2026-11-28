@@ -17,7 +17,7 @@
   "start": "Start download",
   "folder": "Save to: {{name}}",
   "chooseFolder": "Choose folder",
-  "toolsMissing": "Video downloads require local FFmpeg and ffprobe. Install both and restart. Magnet downloads are available without them.",
+  "toolsMissing": "Video downloads need local FFmpeg and ffprobe. Install them and restart. Magnet downloads need no media tools.",
   "empty": "No download tasks yet",
   "emptyHint": "Paste a URL or import a playlist, then select quality and start downloading.",
   "queue": "Downloads",
@@ -46,7 +46,7 @@
     "DOWNLOAD_SOURCE_UNAVAILABLE": "The source is unavailable or expired. Obtain a new URL.",
     "DOWNLOAD_NETWORK": "The network connection failed. Try again later.",
     "DOWNLOAD_UNSUPPORTED": "Unsupported source: live streams and DRM are unavailable. Magnets must be public BitTorrent v1; pure v2 and private torrents are unsupported.",
-    "DOWNLOAD_LIMIT": "Limit exceeded: video 10 GiB / 20,000 segments; magnets 100 GiB selected / 10,000 files; metadata 4 MiB.",
+    "DOWNLOAD_LIMIT": "Limit exceeded: video 10 GiB / 20,000 segments; magnets 100 GiB selected / 10,000 files; metadata 4 MiB. Server cache quotas also apply to magnets.",
     "DOWNLOAD_INVALID_MEDIA": "The file or metadata failed validation and was not published.",
     "DOWNLOAD_STORAGE": "Could not save the file. Check folder permissions and hard-link support.",
     "DOWNLOAD_NO_SPACE": "The disk of the download folder is running out of space. Free some space or choose another download folder.",
@@ -57,12 +57,16 @@
     "DOWNLOAD_BUSY": "The queue is full or the task is still running. Try again later.",
     "unknown": "The operation did not complete. Try again.",
     "DOWNLOAD_CREDENTIALS_UNAVAILABLE": "The system keychain is unavailable. Resume credentials could not be saved or read.",
-    "DOWNLOAD_METADATA_UNAVAILABLE": "No file list was received. Check resource availability and whether the current proxy or network permits BT. On Mac, direct BT connections are an option if you accept using your real outbound IP.",
-    "DOWNLOAD_ROUTE_UNAVAILABLE": "Direct routing is unavailable. It currently requires the default physical network on a Mac."
+    "DOWNLOAD_METADATA_UNAVAILABLE": "The server could not retrieve the file list. The resource may have no available peers. Try again later.",
+    "DOWNLOAD_ROUTE_UNAVAILABLE": "This version uses the server for magnets. Parse the old task again.",
+    "DOWNLOAD_SERVER_UNAVAILABLE": "The server download service is temporarily unavailable. Try again later.",
+    "DOWNLOAD_SIGN_IN_REQUIRED": "Sign in before using magnet downloads.",
+    "DOWNLOAD_ACCOUNT_MISMATCH": "Sign in to the account that created this task.",
+    "DOWNLOAD_SERVER_QUOTA": "The server download cache is full. Wait for a task to finish or cancel an unused task."
   },
   "magnet": "Magnet link",
   "magnetAddress": "Magnet URI",
-  "magnetHint": "Public BitTorrent v1 magnets are supported. Metadata can take 90 seconds. Upload is limited to 256 KiB/s per task and stops on completion, pause or exit. Resume after restarting.",
+  "magnetHint": "Assemble resolves and downloads the torrent on the server, then saves files here over HTTPS. BT upload is capped at 256 KiB/s and stops at completion. Pause or quit stops the server task; lost connections pause after the timeout. Resume manually after restart.",
   "files": "Select files",
   "selectedFiles": "{{count}} files selected · {{size}}",
   "selectAll": "Select all",
@@ -72,7 +76,6 @@
   "resume": "Resume",
   "paused": "Paused · ready to resume",
   "openFolder": "Open download folder",
-  "directBt": "Direct BT connections (Mac)",
-  "systemNetwork": "Follow system network",
-  "directBtHint": "System network is the default. Direct mode applies only to this magnet task and exposes your real outbound IP to BT peers and DHT. System proxy and firewall settings stay unchanged."
+  "hostedMagnet": "Server download",
+  "receiving": "Saving to this computer"
 }

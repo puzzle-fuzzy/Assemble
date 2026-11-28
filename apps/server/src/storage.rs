@@ -16,7 +16,7 @@ fn bytes(value: i64) -> Result<u64, sqlx::Error> {
     u64::try_from(value).map_err(|_| sqlx::Error::Protocol("invalid stored storage size".into()))
 }
 
-/// 预算只包含 blobs；数据库中的影视图片另列，避免把两种口径混为一谈。
+/// 内容与上传/磁力暂存共同占预算；数据库中的影视图片仍另列。
 pub async fn report(config: &Config, pool: &SqlitePool) -> Result<AdminStorage, sqlx::Error> {
     type Row = (String, String, Option<String>, Option<String>, i64);
     let mut tx = pool.begin().await?;
@@ -24,7 +24,7 @@ pub async fn report(config: &Config, pool: &SqlitePool) -> Result<AdminStorage, 
         .fetch_one(&mut *tx)
         .await?;
     let reserved: i64 =
-        sqlx::query_scalar("SELECT coalesce(sum(bytes),0) FROM upload_reservations")
+        sqlx::query_scalar("SELECT (SELECT coalesce(sum(bytes),0) FROM upload_reservations)+(SELECT coalesce(sum(reserved_bytes),0) FROM hosted_magnets)")
             .fetch_one(&mut *tx)
             .await?;
     let trash: i64 = sqlx::query_scalar(

@@ -16,13 +16,13 @@ use url::Url;
 type Value<'a> = BencodeValue<&'a [u8]>;
 
 #[derive(Clone)]
-pub(super) struct Endpoint {
+pub(crate) struct Endpoint {
     pub url: Url,
     pub addresses: Vec<SocketAddr>,
     local_test: bool,
 }
 
-pub(super) fn parse(value: &str, pool: bool) -> Result<Url> {
+pub(crate) fn parse(value: &str, pool: bool) -> Result<Url> {
     if value.len() > 2048 || value.chars().any(char::is_control) {
         return Err(DownloadError::InvalidSource);
     }
@@ -191,6 +191,9 @@ impl Endpoint {
         if cancel.is_cancelled() {
             return Vec::new();
         }
+        if self.url.scheme() == "udp" {
+            return self.udp_peers(hash, cancel).await.unwrap_or_default();
+        }
         let mut peer = [0_u8; 20];
         if getrandom::fill(&mut peer).is_err() {
             return Vec::new();
@@ -241,9 +244,82 @@ impl Endpoint {
             .and_then(|b| decode_peers(&b, self.local_test).ok())
             .unwrap_or_default()
     }
+    async fn udp_peers(
+        &self,
+        hash: &[u8; 20],
+        cancel: &CancellationToken,
+    ) -> Result<Vec<SocketAddr>> {
+        let address = *self.addresses.first().ok_or(DownloadError::Network)?;
+        let socket = tokio::net::UdpSocket::bind(if address.is_ipv4() {
+            "0.0.0.0:0"
+        } else {
+            "[::]:0"
+        })
+        .await
+        .map_err(|_| DownloadError::Network)?;
+        socket
+            .connect(address)
+            .await
+            .map_err(|_| DownloadError::Network)?;
+        let mut connect = [0u8; 16];
+        connect[..8].copy_from_slice(&0x0417_2710_1980_u64.to_be_bytes());
+        getrandom::fill(&mut connect[12..]).map_err(|_| DownloadError::Network)?;
+        let response = udp_reply(&socket, &connect, 0, cancel).await?;
+        if response.len() < 16 {
+            return Err(DownloadError::Network);
+        }
+        let mut announce = [0u8; 98];
+        announce[..8].copy_from_slice(&response[8..16]);
+        announce[8..12].copy_from_slice(&1u32.to_be_bytes());
+        getrandom::fill(&mut announce[12..16]).map_err(|_| DownloadError::Network)?;
+        announce[16..36].copy_from_slice(hash);
+        getrandom::fill(&mut announce[36..56]).map_err(|_| DownloadError::Network)?;
+        announce[36..44].copy_from_slice(b"-AS0100-");
+        announce[64..72].copy_from_slice(&1u64.to_be_bytes());
+        announce[80..84].copy_from_slice(&2u32.to_be_bytes());
+        getrandom::fill(&mut announce[88..92]).map_err(|_| DownloadError::Network)?;
+        announce[92..96].copy_from_slice(&64u32.to_be_bytes());
+        announce[96..98].copy_from_slice(&4240u16.to_be_bytes());
+        let response = udp_reply(&socket, &announce, 1, cancel).await;
+        announce[80..84].copy_from_slice(&3u32.to_be_bytes());
+        let _ = socket.send(&announce).await;
+        let response = response?;
+        if response.len() < 20 {
+            return Err(DownloadError::Network);
+        }
+        let compact = &response[20..];
+        let key = if address.is_ipv4() {
+            "5:peers"
+        } else {
+            "6:peers6"
+        };
+        let mut encoded = format!("d{key}{}:", compact.len()).into_bytes();
+        encoded.extend_from_slice(compact);
+        encoded.push(b'e');
+        decode_peers(&encoded, self.local_test)
+    }
 }
 
-pub(super) async fn bootstrap(
+async fn udp_reply(
+    socket: &tokio::net::UdpSocket,
+    request: &[u8],
+    action: u32,
+    cancel: &CancellationToken,
+) -> Result<Vec<u8>> {
+    socket
+        .send(request)
+        .await
+        .map_err(|_| DownloadError::Network)?;
+    let mut response = vec![0; 65536];
+    let length = tokio::select! {()=cancel.cancelled()=>return Err(DownloadError::Cancelled),reply=tokio::time::timeout(std::time::Duration::from_secs(3),socket.recv(&mut response))=>reply.map_err(|_|DownloadError::Network)?.map_err(|_|DownloadError::Network)?};
+    response.truncate(length);
+    if length < 8 || response[..4] != action.to_be_bytes() || response[4..8] != request[12..16] {
+        return Err(DownloadError::Network);
+    }
+    Ok(response)
+}
+
+pub(crate) async fn bootstrap(
     endpoints: Vec<Endpoint>,
     hash: &[u8; 20],
     cancel: &CancellationToken,
@@ -262,7 +338,7 @@ pub(super) async fn bootstrap(
 }
 
 /// 地址排序把 IPv4 放在前面；截断前交替两族，避免热门资源挤掉全部 IPv6 节点。
-pub(super) fn bounded_peers(mut peers: Vec<SocketAddr>) -> Vec<SocketAddr> {
+pub(crate) fn bounded_peers(mut peers: Vec<SocketAddr>) -> Vec<SocketAddr> {
     peers.sort_unstable();
     peers.dedup();
     let (v4, v6): (Vec<_>, Vec<_>) = peers.into_iter().partition(SocketAddr::is_ipv4);

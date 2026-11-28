@@ -19,6 +19,7 @@ pub mod client;
 pub mod error;
 pub mod events;
 pub mod login;
+pub mod magnets;
 pub mod media;
 pub mod preview;
 pub mod ranges;

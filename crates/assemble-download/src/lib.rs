@@ -5,6 +5,7 @@ pub mod assistant;
 pub mod browser;
 mod douyin;
 mod hls;
+pub mod hosted;
 mod magnet;
 mod manager;
 mod media;
@@ -55,6 +56,14 @@ pub enum DownloadError {
     MetadataUnavailable,
     #[error("the explicitly requested direct network is unavailable")]
     NetworkRouteUnavailable,
+    #[error("the first-party download service is unavailable")]
+    ServerUnavailable,
+    #[error("a verified account is required for hosted downloads")]
+    SignInRequired,
+    #[error("the download belongs to another account")]
+    AccountMismatch,
+    #[error("the server download budget is exhausted")]
+    ServerQuota,
 }
 
 impl DownloadError {
@@ -76,6 +85,10 @@ impl DownloadError {
             Self::CredentialsUnavailable => "DOWNLOAD_CREDENTIALS_UNAVAILABLE",
             Self::MetadataUnavailable => "DOWNLOAD_METADATA_UNAVAILABLE",
             Self::NetworkRouteUnavailable => "DOWNLOAD_ROUTE_UNAVAILABLE",
+            Self::ServerUnavailable => "DOWNLOAD_SERVER_UNAVAILABLE",
+            Self::SignInRequired => "DOWNLOAD_SIGN_IN_REQUIRED",
+            Self::AccountMismatch => "DOWNLOAD_ACCOUNT_MISMATCH",
+            Self::ServerQuota => "DOWNLOAD_SERVER_QUOTA",
             Self::AssistantDisabled => "DOWNLOAD_ASSISTANT_DISABLED",
         }
     }

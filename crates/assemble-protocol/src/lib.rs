@@ -29,6 +29,7 @@ pub mod error;
 pub mod events;
 pub mod health;
 pub mod login;
+pub mod magnets;
 pub mod media;
 pub mod memo;
 pub mod origin;

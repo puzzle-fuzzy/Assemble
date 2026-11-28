@@ -45,14 +45,13 @@ async function chooseMagnet(dialog: HTMLElement) {
     ),
   );
 }
-test("Mac 直连默认关闭，明确勾选后只随本次磁力预览提交并在开始后重置", async () => {
+test("磁力使用服务器，不显示本机网络开关", async () => {
   const source = new FakeBridge(snapshot());
   source.downloadPreview = {
     id: "p",
     kind: "magnet",
-    magnetNetwork: "direct",
     title: "公开样本",
-    sourceHost: "BitTorrent",
+    sourceHost: "Assemble",
     durationSeconds: null,
     files: [{ id: 0, name: "sample.bin", size: 1 }],
     variants: [{ id: "magnet", width: null, height: null, bandwidth: null }],
@@ -64,23 +63,15 @@ test("Mac 直连默认关闭，明确勾选后只随本次磁力预览提交并�
     />,
   );
   await click(button(view.host, "新建下载"));
-  let dialog = currentDialog();
+  const dialog = currentDialog();
   await chooseMagnet(dialog);
-  const direct = dialog.querySelector<HTMLElement>('[id$="-direct-bt"]');
-  expect(direct?.getAttribute("aria-checked")).toBe("false");
-  expect(text(dialog)).toContain("真实出口 IP");
-  await click(direct ?? undefined);
+  expect(dialog.querySelector('[id$="-direct-bt"]')).toBeNull();
+  expect(text(dialog)).toContain("由 Assemble 服务器解析和下载");
   await typeInto(dialog, `magnet:?xt=urn:btih:${"a".repeat(40)}`);
   await click(button(dialog, "解析地址"));
-  expect(source.downloadInput?.magnetNetwork).toBe("direct");
+  expect(source.downloadInput?.magnetNetwork).toBeUndefined();
+  expect(text(dialog)).toContain("服务器下载");
   await click(button(dialog, "开始下载"));
-  await click(button(view.host, "新建下载"));
-  dialog = currentDialog();
-  expect(
-    dialog.querySelector('[id$="-direct-bt"]')?.getAttribute("aria-checked"),
-  ).toBe("false");
-  await act(async () => setLanguage("en"));
-  expect(text(dialog)).toContain("real outbound IP");
 });
 
 test("助手任务标记跟随语言，普通任务不增加标记", async () => {

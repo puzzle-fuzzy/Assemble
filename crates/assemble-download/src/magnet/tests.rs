@@ -393,6 +393,7 @@ async fn active_history_restores_paused_and_cancel_discards_only_owned_cache() {
     credentials::put(store.as_ref(), &id, &SecretString::new(source)).unwrap();
     let history = dir.path().join("tasks.json");
     let record = Record {
+        remote: None,
         view: DownloadTask {
             magnet_network: None,
             id: id.clone(),

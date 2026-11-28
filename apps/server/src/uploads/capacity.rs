@@ -21,7 +21,7 @@ pub(crate) async fn check(
 ) -> Result<(), ApiError> {
     let (stored, reserved, used, account_reserved): (i64,i64,i64,i64) = sqlx::query_as(
         "SELECT (SELECT coalesce(sum(size),0) FROM blobs),
-         (SELECT coalesce(sum(bytes),0) FROM upload_reservations WHERE id<>?1),
+         ((SELECT coalesce(sum(bytes),0) FROM upload_reservations WHERE id<>?1)+(SELECT coalesce(sum(reserved_bytes),0) FROM hosted_magnets)),
          (SELECT coalesce(sum(size),0) FROM drive_files WHERE account_id=?2),
          (SELECT coalesce(sum(logical_bytes),0) FROM upload_reservations WHERE account_id=?2 AND id<>?1)")
         .bind(exclude).bind(account).fetch_one(&mut **tx).await?;

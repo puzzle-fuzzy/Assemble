@@ -17,7 +17,7 @@
   "start": "开始下载",
   "folder": "保存位置：{{name}}",
   "chooseFolder": "选择文件夹",
-  "toolsMissing": "视频下载需要本机 FFmpeg 和 ffprobe，请安装后重新启动。磁力下载可直接使用。",
+  "toolsMissing": "视频下载需要本机 FFmpeg 和 ffprobe，请安装后重新启动。磁力下载无需安装媒体工具。",
   "empty": "还没有下载任务",
   "emptyHint": "粘贴地址或导入清单，解析后选择画质开始下载。",
   "queue": "下载任务",
@@ -46,7 +46,7 @@
     "DOWNLOAD_SOURCE_UNAVAILABLE": "来源不可用或已过期，请重新获取地址。",
     "DOWNLOAD_NETWORK": "网络连接失败，请稍后重试。",
     "DOWNLOAD_UNSUPPORTED": "暂不支持此来源：视频不支持直播或 DRM；磁力仅支持公开的 BitTorrent v1，不支持纯 v2 或私有种子。",
-    "DOWNLOAD_LIMIT": "超过限制：视频最多 10 GiB / 20,000 分片；磁力最多选择 100 GiB / 10,000 文件；元数据最多 4 MiB。",
+    "DOWNLOAD_LIMIT": "超过限制：视频最多 10 GiB / 20,000 分片；磁力最多选择 100 GiB / 10,000 文件；元数据最多 4 MiB。 磁力容量还受服务器缓存配额限制。",
     "DOWNLOAD_INVALID_MEDIA": "文件内容或资源元数据未通过校验，未发布到下载目录。",
     "DOWNLOAD_STORAGE": "无法保存文件，请检查目录权限和文件系统是否支持硬链接。",
     "DOWNLOAD_NO_SPACE": "下载目录所在的磁盘空间不够，请腾出空间或换一个下载目录。",
@@ -57,12 +57,16 @@
     "DOWNLOAD_BUSY": "队列已满或任务仍在进行，请稍后再试。",
     "unknown": "操作未完成，请重试。",
     "DOWNLOAD_CREDENTIALS_UNAVAILABLE": "系统钥匙串不可用，无法安全保存或读取续传信息。",
-    "DOWNLOAD_METADATA_UNAVAILABLE": "未获取到文件列表。请确认资源有节点，并检查当前代理或网络是否允许 BT；Mac 可在知晓真实出口 IP 会被使用后选择 BT 节点直连。",
-    "DOWNLOAD_ROUTE_UNAVAILABLE": "所选直连网络不可用。目前仅支持 Mac 的默认物理网络，请检查网络后重试。"
+    "DOWNLOAD_METADATA_UNAVAILABLE": "服务器未获取到文件列表。资源可能暂时没有可用节点，请稍后重试。",
+    "DOWNLOAD_ROUTE_UNAVAILABLE": "此版本磁力下载使用服务器，请重新解析旧任务。",
+    "DOWNLOAD_SERVER_UNAVAILABLE": "暂时无法连接服务器下载服务，请稍后重试。",
+    "DOWNLOAD_SIGN_IN_REQUIRED": "请先登录后使用磁力下载。",
+    "DOWNLOAD_ACCOUNT_MISMATCH": "请登录创建此任务的账户后继续。",
+    "DOWNLOAD_SERVER_QUOTA": "服务器下载缓存空间不足，请等待任务完成或取消不用的任务。"
   },
   "magnet": "磁力链",
   "magnetAddress": "磁力链接",
-  "magnetHint": "支持公开的 BitTorrent v1 磁力链。解析可能需要 90 秒；下载期间每个任务上传限速 256 KiB/秒，完成、暂停或退出即停止。重启后点击继续下载。",
+  "magnetHint": "由 Assemble 服务器解析和下载，文件通过 HTTPS 保存到本机。BT 上传限速 256 KiB/秒，下载完成即停止。暂停或退出会停止服务器任务；连接中断后超时自动暂停，重启后手动继续。",
   "files": "选择文件",
   "selectedFiles": "已选择 {{count}} 个文件，共 {{size}}",
   "selectAll": "全选",
@@ -72,7 +76,6 @@
   "resume": "继续下载",
   "paused": "已暂停，可继续下载",
   "openFolder": "打开下载文件夹",
-  "directBt": "BT 节点直连（Mac）",
-  "systemNetwork": "跟随系统网络",
-  "directBtHint": "默认跟随系统网络。仅为此磁力任务启用直连时，BT 节点和 DHT 将使用本机真实出口 IP；不会更改系统代理或防火墙。"
+  "hostedMagnet": "服务器下载",
+  "receiving": "正在保存到本机"
 }

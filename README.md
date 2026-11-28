@@ -25,7 +25,7 @@ Assemble 是一个全新的、自带服务端的项目，用来完全替换 jarv
 
 哪些还没有在真实运行里验证过，逐条列在[运行手册](docs/runbooks/verify-macos-launch.md)的"还没有做过的"一节。
 
-网络文件下载支持本机 M3U8、抖音单视频、磁力链及 Chrome 开发插件入口；视频需要本机 FFmpeg/ffprobe，磁力支持文件选择、暂停续传、重启后继续与有缓存和后台筛选的公共 Tracker 池，Mac 可为单个磁力任务明确选择 BT 节点直连（使用真实出口 IP），下载期间每任务上传限速 256 KiB/秒、完成即停。使用、格式限制和实际验证见[网络下载说明](docs/runbooks/network-downloads.md)与[插件说明](apps/browser-extension/README.md)；尚未捆绑正式安装包或上架商店。
+网络文件下载支持本机 M3U8、抖音单视频、磁力链及 Chrome 开发插件入口。视频需要本机 FFmpeg/ffprobe；磁力需要登录，由服务器解析和下载，再经 HTTPS 校验保存到 Mac，支持文件选择、暂停续传与重启后手动继续。每任务服务器上传限 256 KiB/秒、完成即停，客户端无需设置直连。使用和验证范围见[网络下载说明](docs/runbooks/network-downloads.md)、[决策 0019](docs/decisions/0019-hosted-magnet-downloads.md)与[插件说明](apps/browser-extension/README.md)。
 
 云盘分片续传见[上传手册](docs/runbooks/drive-uploads.md)，重开应用后的恢复与云盘下载续传见[恢复手册](docs/runbooks/drive-recovery.md)。设备中转续传仍按 N4.3 独立推进。
 

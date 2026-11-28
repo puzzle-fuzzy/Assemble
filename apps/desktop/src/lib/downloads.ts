@@ -32,6 +32,7 @@ export interface DownloadPreview {
 export type DownloadPhase =
   | "queued"
   | "downloading"
+  | "receiving"
   | "muxing"
   | "verifying"
   | "completed"
@@ -151,6 +152,7 @@ export function isDownloadsView(value: unknown): value is DownloadsView {
         [
           "queued",
           "downloading",
+          "receiving",
           "muxing",
           "verifying",
           "completed",
@@ -178,7 +180,7 @@ export function downloadProgress(task: DownloadTask): number | null {
       ? task.durationSeconds && task.mediaSeconds !== null
         ? task.mediaSeconds / task.durationSeconds
         : null
-      : ["downloading", "paused"].includes(task.phase)
+      : ["downloading", "receiving", "paused"].includes(task.phase)
         ? task.totalSegments
           ? task.completedSegments / task.totalSegments
           : task.totalBytes

@@ -594,12 +594,16 @@ mod tests {
             serde_json::from_str(include_str!("../../contract/snapshots.json")).unwrap();
         // 一条已经下完的下载不算在忙。
         let mut snapshot = samples[0].clone();
-        snapshot.downloads.tasks[0].phase = assemble_protocol::downloads::DownloadPhase::Completed;
+        for task in &mut snapshot.downloads.tasks {
+            task.phase = assemble_protocol::downloads::DownloadPhase::Completed;
+        }
         assert!(!busy(&snapshot));
 
         snapshot.downloads.tasks[0].phase =
             assemble_protocol::downloads::DownloadPhase::Downloading;
         assert!(busy(&snapshot), "网络下载在跑");
+        snapshot.downloads.tasks[0].phase = assemble_protocol::downloads::DownloadPhase::Receiving;
+        assert!(busy(&snapshot), "HTTPS 回传不能被更新打断");
         snapshot.downloads.tasks[0].phase = assemble_protocol::downloads::DownloadPhase::Completed;
 
         let transfer = samples[7].transfers[0].clone();

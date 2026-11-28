@@ -1,4 +1,4 @@
-//! 本机下载工具不经过正式服务，也不接受保存路径、请求头或 Cookie。
+//! 工具经本机队列编排；磁力由正式服务托管，不接受路径、请求头或 Cookie。
 use crate::tools::Failure;
 use assemble_download::{assistant, browser};
 use assemble_protocol::downloads::{
@@ -18,18 +18,8 @@ pub enum Kind {
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-pub enum Network {
-    System,
-    Direct,
-}
-
-#[derive(Debug, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct Preview {
-    /// Mac 磁力任务的 BT 网络；direct 使用真实出口 IP，必须获得用户明确同意。缺省跟随系统。
-    #[serde(default)]
-    pub magnet_network: Option<Network>,
     pub kind: Kind,
     pub url: String,
     #[serde(default)]
@@ -69,10 +59,12 @@ pub fn result(reply: &AssistantDownloadReply) -> Result<String, Failure> {
             "DOWNLOAD_EXPIRED" => "下载预览或任务已失效，请重新预览。",
             "DOWNLOAD_TOOLS_UNAVAILABLE" => "本机未找到 FFmpeg 和 ffprobe，请用户安装后再试。",
             "DOWNLOAD_NO_SPACE" => "下载目录所在磁盘空间不足。",
-            "DOWNLOAD_ROUTE_UNAVAILABLE" => "所选直连网络不可用；目前仅支持 Mac 的默认物理网络。",
-            "DOWNLOAD_METADATA_UNAVAILABLE" => {
-                "未获取到文件列表；请确认资源有节点，并检查当前代理或网络是否允许 BT。"
-            }
+            "DOWNLOAD_SERVER_UNAVAILABLE" => "暂时无法连接服务器下载服务。",
+            "DOWNLOAD_SIGN_IN_REQUIRED" => "请先在 Assemble 桌面应用登录。",
+            "DOWNLOAD_ACCOUNT_MISMATCH" => "请登录创建此任务的账户再继续。",
+            "DOWNLOAD_SERVER_QUOTA" => "服务器临时下载空间不足。",
+            "DOWNLOAD_ROUTE_UNAVAILABLE" => "此版本磁力下载使用服务器，不再接受本机网络选择。",
+            "DOWNLOAD_METADATA_UNAVAILABLE" => "服务器未获取到文件列表，资源可能暂时没有可用节点。",
             "DOWNLOAD_BUSY" => "当前下载任务过多，请稍后再试。",
             "DOWNLOAD_INVALID_SOURCE" | browser::INVALID_REQUEST => "下载地址或所选清晰度无效。",
             _ => "下载操作失败，请在 Assemble 桌面应用中查看任务。",
@@ -91,10 +83,7 @@ impl Preview {
                 Kind::Video => DownloadKind::Video,
                 Kind::Magnet => DownloadKind::Magnet,
             },
-            magnet_network: self.magnet_network.map(|mode| match mode {
-                Network::System => assemble_protocol::downloads::MagnetNetwork::System,
-                Network::Direct => assemble_protocol::downloads::MagnetNetwork::Direct,
-            }),
+            magnet_network: None,
             url: self.url,
             page_url: self.page_url,
             title: None,
@@ -153,13 +142,7 @@ mod tests {
         );
         let mut direct = old.clone();
         direct["magnetNetwork"] = "direct".into();
-        let input = serde_json::from_value::<Preview>(direct)
-            .unwrap()
-            .into_input();
-        assert_eq!(
-            input.magnet_network,
-            Some(assemble_protocol::downloads::MagnetNetwork::Direct)
-        );
+        assert!(serde_json::from_value::<Preview>(direct).is_err());
         let mut unsafe_input = old.clone();
         unsafe_input["bindDeviceName"] = "en9".into();
         assert!(serde_json::from_value::<Preview>(unsafe_input).is_err());

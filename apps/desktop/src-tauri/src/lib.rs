@@ -325,12 +325,13 @@ fn start(
             .app_data_dir()?
             .join("system-notifications.json"),
     );
-    let downloads = assemble_download::DownloadManager::open(
+    let downloads = assemble_download::DownloadManager::open_with_server(
         handle.path().app_data_dir()?.join("network-downloads.json"),
         transfers::system_downloads_dir(&handle)
             .join("Assemble")
             .join("网络下载"),
         assemble_download::MediaTools::discover(),
+        handle.state::<AppState>().client.clone(),
         move |view| downloads_handle.state::<AppState>().set_downloads(view),
     )?;
     downloads.set_assistant_allowed(
@@ -344,7 +345,10 @@ fn start(
     handle.manage(Arc::clone(&downloads));
     // 上次崩溃留下的下载暂存目录趁现在清掉：窗口还没开出来，不可能有任务在跑。
     // 平时这里什么都不用删；真留下来几个 G 的分片时，等它删完比留着占地方强。
-    tauri::async_runtime::block_on(downloads.sweep_staging());
+    tauri::async_runtime::block_on(async {
+        downloads.sweep_staging().await;
+        downloads.start_maintenance();
+    });
 
     tray::build(&handle)?;
     // 点通知的处理要早于第一条通知登记好，否则点了也报不上来。

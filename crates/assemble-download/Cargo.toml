@@ -6,11 +6,17 @@ rust-version.workspace = true
 publish.workspace = true
 description = "本机 M3U8、抖音视频与磁力下载核心"
 
+[features]
+test-fixtures = []
+
 [dependencies]
+assemble-client.workspace = true
+assemble-dht.workspace = true
 assemble-device.workspace = true
 assemble-protocol.workspace = true
 assemble-store.workspace = true
 axum.workspace = true
+base64.workspace = true
 fs4.workspace = true
 futures-util.workspace = true
 getrandom.workspace = true

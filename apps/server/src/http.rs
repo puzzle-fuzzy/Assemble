@@ -42,6 +42,7 @@ pub struct AppState {
     /// 文件内容的存放处，按摘要寻址。
     pub blobs: Arc<BlobStore>,
     pub uploads: crate::uploads::Store,
+    pub magnets: Arc<crate::magnets::Runtime>,
     pub mailer: Arc<dyn crate::mail::Mailer>,
     pub github_flows: crate::github::Flows,
     pub github_provider: Arc<dyn crate::github::Provider>,
@@ -58,6 +59,7 @@ impl AppState {
     pub fn new(pool: SqlitePool, config: Config) -> Self {
         Self {
             remote: crate::remote::RemoteSessions::default(),
+            magnets: Arc::new(crate::magnets::Runtime::default()),
             media: Arc::new(crate::media::jobs::Runtime::new(config.media.clone())),
             storage_monitor: crate::storage::Monitor::default(),
             dht: Arc::new(crate::dht::runtime::Runtime::default()),
@@ -142,6 +144,7 @@ pub fn router(state: Shared) -> Router {
         .merge(crate::memos::routes())
         .merge(crate::drive_preview::routes())
         .merge(drive_routes())
+        .merge(crate::magnets::routes())
         .merge(crate::planner::locations::routes())
         .merge(crate::remote::routes())
         // 桌面端自动更新：清单和更新包，谁都能读
@@ -304,6 +307,7 @@ pub async fn serve_until(
         .start(&state)
         .await
         .map_err(|_| ServeError::DhtRecovery)?;
+    state.magnets.start(&state).await;
     let closing = Arc::clone(&state);
     let waiting = stop.clone();
     let shutdown = async move {
@@ -311,6 +315,7 @@ pub async fn serve_until(
         tracing::info!("shutting down");
         // 事件流是永不主动结束的长连接。不先收掉它们，优雅退出会一直等下去。
         closing.hub.close();
+        closing.magnets.shutdown().await;
         closing.dht.shutdown().await;
         closing.media.shutdown(&closing.pool).await;
     };
@@ -330,6 +335,7 @@ pub async fn serve_until(
         }
     };
     // HTTP 出错或宽限到期时，优雅退出 future 也可能被取消，仍显式回收采集任务。
+    cleanup.magnets.shutdown().await;
     cleanup.dht.shutdown().await;
     result
 }

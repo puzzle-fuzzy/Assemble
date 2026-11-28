@@ -28,7 +28,7 @@ struct State {
     next_attempt: Instant,
     refresh: Option<JoinHandle<()>>,
 }
-pub(super) struct Pool {
+pub(crate) struct Pool {
     path: PathBuf,
     state: Mutex<State>,
     network: Network,

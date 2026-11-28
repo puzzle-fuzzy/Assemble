@@ -1,6 +1,14 @@
 # 部署 Assemble 服务端
 
-## 当前发布：2026-11-27 云盘目录、回收站与操作日志
+实际运行版本以 `docker inspect` 的镜像引用为准，下列发布记录保留各次证据。
+
+## 服务器磁力升级
+
+新增迁移 `0018_hosted_magnets.sql`，升级前照本文核对旧迁移校验和并保存一致数据库及完整数据备份。私有磁力缓存位于数据卷 `hosted-magnets/`，与数据库一起备份；停止服务会显式停止 BT，重启先暂停，不自动恢复下载。无需新增端口、nginx 或系统代理设置。先升级服务器，再安装带新接口的客户端。
+
+磁力缓存按两份所选容量预留，与上传和内容共享全站预算；账户活跃所选总量受现有 `ASSEMBLE_DRIVE_QUOTA_BYTES` 约束。管理端存储中的“传输缓存预留”包含这些缓存。清理成功才释放预留；暂停缓存 24 小时未续期自动取消，终态回执保留 30 天。实际使用与诊断见[网络下载手册](network-downloads.md)。
+
+## 既往发布：2026-11-27 云盘目录、回收站与操作日志
 
 正式服务已更新为 `ghcr.io/puzzle-fuzzy/assemble-server:9a7dfe5eefdd`，源码 `9a7dfe5eefdde0b5de488b10adc8f25afaac36c2`，镜像标识 `sha256:dd7bbba7c02d2ca84c691deb574ec0ddec9c659319547dd8b4167fe27572a9c9`。[Windows/macOS 验证](https://github.com/puzzle-fuzzy/Assemble/actions/runs/46014498628)与[服务端镜像](https://github.com/puzzle-fuzzy/Assemble/actions/runs/46014498660)全部成功。本机提交前完整 verify 通过，用时 137.8 秒；N3 真实 Windows、Chrome 与镜像验收见[回收站手册](drive-trash.md)。
 
