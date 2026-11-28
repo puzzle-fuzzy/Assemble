@@ -54,6 +54,10 @@ impl Handle {
     pub fn subscribe(&self) -> broadcast::Receiver<Peer> {
         self.peers.subscribe()
     }
+    #[cfg(any(test, feature = "test-fixtures"))]
+    pub fn discovered_for_test(&self, hash: InfoHash, address: SocketAddr) {
+        let _ = self.peers.send(Peer { hash, address });
+    }
     pub async fn collect(&self, enabled: bool) {
         let _ = self.commands.send(Command::Collect(enabled)).await;
     }

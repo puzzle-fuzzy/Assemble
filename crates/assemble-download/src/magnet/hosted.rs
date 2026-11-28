@@ -73,6 +73,14 @@ impl Service {
             resolving: Semaphore::new(2),
         }))
     }
+    #[cfg(any(test, feature = "test-fixtures"))]
+    pub fn discovered_for_test(&self, hash: [u8; 20], address: std::net::SocketAddr) {
+        self.options
+            .discovery
+            .as_ref()
+            .expect("discovery fixture")
+            .discovered_for_test(hash, address);
+    }
     pub async fn resolve(&self, source: &str, cancel: &CancellationToken) -> Result<Torrent> {
         let _slot = tokio::select! {()=cancel.cancelled()=>return Err(DownloadError::Cancelled),slot=self.resolving.acquire()=>slot.map_err(|_|DownloadError::Cancelled)?};
         let prepared = engine::prepare(source, cancel, &self.options()).await?;

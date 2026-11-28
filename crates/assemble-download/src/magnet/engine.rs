@@ -134,7 +134,9 @@ pub(crate) async fn connection_options(
     // HTTPS 通过固定地址的客户端短时找节点；引擎持续使用固定公网 IP 的 UDP Tracker。
     peers.extend(trackers::bootstrap(http, &hash.0, cancel).await);
     if let Some(discovery) = &options.discovery {
-        peers.extend(discovery.peers(hash.0, cancel).await?);
+        let mut known = discovery.peers(hash.0, cancel).await?;
+        known.append(&mut peers);
+        peers = known;
     }
     if cancel.is_cancelled() {
         return Err(DownloadError::Cancelled);
@@ -152,16 +154,62 @@ pub(crate) async fn download_connections(
 ) -> Result<(Vec<String>, Vec<SocketAddr>)> {
     let (trackers, initial) = connection_options(source, options, cancel).await?;
     peers.extend(initial);
-    if let Some(discovery) = &options.discovery {
-        let mut known = discovery.confirmed_peers(source, options, cancel).await?;
+    if options.discovery.is_some() {
         tracing::info!(
-            initial_peers = known.len(),
+            initial_peers = peers.len(),
             "hosted magnet payload nodes ready"
         );
-        known.append(&mut peers);
-        peers = known;
     }
     Ok((trackers, trackers::bounded_peers(peers)))
+}
+
+pub(super) struct PayloadSession {
+    pub inner: Arc<Session>,
+    relay: Option<crate::hosted::PeerRelay>,
+}
+impl PayloadSession {
+    pub async fn stop(self) {
+        self.inner.stop().await;
+        if let Some(relay) = self.relay {
+            relay.shutdown().await;
+        }
+    }
+}
+pub(super) async fn payload_session(
+    folder: PathBuf,
+    cancel: CancellationToken,
+    options: &Options,
+    source: &SecretString,
+    trackers: &mut Vec<String>,
+) -> Result<PayloadSession> {
+    let hash = librqbit::Magnet::parse(source.expose())
+        .map_err(|_| DownloadError::InvalidSource)?
+        .as_id20()
+        .ok_or(DownloadError::Unsupported)?
+        .0;
+    let inner = session(folder, cancel.clone(), options).await?;
+    let relay = if let Some(discovery) = &options.discovery {
+        match crate::hosted::PeerRelay::open(
+            Arc::clone(discovery),
+            hash,
+            options.local_test,
+            cancel,
+        )
+        .await
+        {
+            Ok(relay) => {
+                trackers.push(relay.url.clone());
+                Some(relay)
+            }
+            Err(error) => {
+                inner.stop().await;
+                return Err(error);
+            }
+        }
+    } else {
+        None
+    };
+    Ok(PayloadSession { inner, relay })
 }
 
 pub(super) struct Diagnostics(std::time::Instant);

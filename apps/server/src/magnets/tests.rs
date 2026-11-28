@@ -301,18 +301,23 @@ async fn real_metadata_selection_pause_lease_restart_and_verified_https() {
     server.stop().await;
     drop(server);
     let mut server = TestServer::start_default(data.path()).await.unwrap();
+    let discovery = Service::for_test_discovery(&data.path().join("discovery-fixture"), Vec::new())
+        .await
+        .unwrap();
     assert!(
         server
             .state
             .magnets
             .service
-            .set(
-                Service::for_test_discovery(&data.path().join("discovery-fixture"), vec![peer])
-                    .await
-                    .unwrap()
-            )
+            .set(Arc::clone(&discovery))
             .is_ok()
     );
+    // 模拟初始发现窗口过后才抵达的节点；重启恢复已有元数据，不能再次依赖元数据提供者。
+    let peer_hash = librqbit::torrent_from_bytes(&torrent).unwrap().info_hash.0;
+    let later = tokio::spawn(async move {
+        tokio::time::sleep(Duration::from_secs(12)).await;
+        discovery.discovered_for_test(peer_hash, peer);
+    });
     let alice = Client::new(server.origin.clone()).unwrap();
     alice.set_bearer(Some(token));
     let recovered = alice
@@ -335,6 +340,7 @@ async fn real_metadata_selection_pause_lease_restart_and_verified_https() {
         t.phase == DownloadPhase::Completed
     })
     .await;
+    later.await.unwrap();
     let manifest = alice
         .magnet_manifest(&task.id, &options(&cancel))
         .await

@@ -100,7 +100,7 @@ impl Discovery {
                 .into(),
         }))
     }
-    fn cached(&self, hash: InfoHash) -> Vec<SocketAddr> {
+    pub(super) fn known(&self, hash: InfoHash) -> Vec<SocketAddr> {
         let mut recent = self
             .recent
             .lock()
@@ -108,7 +108,7 @@ impl Discovery {
         recent.retain(|_, (at, _)| at.elapsed() < Duration::from_secs(600));
         recent.get(&hash).map_or_default(|(_, peers)| peers.clone())
     }
-    fn remember(&self, hash: InfoHash, peers: Vec<SocketAddr>) {
+    pub(super) fn remember(&self, hash: InfoHash, peers: Vec<SocketAddr>) {
         let mut recent = self
             .recent
             .lock()
@@ -124,23 +124,17 @@ impl Discovery {
         }
         recent.insert(hash, (Instant::now(), peers));
     }
-    /// 解析时已完成握手的节点必须衔接到下载。服务重启没有缓存时，重新走安全元数据发现。
-    pub async fn confirmed_peers(
+    pub(super) fn subscribe(
         &self,
-        source: &SecretString,
-        options: &engine::Options,
-        cancel: &CancellationToken,
-    ) -> Result<Vec<SocketAddr>> {
-        let hash = librqbit::Magnet::parse(source.expose())
-            .map_err(|_| DownloadError::InvalidSource)?
-            .as_id20()
-            .ok_or(DownloadError::Unsupported)?
-            .0;
-        let peers = self.cached(hash);
-        if !peers.is_empty() {
-            return Ok(peers);
-        }
-        Ok(self.prepare(source.clone(), options, cancel).await?.peers)
+    ) -> tokio::sync::broadcast::Receiver<assemble_dht::network::Peer> {
+        self.handle.subscribe()
+    }
+    pub(super) async fn lookup(&self, hash: InfoHash) {
+        let _ = self.handle.lookup(hash).await;
+    }
+    #[cfg(any(test, feature = "test-fixtures"))]
+    pub fn discovered_for_test(&self, hash: InfoHash, address: SocketAddr) {
+        self.handle.discovered_for_test(hash, address);
     }
     pub async fn shutdown(&self) {
         if let Some(engine) = self.engine.lock().await.take() {
@@ -158,7 +152,7 @@ impl Discovery {
             .await
             .map_err(|_| DownloadError::Network)?;
         let deadline = tokio::time::Instant::now() + Duration::from_secs(4);
-        let mut peers = self.cached(hash);
+        let mut peers = self.known(hash);
         loop {
             tokio::select! {
                 ()=cancel.cancelled()=>return Err(DownloadError::Cancelled),
