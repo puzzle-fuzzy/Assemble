@@ -26,6 +26,20 @@ pub struct Service {
     resolving: Semaphore,
 }
 impl Service {
+    pub fn info_hash(source: &str) -> Result<String> {
+        let source = engine::source(source)?;
+        librqbit::Magnet::parse(source.expose())
+            .map_err(|_| DownloadError::InvalidSource)?
+            .as_id20()
+            .map(|hash| hash.as_string())
+            .ok_or(DownloadError::Unsupported)
+    }
+    /// 缓存也重新核验哈希、私有标记与路径，不能让数据库记录绕过下载边界。
+    pub fn validate_metadata(source: &str, metadata: &[u8]) -> Result<Vec<u8>> {
+        let source = engine::source(source)?;
+        engine::check_identity(&source, metadata)?;
+        engine::describe(metadata).map(|(metadata, _, _)| metadata)
+    }
     pub async fn open(root: PathBuf) -> Result<Arc<Self>> {
         tokio::fs::create_dir_all(&root)
             .await

@@ -256,6 +256,43 @@ impl Runtime {
             .map(|p| p.reply.clone())
             .ok_or_else(ApiError::not_found)
     }
+    async fn cached_metadata(
+        state: &Shared,
+        owner: &str,
+        source: &str,
+    ) -> Result<Option<Vec<u8>>, assemble_download::DownloadError> {
+        let hash = Service::info_hash(source)?;
+        // 只复用本人仍在租期内的任务；不向其他账户或已清理任务借元数据。
+        let cached: Option<Vec<u8>> = sqlx::query_scalar(
+            "SELECT metadata FROM hosted_magnets WHERE account_id=? AND info_hash=? AND state='active' AND expires_at>? ORDER BY created_at DESC LIMIT 1",
+        )
+        .bind(owner)
+        .bind(hash)
+        .bind(now())
+        .fetch_optional(&state.pool)
+        .await
+        .map_err(|_| assemble_download::DownloadError::Storage)?;
+        cached
+            .map(|metadata| Service::validate_metadata(source, &metadata))
+            .transpose()
+    }
+    async fn resolve_metadata(
+        &self,
+        state: &Shared,
+        owner: &str,
+        source: &str,
+        cancel: &CancellationToken,
+    ) -> Result<Vec<u8>, assemble_download::DownloadError> {
+        if let Some(metadata) = Self::cached_metadata(state, owner, source).await? {
+            tracing::info!("hosted magnet metadata reused");
+            return Ok(metadata);
+        }
+        let service = self
+            .service(state)
+            .await
+            .map_err(|_| assemble_download::DownloadError::ServerUnavailable)?;
+        service.resolve(source, cancel).await.map(|v| v.metadata)
+    }
     async fn create_preview(
         self: &Arc<Self>,
         state: &Shared,
@@ -329,10 +366,10 @@ impl Runtime {
         let mut workers = self.workers.lock().await;
         workers.retain(|task| !task.is_finished());
         workers.push(tokio::spawn(async move{
-            let result=tokio::select!{()=cancel.cancelled()=>Err(assemble_download::DownloadError::Cancelled),reply=tokio::time::timeout(Duration::from_secs(95),async{let service=runtime.service(&state).await.map_err(|_|assemble_download::DownloadError::ServerUnavailable)?;service.resolve(&input.magnet,&cancel).await})=>reply.unwrap_or(Err(assemble_download::DownloadError::MetadataUnavailable))};
+            let result=tokio::select!{()=cancel.cancelled()=>Err(assemble_download::DownloadError::Cancelled),reply=tokio::time::timeout(Duration::from_secs(95),runtime.resolve_metadata(&state,&key.0,&input.magnet,&cancel))=>reply.unwrap_or(Err(assemble_download::DownloadError::MetadataUnavailable))};
             let mut previews=runtime.previews.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
             if let Some(pending)=previews.get_mut(&key){
-                match result{Ok(torrent) if !cancel.is_cancelled()=>{use base64::Engine as _;pending.reply.phase=PreviewPhase::Ready;pending.reply.metainfo=Some(base64::engine::general_purpose::STANDARD.encode(torrent.metadata));},Ok(_)=>{pending.reply.phase=PreviewPhase::Failed;pending.reply.error_code=Some("DOWNLOAD_CANCELLED".into());},Err(error)=>{pending.reply.phase=PreviewPhase::Failed;pending.reply.error_code=Some(error.code().into());}}
+                match result{Ok(metadata) if !cancel.is_cancelled()=>{use base64::Engine as _;pending.reply.phase=PreviewPhase::Ready;pending.reply.metainfo=Some(base64::engine::general_purpose::STANDARD.encode(metadata));},Ok(_)=>{pending.reply.phase=PreviewPhase::Failed;pending.reply.error_code=Some("DOWNLOAD_CANCELLED".into());},Err(error)=>{pending.reply.phase=PreviewPhase::Failed;pending.reply.error_code=Some(error.code().into());}}
             }
         }));
         Ok(reply)

@@ -45,6 +45,115 @@ async fn user(server: &TestServer, name: &str) -> (Client, SecretString, String)
 fn options(cancel: &CancellationToken) -> RequestOptions<'_> {
     RequestOptions::new(cancel)
 }
+#[tokio::test]
+async fn repeats_own_preview_without_network_and_revalidates_scoped_cache() {
+    let data = tempfile::tempdir().unwrap();
+    let source = tempfile::tempdir().unwrap();
+    tokio::fs::write(source.path().join("cached.bin"), b"verified public data")
+        .await
+        .unwrap();
+    let metadata = create_torrent(
+        source.path(),
+        CreateTorrentOptions::default(),
+        &librqbit::spawn_utils::BlockingSpawner::new(1),
+    )
+    .await
+    .unwrap()
+    .as_bytes()
+    .unwrap();
+    let hash = librqbit::torrent_from_bytes(&metadata)
+        .unwrap()
+        .info_hash
+        .as_string();
+    let magnet = format!("magnet:?xt=urn:btih:{hash}");
+    let mut server = TestServer::start_default(data.path()).await.unwrap();
+    let (alice, _, owner) = user(&server, "cached-alice").await;
+    let (_, _, other) = user(&server, "cached-bob").await;
+    let task = "a".repeat(32);
+    sqlx::query("INSERT INTO hosted_magnets(account_id,id,info_hash,metadata,file_ids,selected_bytes,reserved_bytes,state,created_at,expires_at) VALUES (?,?,?,?,'[0]',20,40,'active',?,?)")
+        .bind(&owner).bind(&task).bind(&hash).bind(metadata.as_ref()).bind(now()).bind(now()+TTL)
+        .execute(&server.state.pool).await.unwrap();
+    let cancel = CancellationToken::new();
+    let id = "b".repeat(32);
+    alice
+        .magnet_preview(
+            &PreviewInput {
+                request_id: id.clone(),
+                magnet: magnet.clone(),
+            },
+            &options(&cancel),
+        )
+        .await
+        .unwrap();
+    let reply = tokio::time::timeout(Duration::from_secs(2), async {
+        loop {
+            let reply = alice
+                .magnet_preview_status(&id, &options(&cancel))
+                .await
+                .unwrap();
+            if reply.phase != PreviewPhase::Resolving {
+                break reply;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .unwrap();
+    assert_eq!(reply.phase, PreviewPhase::Ready);
+    assert!(reply.metainfo.is_some());
+    assert!(
+        server.state.magnets.service.get().is_none(),
+        "cached preview must not start networking"
+    );
+    assert!(
+        Runtime::cached_metadata(&server.state, &other, &magnet)
+            .await
+            .unwrap()
+            .is_none()
+    );
+    let wrong = format!("magnet:?xt=urn:btih:{}", "c".repeat(40));
+    assert!(
+        Runtime::cached_metadata(&server.state, &owner, &wrong)
+            .await
+            .unwrap()
+            .is_none()
+    );
+    sqlx::query("UPDATE hosted_magnets SET expires_at=0 WHERE id=?")
+        .bind(&task)
+        .execute(&server.state.pool)
+        .await
+        .unwrap();
+    assert!(
+        Runtime::cached_metadata(&server.state, &owner, &magnet)
+            .await
+            .unwrap()
+            .is_none()
+    );
+    sqlx::query("UPDATE hosted_magnets SET expires_at=?,state='cancelled' WHERE id=?")
+        .bind(now() + TTL)
+        .bind(&task)
+        .execute(&server.state.pool)
+        .await
+        .unwrap();
+    assert!(
+        Runtime::cached_metadata(&server.state, &owner, &magnet)
+            .await
+            .unwrap()
+            .is_none()
+    );
+    sqlx::query("UPDATE hosted_magnets SET state='active',metadata=X'00' WHERE id=?")
+        .bind(&task)
+        .execute(&server.state.pool)
+        .await
+        .unwrap();
+    assert!(
+        Runtime::cached_metadata(&server.state, &owner, &magnet)
+            .await
+            .is_err()
+    );
+    assert!(Service::validate_metadata(&wrong, &metadata).is_err());
+    server.stop().await;
+}
 async fn until_task(
     client: &Client,
     id: &str,
